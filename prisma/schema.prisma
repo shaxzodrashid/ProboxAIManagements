@@ -1,0 +1,225 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  MEMBER
+}
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+enum TaskStatus {
+  QUEUED
+  RUNNING
+  AWAITING_APPROVAL
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+enum SessionStatus {
+  QUEUED
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+  INTERRUPTED
+  ARCHIVED
+}
+enum TurnStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  INTERRUPTED
+}
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model Workspace {
+  id        String   @id @default(uuid())
+  slug      String   @unique @default("default")
+  createdAt DateTime @default(now())
+  users     User[]
+  tasks     Task[]
+  sessions  ProboxAiSession[]
+}
+
+model User {
+  id               String     @id @default(uuid())
+  workspaceId      String
+  workspace        Workspace  @relation(fields: [workspaceId], references: [id])
+  phoneNumber      String
+  displayName      String
+  role             UserRole
+  status           UserStatus @default(PENDING)
+  telegramUserId   BigInt?    @unique
+  telegramChatId   BigInt?    @unique
+  verifiedAt       DateTime?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  tasksCreated     Task[]     @relation("taskCreator")
+  tasksAssigned    Task[]     @relation("taskManager")
+  sessionsCreated  ProboxAiSession[] @relation("sessionCreator")
+  approvals        ApprovalRequest[] @relation("approvalDecider")
+  otps             AuthOtp[]
+  tokens           SessionToken[]
+  notifications    NotificationDelivery[]
+  @@unique([workspaceId, phoneNumber])
+}
+
+model AuthOtp {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, expiresAt])
+}
+
+model SessionToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+}
+
+model Task {
+  id          String     @id @default(uuid())
+  workspaceId String
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id])
+  title       String
+  description String
+  criteria    String?
+  status      TaskStatus @default(QUEUED)
+  creatorId   String
+  creator     User       @relation("taskCreator", fields: [creatorId], references: [id])
+  managerId   String
+  manager     User       @relation("taskManager", fields: [managerId], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  sessions    ProboxAiSession[]
+  @@index([workspaceId, status])
+  @@index([managerId, status])
+}
+
+model ProboxAiSession {
+  id              String        @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace     @relation(fields: [workspaceId], references: [id])
+  taskId          String
+  task            Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  creatorId       String
+  creator         User          @relation("sessionCreator", fields: [creatorId], references: [id])
+  status          SessionStatus @default(QUEUED)
+  cwd             String
+  sandbox         String
+  model           String?
+  codexThreadId   String?       @unique
+  processId       Int?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  lastSequence    Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  turns           ProboxAiTurn[]
+  events          SessionEvent[]
+  artifacts       SessionArtifact[]
+  approvals       ApprovalRequest[]
+  @@index([taskId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ProboxAiTurn {
+  id            String     @id @default(uuid())
+  sessionId     String
+  session       ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  codexTurnId   String?
+  prompt        String
+  status        TurnStatus @default(RUNNING)
+  inputTokens   Int?
+  cachedTokens  Int?
+  outputTokens  Int?
+  reasoningTokens Int?
+  startedAt     DateTime   @default(now())
+  endedAt       DateTime?
+  @@index([sessionId, startedAt])
+}
+
+model SessionEvent {
+  id           String   @id @default(uuid())
+  sessionId    String
+  session      ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  turnId       String?
+  sequence     Int
+  type         String
+  itemType     String?
+  rawPayload   Json
+  payloadHash  String
+  previousHash String?
+  createdAt    DateTime @default(now())
+  @@unique([sessionId, sequence])
+  @@index([sessionId, createdAt])
+}
+
+model SessionArtifact {
+  id          String   @id @default(uuid())
+  sessionId   String
+  session     ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  kind        String
+  objectPath  String
+  sha256      String
+  bytes       Int
+  createdAt   DateTime @default(now())
+  @@index([sessionId, createdAt])
+}
+
+model ApprovalRequest {
+  id          String         @id @default(uuid())
+  sessionId   String
+  session     ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  status      ApprovalStatus @default(PENDING)
+  requestedAction String
+  evidence    Json
+  decidedById String?
+  decidedBy   User?          @relation("approvalDecider", fields: [decidedById], references: [id])
+  decisionReason String?
+  createdAt   DateTime       @default(now())
+  decidedAt   DateTime?
+  @@index([sessionId, status])
+}
+
+model NotificationDelivery {
+  id          String             @id @default(uuid())
+  userId      String
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType   String
+  payload     Json
+  status      NotificationStatus @default(PENDING)
+  attempts    Int                @default(0)
+  sentAt      DateTime?
+  createdAt   DateTime           @default(now())
+  @@index([status, createdAt])
+}
