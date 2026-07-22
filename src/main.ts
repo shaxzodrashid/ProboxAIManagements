@@ -22,6 +22,6 @@ async function bootstrap() {
     .setVersion("1")
     .build();
   SwaggerModule.setup("docs", app, SwaggerModule.createDocument(app, config));
-  await app.listen(process.env.PORT ?? 3000, "0.0.0.0");
+  await app.listen(process.env.PORT ?? 3000, "127.0.0.1");
 }
 void bootstrap();
