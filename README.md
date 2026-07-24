@@ -32,6 +32,17 @@ final binary Git diff and stderr stream.
 The seeded administrator must verify their own Telegram contact before using
 the Telegram-delivered OTP dashboard login flow.
 
+## API reference
+
+With the service running, the interactive OpenAPI reference is available at
+`/api/v1/docs` (for example, `http://127.0.0.1:3000/api/v1/docs`). It documents
+every public endpoint, validated request field, response schema, authorization
+rule, status code, and project-path constraint. Use `POST /api/v1/auth/otp/verify`
+to obtain an access token, then click **Authorize** and enter the token once to
+try protected endpoints from the reference. Session event streaming is exposed
+as `text/event-stream`; use an SSE client for that endpoint rather than Swagger's
+standard request runner.
+
 ## VPS configuration
 
 Run the API as a dedicated, unprivileged `proboxai` user. The user must own the

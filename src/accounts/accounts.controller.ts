@@ -8,15 +8,35 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
+import {
+  ApiBody,
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiHeader,
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiSecurity,
+  ApiTags,
+} from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import { JwtAuthGuard, RolesGuard } from "../auth/auth.guards";
 import { CurrentUser, Roles } from "../auth/auth.decorator";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { TelegramService } from "../telegram/telegram.service";
-import { CreateUserDto } from "./accounts.dto";
+import { CreateUserDto, UserResponseDto } from "./accounts.dto";
 import { AccountsService } from "./accounts.service";
+import {
+  ApiAccessToken,
+  ApiAuthenticationErrors,
+  ApiErrorResponseDto,
+  ApiResourceErrors,
+  ApiValidationErrors,
+} from "../openapi/api-docs";
 
 @Controller()
+@ApiTags("Users")
 export class AccountsController {
   constructor(
     private readonly accounts: AccountsService,
@@ -25,23 +45,94 @@ export class AccountsController {
   @Get("users")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
+  @ApiAccessToken()
+  @ApiOperation({
+    summary: "List workspace users",
+    description:
+      "Administrator-only. Results are ordered by newest account first.",
+  })
+  @ApiOkResponse({
+    description: "Workspace users.",
+    type: UserResponseDto,
+    isArray: true,
+  })
+  @ApiAuthenticationErrors()
   list(@CurrentUser() user: AuthenticatedUser) {
     return this.accounts.list(user.workspaceId);
   }
   @Post("users")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
+  @ApiAccessToken()
+  @ApiOperation({
+    summary: "Create a pending workspace user",
+    description:
+      "Administrator-only. The user becomes active after verifying their own Telegram contact through the webhook flow.",
+  })
+  @ApiCreatedResponse({
+    description: "Pending user created.",
+    type: UserResponseDto,
+  })
+  @ApiConflictResponse({
+    description:
+      "A user with this phone number already exists in the workspace.",
+    type: ApiErrorResponseDto,
+  })
+  @ApiAuthenticationErrors()
+  @ApiValidationErrors()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateUserDto) {
     return this.accounts.create(user.workspaceId, dto);
   }
   @Post("users/:id/suspend")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
+  @ApiAccessToken()
+  @ApiOperation({
+    summary: "Suspend a workspace user",
+    description: "Administrator-only. Suspended users can no longer sign in.",
+  })
+  @ApiParam({
+    name: "id",
+    format: "uuid",
+    description: "User ID in the current workspace.",
+  })
+  @ApiOkResponse({ description: "User suspended.", type: UserResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
   suspend(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.accounts.suspend(user.workspaceId, id);
   }
   @Post("telegram/webhook")
   @HttpCode(200)
+  @ApiTags("Telegram")
+  @ApiSecurity("telegram-webhook-secret")
+  @ApiOperation({
+    summary: "Receive Telegram contact-verification updates",
+    description:
+      "Telegram calls this endpoint after a pending user shares their own contact in a private chat. Invalid or irrelevant updates deliberately receive `200` so Telegram does not retry them.",
+  })
+  @ApiHeader({
+    name: "x-telegram-bot-api-secret-token",
+    required: true,
+    description:
+      "The webhook secret configured in Telegram and `TELEGRAM_WEBHOOK_SECRET`.",
+  })
+  @ApiBody({
+    schema: {
+      type: "object",
+      required: ["update_id"],
+      properties: {
+        update_id: { type: "integer", example: 100000001 },
+        message: {
+          type: "object",
+          description:
+            "Telegram Message object. `/start` requests the user's contact; a private self-contact activates a pending account.",
+          additionalProperties: true,
+        },
+      },
+    },
+  })
+  @ApiOkResponse({ description: "Update accepted or safely ignored." })
   async webhook(
     @Headers("x-telegram-bot-api-secret-token") secret: string | undefined,
     @Body() update: any,
