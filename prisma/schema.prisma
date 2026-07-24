@@ -53,12 +53,14 @@ enum NotificationStatus {
 }
 
 model Workspace {
-  id        String   @id @default(uuid())
-  slug      String   @unique @default("default")
-  createdAt DateTime @default(now())
-  users     User[]
-  tasks     Task[]
-  sessions  ProboxAiSession[]
+  id               String   @id @default(uuid())
+  slug             String   @unique @default("default")
+  projectsHomePath String?
+  createdAt        DateTime @default(now())
+  users            User[]
+  tasks            Task[]
+  projects         Project[]
+  sessions         ProboxAiSession[]
 }
 
 model User {
@@ -76,6 +78,8 @@ model User {
   updatedAt        DateTime   @updatedAt
   tasksCreated     Task[]     @relation("taskCreator")
   tasksAssigned    Task[]     @relation("taskManager")
+  projectsCreated  Project[]  @relation("projectCreator")
+  projectMemberships ProjectMember[]
   sessionsCreated  ProboxAiSession[] @relation("sessionCreator")
   approvals        ApprovalRequest[] @relation("approvalDecider")
   otps             AuthOtp[]
@@ -123,6 +127,33 @@ model Task {
   sessions    ProboxAiSession[]
   @@index([workspaceId, status])
   @@index([managerId, status])
+}
+
+model Project {
+  id                String          @id @default(uuid())
+  workspaceId       String
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id])
+  name              String
+  directoryName     String
+  description       String?
+  readAccessEnabled Boolean         @default(false)
+  creatorId         String
+  creator           User            @relation("projectCreator", fields: [creatorId], references: [id])
+  members           ProjectMember[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  @@unique([workspaceId, directoryName])
+  @@index([workspaceId, updatedAt])
+}
+
+model ProjectMember {
+  projectId String
+  userId    String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@id([projectId, userId])
+  @@index([userId])
 }
 
 model ProboxAiSession {

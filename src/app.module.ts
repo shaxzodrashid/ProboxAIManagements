@@ -7,6 +7,7 @@ import { TelegramModule } from "./telegram/telegram.module";
 import { AuthModule } from "./auth/auth.module";
 import { AccountsModule } from "./accounts/accounts.module";
 import { TasksModule } from "./tasks/tasks.module";
+import { ProjectsModule } from "./projects/projects.module";
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { TasksModule } from "./tasks/tasks.module";
     AuthModule,
     AccountsModule,
     TasksModule,
+    ProjectsModule,
     SessionsModule,
   ],
   controllers: [HealthController],

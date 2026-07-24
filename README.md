@@ -64,6 +64,8 @@ PUBLIC_BASE_URL=https://proboxai.example.com
 PROBOXAI_BIN=/usr/local/bin/proboxai
 PROBOXAI_ARCHIVE_DIR=/var/lib/proboxai/archive
 PROBOXAI_ALLOWED_WORKSPACE_ROOT=/opt/apps
+PROBOXAI_PROJECTS_HOME=/opt/apps
+PROBOXAI_PROJECT_UPLOAD_MAX_BYTES=104857600
 PROBOXAI_RUNNER_TOKEN=<runner-token-if-required-by-the-cli>
 BOOTSTRAP_ADMIN_PHONE=+998000000000
 BOOTSTRAP_ADMIN_NAME=ProboxAI Administrator
@@ -154,3 +156,31 @@ The API never accepts an executable path or shell command from a request. It
 validates the requested session working directory against
 `PROBOXAI_ALLOWED_WORKSPACE_ROOT` and invokes the configured `proboxai` binary
 with `shell: false`.
+
+## Projects
+
+Projects are workspace-scoped directories managed by the API. Configure the
+initial projects home with `PROBOXAI_PROJECTS_HOME` (normally `/opt/apps`), or
+as an administrator set it at runtime with `PUT /api/v1/settings/projects-home`:
+
+```json
+{ "path": "/opt/apps" }
+```
+
+The selected path must be absolute and remain inside
+`PROBOXAI_ALLOWED_WORKSPACE_ROOT`; the service creates it if needed. Creating a
+project through `POST /api/v1/projects` creates an empty same-named directory
+inside that home and assigns its creator automatically. A project member or an
+administrator can manage its settings, members, folders, uploads, and moves.
+Other workspace accounts can list and download files only when that project's
+`readAccessEnabled` setting is true. To prevent accidental orphaning of project
+files, the home cannot be switched to a different path after the workspace has
+created a project.
+
+Available project operations are `GET/POST /projects`, `GET/PUT /projects/:id`,
+`POST/DELETE /projects/:id/members`, `GET /projects/:id/files`,
+`POST /projects/:id/folders`, `POST /projects/:id/files/upload`,
+`POST /projects/:id/files/move`, and `GET /projects/:id/files/download`.
+All filesystem paths are project-relative. Traversal paths and symbolic links
+are rejected, uploads cannot overwrite an existing file, and the upload limit
+defaults to 100 MiB (configurable through `PROBOXAI_PROJECT_UPLOAD_MAX_BYTES`).
