@@ -25,21 +25,15 @@ async function main() {
     },
   });
   await prisma.user.upsert({
-    where: {
-      workspaceId_phoneNumber: {
-        workspaceId: workspace.id,
-        phoneNumber: parsePhoneNumber(phone).number,
-      },
-    },
+    where: { phoneNumber: parsePhoneNumber(phone).number },
     update: {
       role: UserRole.ADMIN,
-      status: UserStatus.PENDING,
-      displayName: name,
+      fullName: name,
     },
     create: {
       workspaceId: workspace.id,
       phoneNumber: parsePhoneNumber(phone).number,
-      displayName: name,
+      fullName: name,
       role: UserRole.ADMIN,
       status: UserStatus.PENDING,
     },

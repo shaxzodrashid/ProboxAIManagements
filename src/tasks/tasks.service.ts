@@ -20,7 +20,7 @@ export class TasksService {
     return this.prisma.task.findMany({
       where: { workspaceId, ...(admin ? {} : { managerId: actorId }) },
       include: {
-        manager: { select: { displayName: true } },
+        manager: { select: { fullName: true } },
         sessions: { orderBy: { createdAt: "desc" }, take: 1 },
       },
       orderBy: { updatedAt: "desc" },

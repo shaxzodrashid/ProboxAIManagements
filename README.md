@@ -41,19 +41,66 @@ the corrected files before committing again.
    configured secret token.
 5. Run `pnpm start`.
 
-The seeded administrator must verify their own Telegram contact before using
-the Telegram-delivered OTP dashboard login flow.
+The seeded administrator must share their own phone contact with the Telegram
+bot and then complete the platform registration flow described below.
 
 ## API reference
 
 With the service running, the interactive OpenAPI reference is available at
 `/api/v1/docs` (for example, `http://127.0.0.1:3000/api/v1/docs`). It documents
 every public endpoint, validated request field, response schema, authorization
-rule, status code, and project-path constraint. Use `POST /api/v1/auth/otp/verify`
-to obtain an access token, then click **Authorize** and enter the token once to
-try protected endpoints from the reference. Session event streaming is exposed
+rule, status code, and project-path constraint. Use `POST /api/v1/auth/login` to
+obtain an access token, then click **Authorize** and enter the token once to try
+protected endpoints from the reference. Session event streaming is exposed
 as `text/event-stream`; use an SSE client for that endpoint rather than Swagger's
 standard request runner.
+
+## User identity and authentication
+
+Every user has a pre-registered full name and phone number, a role, and one of
+four lifecycle states: `PENDING`, `OPEN`, `BANNED`, or `DELETED`. Administrators
+create identities through `POST /api/v1/users`; new identities always start as
+`PENDING`. A private self-contact shared with the Telegram bot links the Telegram
+user and chat but deliberately leaves the identity pending. Only successful
+platform registration creates a unique lowercase username, stores a scrypt
+password hash, and changes the user to `OPEN`.
+
+The identity migration preserves legacy Telegram links but moves legacy
+`ACTIVE` users back to `PENDING`, because those users have no username/password
+yet. Legacy suspended users become `BANNED`; legacy OTPs and session tokens are
+invalidated during the migration.
+
+Registration uses this ordered flow:
+
+1. `POST /api/v1/auth/registration/otp/send` accepts `phoneNumber` and `locale`
+   (`UZ`, `RU`, or `EN`). The phone must already be pre-created and linked to the
+   Telegram bot. Telegram receives a formal localized message with the code
+   hidden under a spoiler. The message states a one-minute validity period,
+   while the backend keeps a five-minute technical window.
+2. `POST /api/v1/auth/registration/otp/verify` accepts the phone and six-digit
+   code. It returns a purpose-bound, single-use, 384-bit random temporary token
+   valid for ten minutes.
+3. `GET /api/v1/auth/usernames/availability?username=...` performs the quick
+   case-insensitive availability check.
+4. `POST /api/v1/auth/registration` accepts `username`, `password`, and
+   `passwordConfirmation`; send the temporary token as a Bearer token. Passwords
+   require 12–128 characters with uppercase, lowercase, number, and symbol, and
+   cannot contain the username.
+
+`POST /api/v1/auth/login` accepts username and password and returns a JWT access
+token valid for 30 minutes plus an opaque random refresh token valid for 30 days.
+`POST /api/v1/auth/refresh` accepts the refresh token and returns only a new
+access token; it does not rotate the refresh token. Access authorization checks
+the persisted user state, so banning or deleting an account blocks an already
+issued access JWT immediately. `POST /api/v1/users/:id/ban` bans an identity,
+and `DELETE /api/v1/users/:id` performs an auditable soft deletion; both revoke
+all stored session tokens.
+
+Password recovery follows the equivalent
+`password-reset/otp/send` → `password-reset/otp/verify` → `password-reset`
+sequence under `/api/v1/auth`. The final request accepts only `password` and
+`passwordConfirmation`, uses its own purpose-bound temporary Bearer token, and
+revokes every refresh token after changing the password.
 
 ## VPS configuration
 
@@ -79,8 +126,6 @@ NODE_ENV=production
 PORT=3000
 DATABASE_URL=postgresql://proboxai:<strong-password>@127.0.0.1:5432/proboxai?schema=public
 JWT_SECRET=<long-random-secret>
-JWT_ACCESS_TTL_SECONDS=900
-JWT_REFRESH_TTL_SECONDS=2592000
 TELEGRAM_BOT_TOKEN=<bot-token>
 TELEGRAM_WEBHOOK_SECRET=<random-webhook-secret>
 PUBLIC_BASE_URL=https://proboxai.example.com

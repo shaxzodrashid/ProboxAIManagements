@@ -27,7 +27,7 @@ export class CreateTaskDto {
 }
 
 export class TaskManagerDto {
-  @ApiProperty({ example: "Ada Lovelace" }) displayName!: string;
+  @ApiProperty({ example: "Ada Lovelace" }) fullName!: string;
 }
 
 export class LatestSessionDto {

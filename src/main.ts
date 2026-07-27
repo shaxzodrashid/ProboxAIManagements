@@ -23,7 +23,7 @@ async function bootstrap() {
       [
         "Programmatic control plane for secure ProboxAI coding sessions.",
         "",
-        "Authenticate with the Telegram-delivered OTP flow, then send `Authorization: Bearer <accessToken>` to protected endpoints. Access tokens expire according to `JWT_ACCESS_TTL_SECONDS` (15 minutes by default).",
+        "Pre-created users link their phone through the Telegram bot, complete the localized OTP registration flow, and then sign in with a unique username and password. Send `Authorization: Bearer <accessToken>` to protected endpoints. Access tokens expire after 30 minutes; refresh tokens expire after one month.",
         "",
         "Projects live under allowlisted department homes. Missing registered homes can be provisioned by the service. All project paths are relative to a project unless an endpoint explicitly says otherwise; traversal paths and symbolic links are rejected.",
         "",
@@ -38,9 +38,19 @@ async function bootstrap() {
         scheme: "bearer",
         bearerFormat: "JWT",
         description:
-          "Access token returned by `POST /auth/otp/verify`. Do not include the `Bearer` prefix in the Swagger authorization dialog.",
+          "Access token returned by `POST /auth/login`. Do not include the `Bearer` prefix in the Swagger authorization dialog.",
       },
       "access-token",
+    )
+    .addBearerAuth(
+      {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "opaque",
+        description:
+          "Single-use temporary token returned after registration or password-reset OTP verification.",
+      },
+      "temporary-token",
     )
     .addApiKey(
       {
@@ -53,7 +63,7 @@ async function bootstrap() {
     )
     .addTag(
       "Authentication",
-      "Telegram-backed one-time-password authentication.",
+      "Telegram-backed registration and password recovery, plus username/password login and refresh tokens.",
     )
     .addTag("Health", "Deployment health check.")
     .addTag("Users", "Administrator-only workspace user management.")

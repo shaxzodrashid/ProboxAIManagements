@@ -82,7 +82,7 @@ export class ProjectsService {
             }),
       },
       include: {
-        creator: { select: { id: true, displayName: true } },
+        creator: { select: { id: true, fullName: true } },
         department: { select: { id: true, name: true, slug: true } },
         initializations: { orderBy: { attempt: "desc" }, take: 1 },
         _count: { select: { members: true } },
@@ -150,11 +150,11 @@ export class ProjectsService {
           members: { create: { userId: actor.id } },
         },
         include: {
-          creator: { select: { id: true, displayName: true } },
+          creator: { select: { id: true, fullName: true } },
           department: { select: { id: true, name: true, slug: true } },
           members: {
             include: {
-              user: { select: { id: true, displayName: true, role: true } },
+              user: { select: { id: true, fullName: true, role: true } },
             },
           },
         },
@@ -194,11 +194,11 @@ export class ProjectsService {
         members: { create: { userId: actor.id } },
       },
       include: {
-        creator: { select: { id: true, displayName: true } },
+        creator: { select: { id: true, fullName: true } },
         department: { select: { id: true, name: true, slug: true } },
         members: {
           include: {
-            user: { select: { id: true, displayName: true, role: true } },
+            user: { select: { id: true, fullName: true, role: true } },
           },
         },
       },
@@ -210,12 +210,12 @@ export class ProjectsService {
     const project = await this.prisma.project.findUniqueOrThrow({
       where: { id: projectId },
       include: {
-        creator: { select: { id: true, displayName: true } },
+        creator: { select: { id: true, fullName: true } },
         department: { select: { id: true, name: true, slug: true } },
         initializations: { orderBy: { attempt: "desc" }, take: 1 },
         members: {
           include: {
-            user: { select: { id: true, displayName: true, role: true } },
+            user: { select: { id: true, fullName: true, role: true } },
           },
           orderBy: { createdAt: "asc" },
         },
@@ -259,7 +259,7 @@ export class ProjectsService {
       update: {},
       create: { projectId, userId },
       include: {
-        user: { select: { id: true, displayName: true, role: true } },
+        user: { select: { id: true, fullName: true, role: true } },
       },
     });
   }

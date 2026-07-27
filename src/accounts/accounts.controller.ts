@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -66,7 +67,7 @@ export class AccountsController {
   @ApiOperation({
     summary: "Create a pending workspace user",
     description:
-      "Administrator-only. The user becomes active after verifying their own Telegram contact through the webhook flow.",
+      "Administrator-only. The new identity starts in PENDING. Sharing the matching Telegram contact links the bot identity; successful platform registration later changes the status to OPEN.",
   })
   @ApiCreatedResponse({
     description: "Pending user created.",
@@ -82,24 +83,45 @@ export class AccountsController {
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateUserDto) {
     return this.accounts.create(user.workspaceId, dto);
   }
-  @Post("users/:id/suspend")
+  @Post("users/:id/ban")
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @ApiAccessToken()
   @ApiOperation({
-    summary: "Suspend a workspace user",
-    description: "Administrator-only. Suspended users can no longer sign in.",
+    summary: "Ban a workspace user",
+    description:
+      "Administrator-only. Banned users cannot sign in, refresh tokens, or use an existing access token.",
   })
   @ApiParam({
     name: "id",
     format: "uuid",
     description: "User ID in the current workspace.",
   })
-  @ApiOkResponse({ description: "User suspended.", type: UserResponseDto })
+  @ApiOkResponse({ description: "User banned.", type: UserResponseDto })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
-  suspend(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    return this.accounts.suspend(user.workspaceId, id);
+  ban(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.accounts.ban(user.workspaceId, user.id, id);
+  }
+  @Delete("users/:id")
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiAccessToken()
+  @ApiOperation({
+    summary: "Delete a workspace user",
+    description:
+      "Administrator-only. This is a soft deletion: the identity remains auditable with DELETED status, and every active session token is revoked.",
+  })
+  @ApiParam({
+    name: "id",
+    format: "uuid",
+    description: "User ID in the current workspace.",
+  })
+  @ApiOkResponse({ description: "User deleted.", type: UserResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  delete(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.accounts.delete(user.workspaceId, user.id, id);
   }
   @Post("telegram/webhook")
   @HttpCode(200)
@@ -125,7 +147,7 @@ export class AccountsController {
         message: {
           type: "object",
           description:
-            "Telegram Message object. `/start` requests the user's contact; a private self-contact activates a pending account.",
+            "Telegram Message object. `/start` requests the user's contact; a private self-contact links the bot identity to a pending platform user.",
           additionalProperties: true,
         },
       },
@@ -158,8 +180,8 @@ export class AccountsController {
       await this.telegram.sendText(
         BigInt(message.chat.id),
         verified
-          ? "Your ProboxAI account is active. You can now sign in."
-          : "We could not verify that contact for an active pending account.",
+          ? "Your Telegram identity is verified. Continue registration on the ProboxAI platform."
+          : "We could not verify that contact for a pending ProboxAI identity.",
       );
     }
   }

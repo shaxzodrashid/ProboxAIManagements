@@ -1,4 +1,5 @@
 {
   "*.ts": ["eslint --max-warnings=0", "prettier --check"],
-  "*.{js,cjs,mjs,json,md,yml,yaml,prisma}": "prettier --check"
+  "*.{js,cjs,mjs,json,md,yml,yaml}": "prettier --check",
+  "*.prisma": "prisma format --schema"
 }

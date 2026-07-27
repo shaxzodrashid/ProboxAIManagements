@@ -151,7 +151,7 @@ export class SetProjectsHomeDto {
 
 export class ProjectCreatorDto {
   @ApiProperty({ format: "uuid" }) id!: string;
-  @ApiProperty({ example: "Ada Lovelace" }) displayName!: string;
+  @ApiProperty({ example: "Ada Lovelace" }) fullName!: string;
 }
 
 export class ProjectMemberUserDto extends ProjectCreatorDto {

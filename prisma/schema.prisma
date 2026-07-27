@@ -15,8 +15,20 @@ enum UserRole {
 
 enum UserStatus {
   PENDING
-  ACTIVE
-  SUSPENDED
+  OPEN
+  BANNED
+  DELETED
+}
+
+enum AuthOtpPurpose {
+  REGISTRATION
+  PASSWORD_RESET
+}
+
+enum SessionTokenPurpose {
+  REGISTRATION
+  PASSWORD_RESET
+  REFRESH
 }
 
 enum TaskStatus {
@@ -130,8 +142,10 @@ model User {
   id                        String                         @id @default(uuid())
   workspaceId               String
   workspace                 Workspace                      @relation(fields: [workspaceId], references: [id])
-  phoneNumber               String
-  displayName               String
+  phoneNumber               String                         @unique
+  fullName                  String
+  username                  String?                        @unique
+  passwordHash              String?
   role                      UserRole
   status                    UserStatus                     @default(PENDING)
   telegramUserId            BigInt?                        @unique
@@ -151,8 +165,6 @@ model User {
   otps                      AuthOtp[]
   tokens                    SessionToken[]
   notifications             NotificationDelivery[]
-
-  @@unique([workspaceId, phoneNumber])
 }
 
 model Department {
@@ -174,26 +186,31 @@ model Department {
 }
 
 model AuthOtp {
-  id         String    @id @default(uuid())
+  id         String         @id @default(uuid())
   userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose    AuthOtpPurpose
   codeHash   String
   expiresAt  DateTime
-  attempts   Int       @default(0)
+  attempts   Int            @default(0)
   consumedAt DateTime?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime       @default(now())
 
-  @@index([userId, expiresAt])
+  @@index([userId, purpose, expiresAt])
 }
 
 model SessionToken {
-  id        String    @id @default(uuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String    @unique
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime  @default(now())
+  id         String              @id @default(uuid())
+  userId     String
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose    SessionTokenPurpose
+  tokenHash  String              @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  consumedAt DateTime?
+  createdAt  DateTime            @default(now())
+
+  @@index([userId, purpose, expiresAt])
 }
 
 model Task {
