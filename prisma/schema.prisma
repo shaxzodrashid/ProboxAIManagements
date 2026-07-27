@@ -12,11 +12,13 @@ enum UserRole {
   MANAGER
   MEMBER
 }
+
 enum UserStatus {
   PENDING
   ACTIVE
   SUSPENDED
 }
+
 enum TaskStatus {
   QUEUED
   RUNNING
@@ -25,6 +27,7 @@ enum TaskStatus {
   FAILED
   CANCELLED
 }
+
 enum SessionStatus {
   QUEUED
   RUNNING
@@ -34,173 +37,441 @@ enum SessionStatus {
   INTERRUPTED
   ARCHIVED
 }
+
 enum TurnStatus {
   RUNNING
   COMPLETED
   FAILED
   INTERRUPTED
 }
+
 enum ApprovalStatus {
   PENDING
   APPROVED
   REJECTED
   CANCELLED
 }
+
 enum NotificationStatus {
   PENDING
   SENT
   FAILED
 }
 
+enum DepartmentStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ProjectStatus {
+  INITIALIZING
+  READY
+  FAILED
+}
+
+enum ConfigurationTemplateStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ConfigurationTemplateVersionStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum TemplateCommandStageMode {
+  SEQUENTIAL
+  PARALLEL
+}
+
+enum TemplateCommandType {
+  STRUCTURED
+  SHELL
+}
+
+enum ProjectInitializationStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum ProjectInitializationStepStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum TemplateObjectCleanupStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
 model Workspace {
-  id               String   @id @default(uuid())
-  slug             String   @unique @default("default")
-  projectsHomePath String?
-  createdAt        DateTime @default(now())
-  users            User[]
-  tasks            Task[]
-  projects         Project[]
-  sessions         ProboxAiSession[]
+  id                     String                  @id @default(uuid())
+  slug                   String                  @unique @default("default")
+  // Kept during the v1 compatibility window. Department.homePath is the
+  // authoritative setting for new code.
+  projectsHomePath       String?
+  createdAt              DateTime                @default(now())
+  users                  User[]
+  tasks                  Task[]
+  departments            Department[]
+  projects               Project[]
+  configurationTemplates ConfigurationTemplate[]
+  sessions               ProboxAiSession[]
 }
 
 model User {
-  id               String     @id @default(uuid())
-  workspaceId      String
-  workspace        Workspace  @relation(fields: [workspaceId], references: [id])
-  phoneNumber      String
-  displayName      String
-  role             UserRole
-  status           UserStatus @default(PENDING)
-  telegramUserId   BigInt?    @unique
-  telegramChatId   BigInt?    @unique
-  verifiedAt       DateTime?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  tasksCreated     Task[]     @relation("taskCreator")
-  tasksAssigned    Task[]     @relation("taskManager")
-  projectsCreated  Project[]  @relation("projectCreator")
-  projectMemberships ProjectMember[]
-  sessionsCreated  ProboxAiSession[] @relation("sessionCreator")
-  approvals        ApprovalRequest[] @relation("approvalDecider")
-  otps             AuthOtp[]
-  tokens           SessionToken[]
-  notifications    NotificationDelivery[]
+  id                        String                         @id @default(uuid())
+  workspaceId               String
+  workspace                 Workspace                      @relation(fields: [workspaceId], references: [id])
+  phoneNumber               String
+  displayName               String
+  role                      UserRole
+  status                    UserStatus                     @default(PENDING)
+  telegramUserId            BigInt?                        @unique
+  telegramChatId            BigInt?                        @unique
+  verifiedAt                DateTime?
+  createdAt                 DateTime                       @default(now())
+  updatedAt                 DateTime                       @updatedAt
+  tasksCreated              Task[]                         @relation("taskCreator")
+  tasksAssigned             Task[]                         @relation("taskManager")
+  projectsCreated           Project[]                      @relation("projectCreator")
+  projectMemberships        ProjectMember[]
+  templatesCreated          ConfigurationTemplate[]        @relation("templateCreator")
+  templateVersionsCreated   ConfigurationTemplateVersion[] @relation("templateVersionCreator")
+  templateVersionsPublished ConfigurationTemplateVersion[] @relation("templateVersionPublisher")
+  sessionsCreated           ProboxAiSession[]              @relation("sessionCreator")
+  approvals                 ApprovalRequest[]              @relation("approvalDecider")
+  otps                      AuthOtp[]
+  tokens                    SessionToken[]
+  notifications             NotificationDelivery[]
+
   @@unique([workspaceId, phoneNumber])
 }
 
+model Department {
+  id          String                  @id @default(uuid())
+  workspaceId String
+  workspace   Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  homePath    String
+  isDefault   Boolean                 @default(false)
+  status      DepartmentStatus        @default(ACTIVE)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  projects    Project[]
+  templates   ConfigurationTemplate[]
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, status, name])
+}
+
 model AuthOtp {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  codeHash  String
-  expiresAt DateTime
-  attempts  Int      @default(0)
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
   consumedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt  DateTime  @default(now())
+
   @@index([userId, expiresAt])
 }
 
 model SessionToken {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String   @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 }
 
 model Task {
-  id          String     @id @default(uuid())
+  id          String            @id @default(uuid())
   workspaceId String
-  workspace   Workspace  @relation(fields: [workspaceId], references: [id])
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id])
   title       String
   description String
   criteria    String?
-  status      TaskStatus @default(QUEUED)
+  status      TaskStatus        @default(QUEUED)
   creatorId   String
-  creator     User       @relation("taskCreator", fields: [creatorId], references: [id])
+  creator     User              @relation("taskCreator", fields: [creatorId], references: [id])
   managerId   String
-  manager     User       @relation("taskManager", fields: [managerId], references: [id])
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  manager     User              @relation("taskManager", fields: [managerId], references: [id])
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
   sessions    ProboxAiSession[]
+
   @@index([workspaceId, status])
   @@index([managerId, status])
 }
 
 model Project {
-  id                String          @id @default(uuid())
-  workspaceId       String
-  workspace         Workspace       @relation(fields: [workspaceId], references: [id])
-  name              String
-  directoryName     String
-  description       String?
-  readAccessEnabled Boolean         @default(false)
-  creatorId         String
-  creator           User            @relation("projectCreator", fields: [creatorId], references: [id])
-  members           ProjectMember[]
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  @@unique([workspaceId, directoryName])
+  id                       String                        @id @default(uuid())
+  workspaceId              String
+  workspace                Workspace                     @relation(fields: [workspaceId], references: [id])
+  departmentId             String
+  department               Department                    @relation(fields: [departmentId], references: [id])
+  name                     String
+  directoryName            String
+  description              String?
+  readAccessEnabled        Boolean                       @default(false)
+  status                   ProjectStatus                 @default(READY)
+  appliedTemplateVersionId String?
+  appliedTemplateVersion   ConfigurationTemplateVersion? @relation(fields: [appliedTemplateVersionId], references: [id])
+  creatorId                String
+  creator                  User                          @relation("projectCreator", fields: [creatorId], references: [id])
+  members                  ProjectMember[]
+  initializations          ProjectInitialization[]
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+
+  @@unique([departmentId, directoryName])
   @@index([workspaceId, updatedAt])
+  @@index([departmentId, status, updatedAt])
 }
 
 model ProjectMember {
   projectId String
   userId    String
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+
   @@id([projectId, userId])
   @@index([userId])
 }
 
-model ProboxAiSession {
-  id              String        @id @default(uuid())
-  workspaceId     String
-  workspace       Workspace     @relation(fields: [workspaceId], references: [id])
-  taskId          String
-  task            Task          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+model ConfigurationTemplate {
+  id           String                         @id @default(uuid())
+  workspaceId  String
+  workspace    Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  departmentId String
+  department   Department                     @relation(fields: [departmentId], references: [id])
+  name         String
+  slug         String
+  description  String?
+  status       ConfigurationTemplateStatus    @default(ACTIVE)
+  creatorId    String
+  creator      User                           @relation("templateCreator", fields: [creatorId], references: [id])
+  versions     ConfigurationTemplateVersion[]
+  createdAt    DateTime                       @default(now())
+  updatedAt    DateTime                       @updatedAt
+
+  @@unique([departmentId, slug])
+  @@index([workspaceId, status, name])
+}
+
+model ConfigurationTemplateVersion {
+  id              String                              @id @default(uuid())
+  templateId      String
+  template        ConfigurationTemplate               @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  version         Int
+  status          ConfigurationTemplateVersionStatus  @default(DRAFT)
   creatorId       String
-  creator         User          @relation("sessionCreator", fields: [creatorId], references: [id])
-  status          SessionStatus @default(QUEUED)
-  cwd             String
-  sandbox         String
-  model           String?
-  codexThreadId   String?       @unique
-  processId       Int?
-  startedAt       DateTime?
-  endedAt         DateTime?
-  lastSequence    Int           @default(0)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  turns           ProboxAiTurn[]
-  events          SessionEvent[]
-  artifacts       SessionArtifact[]
-  approvals       ApprovalRequest[]
+  creator         User                                @relation("templateVersionCreator", fields: [creatorId], references: [id])
+  publishedById   String?
+  publishedBy     User?                               @relation("templateVersionPublisher", fields: [publishedById], references: [id])
+  publishedAt     DateTime?
+  createdAt       DateTime                            @default(now())
+  updatedAt       DateTime                            @updatedAt
+  folders         ConfigurationTemplateFolder[]
+  files           ConfigurationTemplateFile[]
+  commandStages   ConfigurationTemplateCommandStage[]
+  projects        Project[]
+  initializations ProjectInitialization[]
+
+  @@unique([templateId, version])
+  @@index([templateId, status, version])
+}
+
+model ConfigurationTemplateFolder {
+  id        String                       @id @default(uuid())
+  versionId String
+  version   ConfigurationTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  path      String
+  createdAt DateTime                     @default(now())
+
+  @@unique([versionId, path])
+}
+
+model ConfigurationTemplateFile {
+  id              String                       @id @default(uuid())
+  versionId       String
+  version         ConfigurationTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  destinationPath String
+  objectKey       String
+  originalName    String
+  contentType     String
+  size            Int
+  sha256          String
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+
+  @@unique([versionId, destinationPath])
+  @@index([objectKey])
+}
+
+model ConfigurationTemplateCommandStage {
+  id             String                         @id @default(uuid())
+  versionId      String
+  version        ConfigurationTemplateVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  name           String
+  position       Int
+  mode           TemplateCommandStageMode
+  maxConcurrency Int                            @default(4)
+  commands       ConfigurationTemplateCommand[]
+
+  @@unique([versionId, position])
+}
+
+model ConfigurationTemplateCommand {
+  id                  String                            @id @default(uuid())
+  stageId             String
+  stage               ConfigurationTemplateCommandStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  name                String
+  position            Int
+  type                TemplateCommandType
+  executable          String?
+  arguments           Json?
+  script              String?
+  workingDirectory    String                            @default("")
+  timeoutSeconds      Int                               @default(900)
+  initializationSteps ProjectInitializationStep[]
+
+  @@unique([stageId, position])
+}
+
+model ProjectInitialization {
+  id                String                       @id @default(uuid())
+  projectId         String
+  project           Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  templateVersionId String
+  templateVersion   ConfigurationTemplateVersion @relation(fields: [templateVersionId], references: [id])
+  attempt           Int
+  status            ProjectInitializationStatus  @default(QUEUED)
+  stagingPath       String?
+  quarantinePath    String?
+  leaseOwner        String?
+  leaseExpiresAt    DateTime?
+  lastSequence      Int                          @default(0)
+  error             String?
+  startedAt         DateTime?
+  endedAt           DateTime?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  steps             ProjectInitializationStep[]
+  events            ProjectInitializationEvent[]
+
+  @@unique([projectId, attempt])
+  @@index([status, createdAt])
+}
+
+model ProjectInitializationStep {
+  id               String                          @id @default(uuid())
+  initializationId String
+  initialization   ProjectInitialization           @relation(fields: [initializationId], references: [id], onDelete: Cascade)
+  commandId        String?
+  command          ConfigurationTemplateCommand?   @relation(fields: [commandId], references: [id])
+  key              String
+  kind             String
+  position         Int
+  status           ProjectInitializationStepStatus @default(PENDING)
+  stdout           String?
+  stderr           String?
+  outputTruncated  Boolean                         @default(false)
+  exitCode         Int?
+  error            String?
+  startedAt        DateTime?
+  endedAt          DateTime?
+
+  @@unique([initializationId, key])
+  @@index([initializationId, position])
+}
+
+model ProjectInitializationEvent {
+  id               String                @id @default(uuid())
+  initializationId String
+  initialization   ProjectInitialization @relation(fields: [initializationId], references: [id], onDelete: Cascade)
+  sequence         Int
+  type             String
+  payload          Json
+  createdAt        DateTime              @default(now())
+
+  @@unique([initializationId, sequence])
+  @@index([initializationId, createdAt])
+}
+
+model TemplateObjectCleanup {
+  id            String                      @id @default(uuid())
+  objectKey     String                      @unique
+  status        TemplateObjectCleanupStatus @default(PENDING)
+  attempts      Int                         @default(0)
+  lastError     String?
+  nextAttemptAt DateTime                    @default(now())
+  createdAt     DateTime                    @default(now())
+  updatedAt     DateTime                    @updatedAt
+
+  @@index([status, nextAttemptAt])
+}
+
+model ProboxAiSession {
+  id            String            @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace         @relation(fields: [workspaceId], references: [id])
+  taskId        String
+  task          Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  creatorId     String
+  creator       User              @relation("sessionCreator", fields: [creatorId], references: [id])
+  status        SessionStatus     @default(QUEUED)
+  cwd           String
+  sandbox       String
+  model         String?
+  codexThreadId String?           @unique
+  processId     Int?
+  startedAt     DateTime?
+  endedAt       DateTime?
+  lastSequence  Int               @default(0)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  turns         ProboxAiTurn[]
+  events        SessionEvent[]
+  artifacts     SessionArtifact[]
+  approvals     ApprovalRequest[]
+
   @@index([taskId, createdAt])
   @@index([status, createdAt])
 }
 
 model ProboxAiTurn {
-  id            String     @id @default(uuid())
-  sessionId     String
-  session       ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  codexTurnId   String?
-  prompt        String
-  status        TurnStatus @default(RUNNING)
-  inputTokens   Int?
-  cachedTokens  Int?
-  outputTokens  Int?
+  id              String          @id @default(uuid())
+  sessionId       String
+  session         ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  codexTurnId     String?
+  prompt          String
+  status          TurnStatus      @default(RUNNING)
+  inputTokens     Int?
+  cachedTokens    Int?
+  outputTokens    Int?
   reasoningTokens Int?
-  startedAt     DateTime   @default(now())
-  endedAt       DateTime?
+  startedAt       DateTime        @default(now())
+  endedAt         DateTime?
+
   @@index([sessionId, startedAt])
 }
 
 model SessionEvent {
-  id           String   @id @default(uuid())
+  id           String          @id @default(uuid())
   sessionId    String
   session      ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   turnId       String?
@@ -210,47 +481,51 @@ model SessionEvent {
   rawPayload   Json
   payloadHash  String
   previousHash String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime        @default(now())
+
   @@unique([sessionId, sequence])
   @@index([sessionId, createdAt])
 }
 
 model SessionArtifact {
-  id          String   @id @default(uuid())
-  sessionId   String
-  session     ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  kind        String
-  objectPath  String
-  sha256      String
-  bytes       Int
-  createdAt   DateTime @default(now())
+  id         String          @id @default(uuid())
+  sessionId  String
+  session    ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  kind       String
+  objectPath String
+  sha256     String
+  bytes      Int
+  createdAt  DateTime        @default(now())
+
   @@index([sessionId, createdAt])
 }
 
 model ApprovalRequest {
-  id          String         @id @default(uuid())
-  sessionId   String
-  session     ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  status      ApprovalStatus @default(PENDING)
+  id              String          @id @default(uuid())
+  sessionId       String
+  session         ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  status          ApprovalStatus  @default(PENDING)
   requestedAction String
-  evidence    Json
-  decidedById String?
-  decidedBy   User?          @relation("approvalDecider", fields: [decidedById], references: [id])
-  decisionReason String?
-  createdAt   DateTime       @default(now())
-  decidedAt   DateTime?
+  evidence        Json
+  decidedById     String?
+  decidedBy       User?           @relation("approvalDecider", fields: [decidedById], references: [id])
+  decisionReason  String?
+  createdAt       DateTime        @default(now())
+  decidedAt       DateTime?
+
   @@index([sessionId, status])
 }
 
 model NotificationDelivery {
-  id          String             @id @default(uuid())
-  userId      String
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  eventType   String
-  payload     Json
-  status      NotificationStatus @default(PENDING)
-  attempts    Int                @default(0)
-  sentAt      DateTime?
-  createdAt   DateTime           @default(now())
+  id        String             @id @default(uuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType String
+  payload   Json
+  status    NotificationStatus @default(PENDING)
+  attempts  Int                @default(0)
+  sentAt    DateTime?
+  createdAt DateTime           @default(now())
+
   @@index([status, createdAt])
 }

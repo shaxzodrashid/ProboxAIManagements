@@ -81,7 +81,7 @@ export class ProjectsController {
   @ApiOperation({
     summary: "Create a project",
     description:
-      "Administrator or manager only. Creates both the workspace-scoped project record and an empty project directory. The creator is added as the first member.",
+      "Administrator or manager only. Selects the workspace default department when departmentId is omitted. Empty projects become ready immediately; selecting a published department template creates a persisted asynchronous initialization job. The creator is added as the first member.",
   })
   @ApiCreatedResponse({
     description: "Project and its backing directory created.",
@@ -358,9 +358,9 @@ export class SettingsController {
 
   @Get("projects-home")
   @ApiOperation({
-    summary: "Get the workspace projects home",
+    summary: "Get the legacy default projects home",
     description:
-      "Administrator-only. Returns the effective path and whether it was explicitly configured for the workspace.",
+      "Backward-compatible administrator endpoint. Returns the default department home. New integrations should use the Departments API.",
   })
   @ApiOkResponse({
     description: "Effective projects home.",
@@ -373,9 +373,9 @@ export class SettingsController {
 
   @Put("projects-home")
   @ApiOperation({
-    summary: "Set the workspace projects home",
+    summary: "Set the legacy default projects home",
     description:
-      "Administrator-only. The path must be absolute and inside the server's allowed root. It cannot change after a project has been created.",
+      "Backward-compatible administrator endpoint. Creates or updates the default department home when it is allowlisted. It cannot change after the department owns a project. New integrations should use the Departments API.",
   })
   @ApiOkResponse({
     description: "Projects home updated.",

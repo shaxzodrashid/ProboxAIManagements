@@ -13,7 +13,6 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiHeader,
-  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,

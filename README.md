@@ -20,7 +20,7 @@ final binary Git diff and stderr stream.
 1. Install the local `proboxai` command with `pnpm link --global`, then copy
    `.env.example` to `.env` and set a strong `JWT_SECRET`, Telegram values,
    and the VPS-specific `PROBOXAI_*` paths.
-2. Start PostgreSQL with `docker compose up -d postgres`.
+2. Start PostgreSQL and MinIO with `docker compose up -d postgres minio`.
 3. In development, create and commit the initial migration with
    `pnpm prisma:migrate -- --name init`; deploy committed migrations on the VPS
    with `pnpm prisma:deploy`. Then create the initial pending administrator with
@@ -50,7 +50,7 @@ application checkout, the permitted workspaces, and the session archive:
 
 ```bash
 sudo useradd --system --create-home --home-dir /home/proboxai --shell /bin/bash proboxai
-sudo install -d -o proboxai -g proboxai /opt/proboxai-api /opt/apps /var/lib/proboxai/archive
+sudo install -d -o proboxai -g proboxai /opt/proboxai-api /opt/apps /opt/marketing /var/lib/proboxai/archive /var/lib/proboxai/template-uploads
 sudo install -d -o root -g proboxai -m 0750 /etc/proboxai
 ```
 
@@ -74,9 +74,21 @@ TELEGRAM_WEBHOOK_SECRET=<random-webhook-secret>
 PUBLIC_BASE_URL=https://proboxai.example.com
 PROBOXAI_BIN=/usr/local/bin/proboxai
 PROBOXAI_ARCHIVE_DIR=/var/lib/proboxai/archive
-PROBOXAI_ALLOWED_WORKSPACE_ROOT=/opt/apps
+PROBOXAI_ALLOWED_WORKSPACE_ROOTS=/opt/apps,/opt/marketing
 PROBOXAI_PROJECTS_HOME=/opt/apps
 PROBOXAI_PROJECT_UPLOAD_MAX_BYTES=104857600
+MINIO_ENDPOINT=http://127.0.0.1:9000
+MINIO_REGION=us-east-1
+MINIO_TEMPLATE_BUCKET=proboxai-configuration-templates
+MINIO_ACCESS_KEY=<bucket-scoped-access-key>
+MINIO_SECRET_KEY=<bucket-scoped-secret-key>
+MINIO_FORCE_PATH_STYLE=true
+MINIO_AUTO_CREATE_BUCKET=false
+PROBOXAI_TEMPLATE_FILE_MAX_BYTES=104857600
+PROBOXAI_TEMPLATE_TOTAL_MAX_BYTES=1073741824
+PROBOXAI_TEMPLATE_SHELL=/bin/bash
+PROBOXAI_TEMPLATE_COMMAND_OUTPUT_MAX_BYTES=1048576
+PROBOXAI_UPLOAD_TEMP_DIR=/var/lib/proboxai/template-uploads
 PROBOXAI_RUNNER_TOKEN=<runner-token-if-required-by-the-cli>
 BOOTSTRAP_ADMIN_PHONE=+998000000000
 BOOTSTRAP_ADMIN_NAME=ProboxAI Administrator
@@ -163,26 +175,46 @@ session JSONL, stderr, and final Git diffs are retained under
 
 ## Safety boundary
 
-The API never accepts an executable path or shell command from a request. It
-validates the requested session working directory against
-`PROBOXAI_ALLOWED_WORKSPACE_ROOT` and invokes the configured `proboxai` binary
-with `shell: false`.
+Managed coding sessions never accept a runner executable from an API request.
+They validate the requested working directory against
+`PROBOXAI_ALLOWED_WORKSPACE_ROOTS` and invoke the configured `proboxai` binary
+with `shell: false`. Configuration-template commands are a separate,
+administrator-only automation facility. Structured commands also use
+`shell: false`; shell commands use the fixed server-configured Bash path. Both
+run with a sanitized environment that excludes database, JWT, Telegram, runner,
+and MinIO secrets.
 
 ## Projects
 
-Projects are workspace-scoped directories managed by the API. Configure the
-initial projects home with `PROBOXAI_PROJECTS_HOME` (normally `/opt/apps`), or
-as an administrator set it at runtime with `PUT /api/v1/settings/projects-home`:
+Projects are workspace-scoped directories managed by the API and assigned to a
+department. The migration creates a default IT department using the previous
+projects home. Administrators can add Marketing or other departments with an
+independent absolute home:
 
-```json
-{ "path": "/opt/apps" }
+```http
+POST /api/v1/departments
+Content-Type: application/json
+
+{
+  "name": "Marketing",
+  "homePath": "/opt/marketing"
+}
 ```
 
-The selected path must be absolute and remain inside
-`PROBOXAI_ALLOWED_WORKSPACE_ROOT`; the service creates it if needed. Creating a
-project through `POST /api/v1/projects` creates an empty same-named directory
-inside that home and assigns its creator automatically. A project member or an
-administrator can manage its settings, members, folders, uploads, and moves.
+The path may be absent. The service validates its nearest existing ancestors,
+rejects symlinks and paths outside the root allowlist, creates it recursively,
+and verifies read/write/execute access before saving the department. Existing
+directories are accepted; regular files at the requested path are rejected. A
+department home cannot move after its first project. The deprecated
+`GET/PUT /api/v1/settings/projects-home` endpoints continue to address the
+default department during the v1 compatibility window.
+
+Creating a project through `POST /api/v1/projects` accepts `departmentId` and
+an optional `configurationTemplateId`. Omitting `departmentId` uses the default
+IT department. Empty projects are ready immediately. Templated projects return
+in `INITIALIZING` status and expose their latest persisted initialization attempt.
+A project member or administrator can manage its settings, members, folders,
+uploads, moves, initialization cancellation, and clean retries.
 Other workspace accounts can list and download files only when that project's
 `readAccessEnabled` setting is true. To prevent accidental orphaning of project
 files, the home cannot be switched to a different path after the workspace has
@@ -195,3 +227,65 @@ Available project operations are `GET/POST /projects`, `GET/PUT /projects/:id`,
 All filesystem paths are project-relative. Traversal paths and symbolic links
 are rejected, uploads cannot overwrite an existing file, and the upload limit
 defaults to 100 MiB (configurable through `PROBOXAI_PROJECT_UPLOAD_MAX_BYTES`).
+
+### Privileged creation of new `/opt` roots
+
+The API normally creates department paths as the unprivileged service user. If
+an exact allowlisted root such as `/opt/marketing` does not exist and `/opt` is
+not writable, install the included helper as a root-owned executable and give
+the service account access only to that helper:
+
+```bash
+sudo install -o root -g root -m 0755 scripts/proboxai-create-home.sh /usr/local/libexec/proboxai-create-home
+printf '%s\n' /opt/apps /opt/marketing | sudo tee /etc/proboxai/allowed-workspace-roots >/dev/null
+sudo chown root:root /etc/proboxai/allowed-workspace-roots
+sudo chmod 0644 /etc/proboxai/allowed-workspace-roots
+echo 'proboxai ALL=(root) NOPASSWD: /usr/local/libexec/proboxai-create-home *' | sudo tee /etc/sudoers.d/proboxai-home-provisioner >/dev/null
+sudo chmod 0440 /etc/sudoers.d/proboxai-home-provisioner
+```
+
+Then set this server-owned environment value:
+
+```dotenv
+PROBOXAI_HOME_PROVISIONER_COMMAND='["/usr/bin/sudo","-n","/usr/local/libexec/proboxai-create-home"]'
+```
+
+The helper independently validates the requested path against its root-owned
+allowlist and rejects symbolic links before creating anything.
+
+## Configuration templates
+
+Configuration templates belong to one department. Administrators create a
+template, edit its draft manifest, upload files to exact project-relative paths,
+and publish an immutable version. Published versions can only be changed by
+cloning them into a new draft. Managers can list and select published templates
+when creating projects but cannot modify them.
+
+Template uploads are spooled to `PROBOXAI_UPLOAD_TEMP_DIR` and streamed into
+private MinIO objects, with PostgreSQL metadata and SHA-256 verification. The
+temporary upload is always removed after the request. The default limits are
+100 MiB per file and 1 GiB per version, so a 16-document brand-book package is
+supported without a special-case cap.
+Folders must be declared explicitly; every file parent and command working
+directory must match a declared folder.
+
+Commands are organized into ordered stages. A `SEQUENTIAL` stage runs one
+command at a time. A `PARALLEL` stage runs with a bounded concurrency limit and
+waits for every command before the next stage begins. Commands are either a
+structured executable/argument array or an administrator-authored Bash script.
+Each command has a project-relative working directory and timeout.
+
+## Project initialization lifecycle
+
+Templated project creation queues a PostgreSQL-backed initialization job. The
+worker validates the published manifest, creates folders in same-filesystem
+staging, downloads and verifies MinIO objects, executes command stages, and
+atomically renames staging into the final department home. File APIs return
+`409` until the project is `READY`.
+
+Job status, ordered steps, bounded stdout/stderr, exit codes, failures, and
+sequenced events are persisted. REST replay and SSE streaming are available
+under `/api/v1/projects/:projectId/initializations`. Cancellation terminates
+active process groups. Failed, cancelled, timed-out, or restart-interrupted
+attempts quarantine staging and require an explicit clean retry; queued work
+continues after restart.

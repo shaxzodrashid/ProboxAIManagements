@@ -8,16 +8,22 @@ import { AuthModule } from "./auth/auth.module";
 import { AccountsModule } from "./accounts/accounts.module";
 import { TasksModule } from "./tasks/tasks.module";
 import { ProjectsModule } from "./projects/projects.module";
+import { StorageModule } from "./storage/storage.module";
+import { DepartmentsModule } from "./departments/departments.module";
+import { ConfigurationTemplatesModule } from "./configuration-templates/configuration-templates.module";
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    StorageModule,
     TelegramModule,
     AuthModule,
     AccountsModule,
     TasksModule,
     ProjectsModule,
+    DepartmentsModule,
+    ConfigurationTemplatesModule,
     SessionsModule,
   ],
   controllers: [HealthController],

@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ProjectsService } from "../src/projects/projects.service";
+import { WorkspacePathPolicy } from "../src/storage/workspace-path-policy.service";
 
 describe("ProjectsService filesystem permissions", () => {
   let root: string;
@@ -10,8 +11,10 @@ describe("ProjectsService filesystem permissions", () => {
   const project = {
     id: "project-1",
     workspaceId: "workspace-1",
+    departmentId: "department-1",
     directoryName: "Sample project",
     readAccessEnabled: false,
+    status: "READY" as const,
     members: [{ userId: "member-1" }],
   };
   const member = {
@@ -29,15 +32,21 @@ describe("ProjectsService filesystem permissions", () => {
     project.readAccessEnabled = false;
     root = await fs.mkdtemp(path.join(os.tmpdir(), "proboxai-projects-"));
     process.env.PROBOXAI_ALLOWED_WORKSPACE_ROOT = root;
+    delete process.env.PROBOXAI_ALLOWED_WORKSPACE_ROOTS;
     process.env.PROBOXAI_PROJECTS_HOME = root;
-    service = new ProjectsService({
-      workspace: {
-        findUnique: jest.fn().mockResolvedValue({ projectsHomePath: null }),
-      },
-      project: {
-        findFirst: jest.fn().mockResolvedValue(project),
-      },
-    } as any);
+    service = new ProjectsService(
+      {
+        department: {
+          findUnique: jest.fn().mockResolvedValue({ homePath: root }),
+        },
+        project: {
+          findFirst: jest.fn().mockResolvedValue(project),
+        },
+      } as any,
+      {} as any,
+      new WorkspacePathPolicy(),
+      {} as any,
+    );
     await fs.mkdir(path.join(root, project.directoryName));
   });
 

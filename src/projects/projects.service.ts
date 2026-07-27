@@ -5,12 +5,20 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { UserRole } from "@prisma/client";
+import {
+  ConfigurationTemplateVersionStatus,
+  DepartmentStatus,
+  ProjectStatus,
+  UserRole,
+} from "@prisma/client";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateProjectDto, UpdateProjectDto } from "./projects.dto";
+import { DepartmentsService } from "../departments/departments.service";
+import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
+import { ProjectInitializationService } from "./project-initialization.service";
 
 type UploadedProjectFile = {
   originalname: string;
@@ -20,7 +28,12 @@ type UploadedProjectFile = {
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly departments: DepartmentsService,
+    private readonly pathPolicy: WorkspacePathPolicy,
+    private readonly initializations: ProjectInitializationService,
+  ) {}
 
   static maxUploadBytes() {
     const configured = Number(process.env.PROBOXAI_PROJECT_UPLOAD_MAX_BYTES);
@@ -30,38 +43,29 @@ export class ProjectsService {
   }
 
   async getProjectsHome(workspaceId: string) {
-    const workspace = await this.prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { projectsHomePath: true },
-    });
-    if (!workspace) throw new NotFoundException("Workspace not found");
-    const path = this.resolveProjectsHome(workspace.projectsHomePath);
-    return { path, configured: workspace.projectsHomePath !== null };
+    const department = await this.departments.defaultForWorkspace(workspaceId);
+    return {
+      path: department.homePath,
+      configured: true,
+      departmentId: department.id,
+    };
   }
 
   async setProjectsHome(workspaceId: string, requestedPath: string) {
-    const projectsHomePath = this.validateProjectsHome(requestedPath);
-    const workspace = await this.prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: {
-        projectsHomePath: true,
-        _count: { select: { projects: true } },
-      },
+    const department = await this.departments.defaultForWorkspace(workspaceId);
+    const updated = await this.departments.update(workspaceId, department.id, {
+      homePath: requestedPath,
     });
-    if (!workspace) throw new NotFoundException("Workspace not found");
-    if (
-      workspace._count.projects > 0 &&
-      this.resolveProjectsHome(workspace.projectsHomePath) !== projectsHomePath
-    )
-      throw new ConflictException(
-        "Projects home cannot change after projects have been created",
-      );
-    await this.ensureHomeDirectory(projectsHomePath);
     await this.prisma.workspace.update({
       where: { id: workspaceId },
-      data: { projectsHomePath },
+      data: { projectsHomePath: updated.homePath },
     });
-    return { path: projectsHomePath, configured: true };
+    return {
+      path: updated.homePath,
+      configured: true,
+      departmentId: updated.id,
+      created: updated.homeCreated,
+    };
   }
 
   async list(actor: AuthenticatedUser) {
@@ -79,6 +83,8 @@ export class ProjectsService {
       },
       include: {
         creator: { select: { id: true, displayName: true } },
+        department: { select: { id: true, name: true, slug: true } },
+        initializations: { orderBy: { attempt: "desc" }, take: 1 },
         _count: { select: { members: true } },
       },
       orderBy: { updatedAt: "desc" },
@@ -87,39 +93,65 @@ export class ProjectsService {
   }
 
   async create(actor: AuthenticatedUser, dto: CreateProjectDto) {
+    const department = dto.departmentId
+      ? await this.departments.get(actor.workspaceId, dto.departmentId)
+      : await this.departments.defaultForWorkspace(actor.workspaceId);
+    if (department.status !== DepartmentStatus.ACTIVE)
+      throw new ConflictException(
+        "Projects cannot be created in an archived department",
+      );
     const directoryName = validateProjectDirectoryName(dto.name);
     const existing = await this.prisma.project.findFirst({
-      where: { workspaceId: actor.workspaceId, directoryName },
+      where: { departmentId: department.id, directoryName },
       select: { id: true },
     });
     if (existing)
       throw new ConflictException("A project with this name exists");
 
-    const projectDirectory = await this.projectDirectoryForWorkspace(
-      actor.workspaceId,
+    const projectDirectory = await this.projectDirectoryForDepartment(
+      department.id,
       directoryName,
     );
     if (await exists(projectDirectory))
       throw new ConflictException("The project directory already exists");
-    try {
-      await fs.mkdir(projectDirectory);
-    } catch (error) {
-      throw filesystemError(error, "Unable to create the project directory");
+    let templateVersion: { id: string } | null = null;
+    if (dto.configurationTemplateId) {
+      templateVersion =
+        await this.prisma.configurationTemplateVersion.findFirst({
+          where: {
+            templateId: dto.configurationTemplateId,
+            status: ConfigurationTemplateVersionStatus.PUBLISHED,
+            template: {
+              workspaceId: actor.workspaceId,
+              departmentId: department.id,
+              status: "ACTIVE",
+            },
+          },
+          select: { id: true },
+          orderBy: { version: "desc" },
+        });
+      if (!templateVersion)
+        throw new ConflictException(
+          "The selected department has no matching published template",
+        );
     }
-
-    try {
-      return await this.prisma.project.create({
+    if (templateVersion) {
+      const project = await this.prisma.project.create({
         data: {
           workspaceId: actor.workspaceId,
+          departmentId: department.id,
           creatorId: actor.id,
           name: dto.name.trim(),
           directoryName,
           description: dto.description?.trim() || null,
           readAccessEnabled: dto.readAccessEnabled ?? false,
+          status: ProjectStatus.INITIALIZING,
+          appliedTemplateVersionId: templateVersion.id,
           members: { create: { userId: actor.id } },
         },
         include: {
           creator: { select: { id: true, displayName: true } },
+          department: { select: { id: true, name: true, slug: true } },
           members: {
             include: {
               user: { select: { id: true, displayName: true, role: true } },
@@ -127,11 +159,50 @@ export class ProjectsService {
           },
         },
       });
-    } catch (error) {
-      // The directory is deliberately kept for an operator to inspect. Removing it
-      // after a failed database write could erase files concurrently added by a user.
-      throw error;
+      try {
+        const initialization = await this.initializations.enqueue(
+          project.id,
+          templateVersion.id,
+        );
+        return { ...project, initializations: [initialization] };
+      } catch (error) {
+        await this.prisma.project.update({
+          where: { id: project.id },
+          data: { status: ProjectStatus.FAILED },
+        });
+        throw error;
+      }
     }
+    try {
+      await fs.mkdir(projectDirectory);
+    } catch (error) {
+      throw filesystemError(error, "Unable to create the project directory");
+    }
+
+    // If the database write fails, deliberately keep the empty directory for an
+    // operator to inspect; deleting it could race with a concurrent writer.
+    return this.prisma.project.create({
+      data: {
+        workspaceId: actor.workspaceId,
+        departmentId: department.id,
+        creatorId: actor.id,
+        name: dto.name.trim(),
+        directoryName,
+        description: dto.description?.trim() || null,
+        readAccessEnabled: dto.readAccessEnabled ?? false,
+        status: ProjectStatus.READY,
+        members: { create: { userId: actor.id } },
+      },
+      include: {
+        creator: { select: { id: true, displayName: true } },
+        department: { select: { id: true, name: true, slug: true } },
+        members: {
+          include: {
+            user: { select: { id: true, displayName: true, role: true } },
+          },
+        },
+      },
+    });
   }
 
   async get(actor: AuthenticatedUser, projectId: string) {
@@ -140,6 +211,8 @@ export class ProjectsService {
       where: { id: projectId },
       include: {
         creator: { select: { id: true, displayName: true } },
+        department: { select: { id: true, name: true, slug: true } },
+        initializations: { orderBy: { attempt: "desc" }, take: 1 },
         members: {
           include: {
             user: { select: { id: true, displayName: true, role: true } },
@@ -213,6 +286,7 @@ export class ProjectsService {
     relativePath: string,
   ) {
     const project = await this.assertSensitiveAccess(actor, projectId);
+    this.assertProjectReady(project);
     const target = await this.resolveProjectPath(project, relativePath, false);
     if (await exists(target))
       throw new ConflictException(
@@ -232,6 +306,7 @@ export class ProjectsService {
     relativePath?: string,
   ) {
     const { project } = await this.assertReadAccess(actor, projectId);
+    this.assertProjectReady(project);
     const target = await this.resolveProjectPath(
       project,
       relativePath ?? "",
@@ -275,6 +350,7 @@ export class ProjectsService {
     file: UploadedProjectFile,
   ) {
     const project = await this.assertSensitiveAccess(actor, projectId);
+    this.assertProjectReady(project);
     const directory = await this.resolveProjectPath(
       project,
       relativePath ?? "",
@@ -310,6 +386,7 @@ export class ProjectsService {
     destinationPath: string,
   ) {
     const project = await this.assertSensitiveAccess(actor, projectId);
+    this.assertProjectReady(project);
     const sourceRelative = normalizeRelativePath(sourcePath, false);
     const destinationRelative = normalizeRelativePath(destinationPath, false);
     if (
@@ -358,6 +435,7 @@ export class ProjectsService {
     relativePath: string,
   ) {
     const { project } = await this.assertReadAccess(actor, projectId);
+    this.assertProjectReady(project);
     const target = await this.resolveProjectPath(project, relativePath, false);
     const stat = await safeLstat(target, "File not found");
     if (!stat.isFile())
@@ -405,56 +483,35 @@ export class ProjectsService {
     return project;
   }
 
-  private resolveProjectsHome(configuredPath: string | null) {
-    const defaultPath =
-      process.env.PROBOXAI_PROJECTS_HOME ?? this.allowedWorkspaceRoot();
-    return this.validateProjectsHome(configuredPath ?? defaultPath);
-  }
-
-  private validateProjectsHome(requestedPath: string) {
-    if (!path.isAbsolute(requestedPath))
-      throw new BadRequestException("Projects home must be an absolute path");
-    const resolved = path.resolve(requestedPath);
-    const allowedRoot = this.allowedWorkspaceRoot();
-    if (!isWithin(allowedRoot, resolved))
-      throw new BadRequestException(
-        `Projects home must be inside ${allowedRoot}`,
+  private assertProjectReady(project: { status: ProjectStatus }) {
+    if (project.status !== ProjectStatus.READY)
+      throw new ConflictException(
+        `Project files are unavailable while project status is ${project.status}`,
       );
-    return resolved;
   }
 
-  private allowedWorkspaceRoot() {
-    const configured =
-      process.env.PROBOXAI_ALLOWED_WORKSPACE_ROOT ?? "/opt/apps";
-    if (!path.isAbsolute(configured))
-      throw new Error(
-        "PROBOXAI_ALLOWED_WORKSPACE_ROOT must be an absolute path",
-      );
-    return path.resolve(configured);
-  }
-
-  private async projectDirectoryForWorkspace(
-    workspaceId: string,
+  private async projectDirectoryForDepartment(
+    departmentId: string,
     directoryName: string,
   ) {
-    const workspace = await this.prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { projectsHomePath: true },
+    const department = await this.prisma.department.findUnique({
+      where: { id: departmentId },
+      select: { homePath: true },
     });
-    if (!workspace) throw new NotFoundException("Workspace not found");
-    const home = this.resolveProjectsHome(workspace.projectsHomePath);
+    if (!department) throw new NotFoundException("Department not found");
+    const home = this.pathPolicy.validateDepartmentHome(department.homePath);
     await this.ensureHomeDirectory(home);
     return path.join(home, directoryName);
   }
 
   private async resolveProjectPath(
-    project: { workspaceId: string; directoryName: string },
+    project: { departmentId: string; directoryName: string },
     relativePath: string,
     allowRoot: boolean,
   ) {
     const normalized = normalizeRelativePath(relativePath, allowRoot);
-    const projectDirectory = await this.projectDirectoryForWorkspace(
-      project.workspaceId,
+    const projectDirectory = await this.projectDirectoryForDepartment(
+      project.departmentId,
       project.directoryName,
     );
     const target = path.resolve(
@@ -468,22 +525,18 @@ export class ProjectsService {
   }
 
   private async assertProjectPathSafe(
-    project: { workspaceId: string; directoryName: string },
+    project: { departmentId: string; directoryName: string },
     target: string,
   ) {
-    const projectDirectory = await this.projectDirectoryForWorkspace(
-      project.workspaceId,
+    const projectDirectory = await this.projectDirectoryForDepartment(
+      project.departmentId,
       project.directoryName,
     );
     await assertNoSymlinks(projectDirectory, target);
   }
 
   private async ensureHomeDirectory(home: string) {
-    const allowedRoot = this.allowedWorkspaceRoot();
-    await fs.mkdir(allowedRoot, { recursive: true });
-    await assertNoSymlinks(allowedRoot, allowedRoot);
-    await fs.mkdir(home, { recursive: true });
-    await assertNoSymlinks(allowedRoot, home);
+    await this.pathPolicy.provisionDepartmentHome(home);
   }
 }
 

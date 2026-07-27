@@ -3,7 +3,6 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { UserRole } from "@prisma/client";
 import { parsePhoneNumber } from "libphonenumber-js";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateUserDto } from "./accounts.dto";

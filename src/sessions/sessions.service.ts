@@ -7,7 +7,7 @@ import { Prisma, SessionStatus, TaskStatus, TurnStatus } from "@prisma/client";
 import { ProboxAiRunner, RunnerEvent } from "./proboxai-runner.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SessionEventsService } from "./session-events.service";
-import { CreateSessionDto, CreateTurnDto } from "./dto";
+import { CreateSessionDto } from "./dto";
 
 @Injectable()
 export class SessionsService {

@@ -6,8 +6,9 @@ import {
 } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, appendFile } from "node:fs/promises";
-import { isAbsolute, resolve, relative } from "node:path";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,6 +32,8 @@ export class ProboxAiRunner {
     string,
     ChildProcessWithoutNullStreams
   >();
+
+  constructor(private readonly paths: WorkspacePathPolicy) {}
 
   async start(
     options: RunnerOptions,
@@ -168,13 +171,7 @@ export class ProboxAiRunner {
   }
 
   private assertSafeCwd(cwd: string) {
-    const allowed = resolve(
-      process.env.PROBOXAI_ALLOWED_WORKSPACE_ROOT ?? "/opt/apps",
-    );
-    const actual = resolve(cwd);
-    const rel = relative(allowed, actual);
-    if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return;
-    throw new Error(`Workspace must be inside ${allowed}`);
+    this.paths.assertAllowedPath(cwd);
   }
 
   private safeEnvironment(): NodeJS.ProcessEnv {

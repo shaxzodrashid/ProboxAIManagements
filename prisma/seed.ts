@@ -11,6 +11,19 @@ async function main() {
     update: {},
     create: { slug: "default" },
   });
+  await prisma.department.upsert({
+    where: {
+      workspaceId_slug: { workspaceId: workspace.id, slug: "it" },
+    },
+    update: {},
+    create: {
+      workspaceId: workspace.id,
+      name: "IT",
+      slug: "it",
+      homePath: process.env.PROBOXAI_PROJECTS_HOME ?? "/opt/apps",
+      isDefault: true,
+    },
+  });
   await prisma.user.upsert({
     where: {
       workspaceId_phoneNumber: {

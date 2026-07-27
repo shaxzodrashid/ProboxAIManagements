@@ -43,6 +43,26 @@ export class CreateProjectDto {
   @IsOptional()
   @IsBoolean()
   readAccessEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "Department that owns the project home. The workspace default is used when omitted.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  departmentId?: string;
+
+  @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "Optional published configuration template from the selected department.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  configurationTemplateId?: string;
 }
 
 export class UpdateProjectDto {
@@ -152,11 +172,16 @@ export class ProjectMemberCountDto {
 export class ProjectResponseDto {
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ format: "uuid" }) workspaceId!: string;
+  @ApiProperty({ format: "uuid" }) departmentId!: string;
   @ApiProperty({ example: "Customer Portal" }) name!: string;
   @ApiProperty({ example: "Customer Portal" }) directoryName!: string;
   @ApiProperty({ nullable: true, example: "Customer-facing web application." })
   description!: string | null;
   @ApiProperty({ example: false }) readAccessEnabled!: boolean;
+  @ApiProperty({ enum: ["INITIALIZING", "READY", "FAILED"] })
+  status!: "INITIALIZING" | "READY" | "FAILED";
+  @ApiProperty({ nullable: true, format: "uuid" })
+  appliedTemplateVersionId!: string | null;
   @ApiProperty({ format: "uuid" }) creatorId!: string;
   @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
   @ApiProperty({ type: String, format: "date-time" }) updatedAt!: string;
@@ -165,6 +190,18 @@ export class ProjectResponseDto {
   _count?: ProjectMemberCountDto;
   @ApiPropertyOptional({ type: ProjectMemberResponseDto, isArray: true })
   members?: ProjectMemberResponseDto[];
+  @ApiPropertyOptional({
+    type: "object",
+    additionalProperties: true,
+    description: "Owning department metadata.",
+  })
+  department?: { id: string; name: string; slug: string };
+  @ApiPropertyOptional({
+    type: "object",
+    additionalProperties: true,
+    description: "Latest initialization attempt, when a template was selected.",
+  })
+  initializations?: Record<string, unknown>[];
 }
 
 export class ProjectsHomeResponseDto {

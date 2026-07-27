@@ -25,7 +25,9 @@ async function bootstrap() {
         "",
         "Authenticate with the Telegram-delivered OTP flow, then send `Authorization: Bearer <accessToken>` to protected endpoints. Access tokens expire according to `JWT_ACCESS_TTL_SECONDS` (15 minutes by default).",
         "",
-        "All project paths are relative to a project unless an endpoint explicitly says otherwise. The API rejects traversal paths and symbolic links. Session events are delivered as server-sent events (SSE).",
+        "Projects live under allowlisted department homes. Missing registered homes can be provisioned by the service. All project paths are relative to a project unless an endpoint explicitly says otherwise; traversal paths and symbolic links are rejected.",
+        "",
+        "Published configuration-template versions are immutable. Template files are stored privately in MinIO, and project initialization is persisted, staged, observable over REST or SSE, cancellable, and retryable.",
       ].join("\n"),
     )
     .setVersion("v1")
@@ -64,6 +66,18 @@ async function bootstrap() {
     .addTag(
       "Projects",
       "Workspace project metadata and safe filesystem operations.",
+    )
+    .addTag(
+      "Departments",
+      "Independent project homes and department lifecycle management.",
+    )
+    .addTag(
+      "Configuration Templates",
+      "Versioned folders, MinIO files, and staged terminal commands.",
+    )
+    .addTag(
+      "Project Initializations",
+      "Persisted template materialization jobs, steps, logs, and event streams.",
     )
     .addTag("Settings", "Administrator-only workspace configuration.")
     .build();
