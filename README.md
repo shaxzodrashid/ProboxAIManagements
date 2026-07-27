@@ -17,6 +17,18 @@ final binary Git diff and stderr stream.
 
 ## Local setup
 
+Install dependencies with `pnpm install`. The install runs Husky's `prepare`
+script and configures the repository's Git hooks automatically.
+
+Every commit must pass the following checks:
+
+- ESLint and Prettier checks for staged files.
+- A full TypeScript typecheck, including tests.
+- The complete Jest test suite.
+
+Run the same gate manually with `pnpm precommit`. Fix reported issues and stage
+the corrected files before committing again.
+
 1. Install the local `proboxai` command with `pnpm link --global`, then copy
    `.env.example` to `.env` and set a strong `JWT_SECRET`, Telegram values,
    and the VPS-specific `PROBOXAI_*` paths.
