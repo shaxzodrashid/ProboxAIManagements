@@ -147,6 +147,8 @@ PROBOXAI_TEMPLATE_SHELL=/bin/bash
 PROBOXAI_TEMPLATE_COMMAND_OUTPUT_MAX_BYTES=1048576
 PROBOXAI_UPLOAD_TEMP_DIR=/var/lib/proboxai/template-uploads
 PROBOXAI_RUNNER_TOKEN=<runner-token-if-required-by-the-cli>
+# Required only when managed sessions use an Anthropic model.
+ANTHROPIC_API_KEY=<anthropic-api-key>
 BOOTSTRAP_ADMIN_PHONE=+998000000000
 BOOTSTRAP_ADMIN_NAME=ProboxAI Administrator
 ```
@@ -238,8 +240,12 @@ They validate the requested working directory against
 with `shell: false`. Configuration-template commands are a separate,
 administrator-only automation facility. Structured commands also use
 `shell: false`; shell commands use the fixed server-configured Bash path. Both
-run with a sanitized environment that excludes database, JWT, Telegram, runner,
-and MinIO secrets.
+run with a sanitized environment that excludes database, JWT, Telegram, and
+MinIO secrets. Managed coding sessions receive only their runtime variables,
+the optional runner token, and `ANTHROPIC_API_KEY` when configured so an
+explicitly selected Anthropic model can authenticate. Do not add other provider
+or plugin credentials to this allowlist without a demonstrated managed-session
+requirement and a separate review.
 
 ## Projects
 
