@@ -175,9 +175,22 @@ export class ProboxAiRunner {
   }
 
   private safeEnvironment(): NodeJS.ProcessEnv {
-    const { NODE_ENV, PATH, HOME, USERPROFILE, PROBOXAI_RUNNER_TOKEN } =
-      process.env;
-    return { NODE_ENV, PATH, HOME, USERPROFILE, PROBOXAI_RUNNER_TOKEN };
+    const {
+      NODE_ENV,
+      PATH,
+      HOME,
+      USERPROFILE,
+      PROBOXAI_RUNNER_TOKEN,
+      ANTHROPIC_API_KEY,
+    } = process.env;
+    return {
+      NODE_ENV,
+      PATH,
+      HOME,
+      USERPROFILE,
+      PROBOXAI_RUNNER_TOKEN,
+      ANTHROPIC_API_KEY,
+    };
   }
 
   static hash(raw: string, previousHash?: string) {
