@@ -79,6 +79,31 @@ enum ProjectStatus {
   INITIALIZING
   READY
   FAILED
+  DELETING
+}
+
+enum ProjectFileTrashStatus {
+  ACTIVE
+  RESTORED
+  PURGED
+  PURGE_FAILED
+}
+
+enum ProjectFileDeletionConfirmationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+}
+
+enum ProjectDeletionRequestStatus {
+  PENDING_OWNER_APPROVAL
+  AWAITING_ACTIVE_SESSIONS
+  AWAITING_TOKEN
+  DELETING
+  COMPLETED
+  CANCELLED
+  FAILED
 }
 
 enum ConfigurationTemplateStatus {
@@ -139,32 +164,37 @@ model Workspace {
 }
 
 model User {
-  id                        String                         @id @default(uuid())
+  id                        String                            @id @default(uuid())
   workspaceId               String
-  workspace                 Workspace                      @relation(fields: [workspaceId], references: [id])
-  phoneNumber               String                         @unique
+  workspace                 Workspace                         @relation(fields: [workspaceId], references: [id])
+  phoneNumber               String                            @unique
   fullName                  String
-  username                  String?                        @unique
+  username                  String?                           @unique
   passwordHash              String?
   role                      UserRole
-  status                    UserStatus                     @default(PENDING)
-  telegramUserId            BigInt?                        @unique
-  telegramChatId            BigInt?                        @unique
+  status                    UserStatus                        @default(PENDING)
+  telegramUserId            BigInt?                           @unique
+  telegramChatId            BigInt?                           @unique
   verifiedAt                DateTime?
-  createdAt                 DateTime                       @default(now())
-  updatedAt                 DateTime                       @updatedAt
-  tasksCreated              Task[]                         @relation("taskCreator")
-  tasksAssigned             Task[]                         @relation("taskManager")
-  projectsCreated           Project[]                      @relation("projectCreator")
+  createdAt                 DateTime                          @default(now())
+  updatedAt                 DateTime                          @updatedAt
+  tasksCreated              Task[]                            @relation("taskCreator")
+  tasksAssigned             Task[]                            @relation("taskManager")
+  projectsCreated           Project[]                         @relation("projectCreator")
   projectMemberships        ProjectMember[]
-  templatesCreated          ConfigurationTemplate[]        @relation("templateCreator")
-  templateVersionsCreated   ConfigurationTemplateVersion[] @relation("templateVersionCreator")
-  templateVersionsPublished ConfigurationTemplateVersion[] @relation("templateVersionPublisher")
-  sessionsCreated           ProboxAiSession[]              @relation("sessionCreator")
-  approvals                 ApprovalRequest[]              @relation("approvalDecider")
+  templatesCreated          ConfigurationTemplate[]           @relation("templateCreator")
+  templateVersionsCreated   ConfigurationTemplateVersion[]    @relation("templateVersionCreator")
+  templateVersionsPublished ConfigurationTemplateVersion[]    @relation("templateVersionPublisher")
+  sessionsCreated           ProboxAiSession[]                 @relation("sessionCreator")
+  approvals                 ApprovalRequest[]                 @relation("approvalDecider")
   otps                      AuthOtp[]
   tokens                    SessionToken[]
   notifications             NotificationDelivery[]
+  protectedFileTypesCreated ProjectProtectedFileType[]        @relation("protectedFileTypeCreator")
+  fileTrashCreated          ProjectFileTrashItem[]            @relation("fileTrashCreator")
+  fileDeletionRequests      ProjectFileDeletionConfirmation[] @relation("fileDeletionRequester")
+  projectDeletionRequests   ProjectDeletionRequest[]          @relation("projectDeletionRequester")
+  projectDeletionAudits     ProjectDeletionAudit[]            @relation("projectDeletionOwner")
 }
 
 model Department {
@@ -234,28 +264,127 @@ model Task {
 }
 
 model Project {
-  id                       String                        @id @default(uuid())
-  workspaceId              String
-  workspace                Workspace                     @relation(fields: [workspaceId], references: [id])
-  departmentId             String
-  department               Department                    @relation(fields: [departmentId], references: [id])
-  name                     String
-  directoryName            String
-  description              String?
-  readAccessEnabled        Boolean                       @default(false)
-  status                   ProjectStatus                 @default(READY)
-  appliedTemplateVersionId String?
-  appliedTemplateVersion   ConfigurationTemplateVersion? @relation(fields: [appliedTemplateVersionId], references: [id])
-  creatorId                String
-  creator                  User                          @relation("projectCreator", fields: [creatorId], references: [id])
-  members                  ProjectMember[]
-  initializations          ProjectInitialization[]
-  createdAt                DateTime                      @default(now())
-  updatedAt                DateTime                      @updatedAt
+  id                        String                            @id @default(uuid())
+  workspaceId               String
+  workspace                 Workspace                         @relation(fields: [workspaceId], references: [id])
+  departmentId              String
+  department                Department                        @relation(fields: [departmentId], references: [id])
+  name                      String
+  directoryName             String
+  description               String?
+  readAccessEnabled         Boolean                           @default(false)
+  status                    ProjectStatus                     @default(READY)
+  appliedTemplateVersionId  String?
+  appliedTemplateVersion    ConfigurationTemplateVersion?     @relation(fields: [appliedTemplateVersionId], references: [id])
+  creatorId                 String
+  creator                   User                              @relation("projectCreator", fields: [creatorId], references: [id])
+  members                   ProjectMember[]
+  initializations           ProjectInitialization[]
+  protectedFileTypes        ProjectProtectedFileType[]
+  trashItems                ProjectFileTrashItem[]
+  fileDeletionConfirmations ProjectFileDeletionConfirmation[]
+  deletionRequests          ProjectDeletionRequest[]
+  createdAt                 DateTime                          @default(now())
+  updatedAt                 DateTime                          @updatedAt
 
   @@unique([departmentId, directoryName])
   @@index([workspaceId, updatedAt])
   @@index([departmentId, status, updatedAt])
+}
+
+model ProjectProtectedFileType {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  extension   String
+  createdById String
+  createdBy   User     @relation("protectedFileTypeCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([projectId, extension])
+  @@index([projectId, createdAt])
+}
+
+model ProjectFileTrashItem {
+  id             String                 @id @default(uuid())
+  projectId      String
+  project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  originalPath   String
+  trashPath      String
+  isDirectory    Boolean
+  deletedById    String
+  deletedBy      User                   @relation("fileTrashCreator", fields: [deletedById], references: [id])
+  status         ProjectFileTrashStatus @default(ACTIVE)
+  expiresAt      DateTime
+  leaseOwner     String?
+  leaseExpiresAt DateTime?
+  lastError      String?
+  createdAt      DateTime               @default(now())
+  restoredAt     DateTime?
+  purgedAt       DateTime?
+
+  @@unique([projectId, trashPath])
+  @@index([status, expiresAt])
+}
+
+model ProjectFileDeletionConfirmation {
+  id            String                                @id @default(uuid())
+  projectId     String
+  project       Project                               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  targetPath    String
+  fingerprint   String
+  requestedById String
+  requestedBy   User                                  @relation("fileDeletionRequester", fields: [requestedById], references: [id])
+  status        ProjectFileDeletionConfirmationStatus @default(PENDING)
+  expiresAt     DateTime
+  createdAt     DateTime                              @default(now())
+  confirmedAt   DateTime?
+
+  @@index([projectId, status, expiresAt])
+}
+
+model ProjectDeletionRequest {
+  id                  String                       @id @default(uuid())
+  projectId           String
+  project             Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  requestedById       String
+  requestedBy         User                         @relation("projectDeletionRequester", fields: [requestedById], references: [id])
+  ownerId             String
+  status              ProjectDeletionRequestStatus @default(PENDING_OWNER_APPROVAL)
+  tokenHash           String?
+  tokenExpiresAt      DateTime?
+  tokenAttempts       Int                          @default(0)
+  activeSessionAction String?
+  requestedAt         DateTime                     @default(now())
+  approvedAt          DateTime?
+  completedAt         DateTime?
+  cancelledAt         DateTime?
+  failure             String?
+
+  @@index([projectId, status, requestedAt])
+  @@index([ownerId, status, requestedAt])
+}
+
+model ProjectDeletionAudit {
+  id             String    @id @default(uuid())
+  projectId      String
+  projectName    String
+  directoryName  String
+  departmentId   String
+  ownerId        String
+  owner          User      @relation("projectDeletionOwner", fields: [ownerId], references: [id])
+  requestedById  String
+  requestId      String
+  snapshot       Json
+  status         String
+  quarantinePath String?
+  error          String?
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@index([projectId, createdAt])
+  @@index([status, createdAt])
 }
 
 model ProjectMember {

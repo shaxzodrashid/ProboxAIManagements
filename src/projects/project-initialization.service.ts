@@ -373,8 +373,14 @@ export class ProjectInitializationService
       stagingRoot,
       `${initialization.project.id}-attempt-${initialization.attempt}`,
     );
-    if (await exists(finalPath))
-      throw new ConflictException("Project directory already exists");
+    if (await exists(finalPath)) {
+      const finalStat = await fs.lstat(finalPath);
+      if (finalStat.isSymbolicLink() || !finalStat.isDirectory())
+        throw new ConflictException("Project directory already exists");
+      if ((await fs.readdir(finalPath)).length > 0)
+        throw new ConflictException("Project directory already exists");
+      await fs.rmdir(finalPath);
+    }
     if (await exists(stagingPath))
       throw new ConflictException("Initialization staging path already exists");
     await fs.mkdir(stagingRoot, { recursive: true, mode: 0o750 });

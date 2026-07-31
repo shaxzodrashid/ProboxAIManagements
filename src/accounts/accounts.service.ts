@@ -90,6 +90,13 @@ export class AccountsService {
       where: { id, workspaceId },
     });
     if (!user) throw new NotFoundException("User not found");
+    const ownedProjects = await this.prisma.project.count({
+      where: { creatorId: id },
+    });
+    if (ownedProjects)
+      throw new ConflictException(
+        "This user owns project records and cannot be banned or deleted until they are removed",
+      );
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.user.update({
         where: { id },

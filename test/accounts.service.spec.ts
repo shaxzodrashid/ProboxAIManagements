@@ -70,6 +70,7 @@ describe("AccountsService", () => {
       sessionToken: {
         updateMany: jest.fn().mockResolvedValue({ count: 2 }),
       },
+      project: { count: jest.fn().mockResolvedValue(0) },
     };
     prisma.$transaction = jest.fn((callback: any) => callback(prisma));
     const service = new AccountsService(prisma as PrismaService);
@@ -87,5 +88,16 @@ describe("AccountsService", () => {
       where: { userId: "user-2", revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     });
+  });
+
+  it("does not deactivate an account that remains a project owner", async () => {
+    const prisma: any = {
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "owner-1" }) },
+      project: { count: jest.fn().mockResolvedValue(1) },
+    };
+    const service = new AccountsService(prisma as PrismaService);
+    await expect(
+      service.delete("workspace-1", "admin-1", "owner-1"),
+    ).rejects.toThrow("owns project records");
   });
 });

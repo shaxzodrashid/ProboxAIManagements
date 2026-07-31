@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsOptional,
   IsString,
   Matches,
@@ -9,6 +10,10 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 
 const PROJECT_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,119}$/;
+
+export const EXISTING_PROJECT_DIRECTORY_ACTIONS = ["KEEP", "CLEAR"] as const;
+export type ExistingProjectDirectoryAction =
+  (typeof EXISTING_PROJECT_DIRECTORY_ACTIONS)[number];
 
 export class CreateProjectDto {
   @ApiProperty({
@@ -63,6 +68,15 @@ export class CreateProjectDto {
   @IsString()
   @MaxLength(128)
   configurationTemplateId?: string;
+
+  @ApiPropertyOptional({
+    enum: EXISTING_PROJECT_DIRECTORY_ACTIONS,
+    description:
+      "Required only after the API reports that the project directory already exists. KEEP creates the project using the existing files. CLEAR permanently removes the directory contents before creating the project, while preserving the directory itself. KEEP cannot be combined with configurationTemplateId.",
+  })
+  @IsOptional()
+  @IsIn(EXISTING_PROJECT_DIRECTORY_ACTIONS)
+  existingDirectoryAction?: ExistingProjectDirectoryAction;
 }
 
 export class UpdateProjectDto {
@@ -135,6 +149,40 @@ export class MoveProjectFileDto {
   @IsString()
   @MaxLength(1024)
   destinationPath!: string;
+}
+
+export class ProtectedFileTypeDto {
+  @ApiProperty({
+    example: ".env",
+    description:
+      "Case-insensitive file extension protected by a second deletion confirmation.",
+  })
+  @IsString()
+  @MaxLength(64)
+  extension!: string;
+}
+
+export class DeleteProjectFileDto {
+  @ApiProperty({ example: "secrets/.env", maxLength: 1024 })
+  @IsString()
+  @MaxLength(1024)
+  path!: string;
+}
+
+export class ActiveSessionDecisionDto {
+  @ApiProperty({ enum: ["WAIT", "INTERRUPT"], example: "WAIT" })
+  @IsString()
+  @Matches(/^(WAIT|INTERRUPT)$/)
+  action!: "WAIT" | "INTERRUPT";
+}
+
+export class ConfirmProjectDeletionDto {
+  @ApiProperty({
+    description: "One-time token delivered only to the owner's Telegram chat.",
+  })
+  @IsString()
+  @MaxLength(128)
+  token!: string;
 }
 
 export class SetProjectsHomeDto {

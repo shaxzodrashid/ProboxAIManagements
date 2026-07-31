@@ -9,5 +9,6 @@ import { ProboxAiRunner } from "./proboxai-runner.service";
   imports: [AuthModule],
   controllers: [SessionsController],
   providers: [SessionsService, SessionEventsService, ProboxAiRunner],
+  exports: [ProboxAiRunner],
 })
 export class SessionsModule {}

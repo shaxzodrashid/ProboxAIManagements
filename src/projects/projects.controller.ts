@@ -44,6 +44,10 @@ import {
   UploadedProjectFileResponseDto,
   UpdateProjectDto,
   UploadProjectFileDto,
+  ProtectedFileTypeDto,
+  DeleteProjectFileDto,
+  ActiveSessionDecisionDto,
+  ConfirmProjectDeletionDto,
 } from "./projects.dto";
 import { ProjectsService } from "./projects.service";
 import {
@@ -81,7 +85,7 @@ export class ProjectsController {
   @ApiOperation({
     summary: "Create a project",
     description:
-      "Administrator or manager only. Selects the workspace default department when departmentId is omitted. Empty projects become ready immediately; selecting a published department template creates a persisted asynchronous initialization job. The creator is added as the first member.",
+      "Administrator or manager only. Selects the workspace default department when departmentId is omitted. If the target directory already exists, the first request returns a conflict asking the caller to explicitly resubmit with existingDirectoryAction KEEP or CLEAR. Empty projects become ready immediately; selecting a published department template creates a persisted asynchronous initialization job. The creator is added as the first member.",
   })
   @ApiCreatedResponse({
     description: "Project and its backing directory created.",
@@ -303,6 +307,153 @@ export class ProjectsController {
       dto.sourcePath,
       dto.destinationPath,
     );
+  }
+
+  @Get(":id/protected-file-types")
+  @ApiOperation({ summary: "List protected file extensions" })
+  listProtectedFileTypes(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+  ) {
+    return this.projects.listProtectedFileTypes(user, id);
+  }
+
+  @Post(":id/protected-file-types")
+  @ApiOperation({ summary: "Append a protected file extension" })
+  addProtectedFileType(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body() dto: ProtectedFileTypeDto,
+  ) {
+    return this.projects.addProtectedFileType(user, id, dto.extension);
+  }
+
+  @Put(":id/protected-file-types/:typeId")
+  @ApiOperation({ summary: "Update a protected file extension (owner only)" })
+  updateProtectedFileType(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("typeId") typeId: string,
+    @Body() dto: ProtectedFileTypeDto,
+  ) {
+    return this.projects.updateProtectedFileType(
+      user,
+      id,
+      typeId,
+      dto.extension,
+    );
+  }
+
+  @Delete(":id/protected-file-types/:typeId")
+  @ApiOperation({ summary: "Remove a protected file extension (owner only)" })
+  removeProtectedFileType(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("typeId") typeId: string,
+  ) {
+    return this.projects.removeProtectedFileType(user, id, typeId);
+  }
+
+  @Post(":id/files/delete")
+  @ApiOperation({
+    summary: "Move a file or folder to the recoverable project trash",
+  })
+  deleteFile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body() dto: DeleteProjectFileDto,
+  ) {
+    return this.projects.deleteFile(user, id, dto.path);
+  }
+
+  @Post(":id/files/delete-confirmations/:confirmationId/confirm")
+  @ApiOperation({
+    summary: "Confirm deletion of a protected project file or folder",
+  })
+  confirmFileDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("confirmationId") confirmationId: string,
+  ) {
+    return this.projects.confirmFileDeletion(user, id, confirmationId);
+  }
+
+  @Get(":id/trash")
+  @ApiOperation({ summary: "List recoverable project trash items" })
+  listTrash(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.projects.listTrash(user, id);
+  }
+
+  @Post(":id/trash/:trashId/restore")
+  @ApiOperation({ summary: "Restore a recoverable project trash item" })
+  restoreTrash(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("trashId") trashId: string,
+  ) {
+    return this.projects.restoreTrash(user, id, trashId);
+  }
+
+  @Post(":id/deletion-requests")
+  @ApiOperation({ summary: "Request permanent project deletion" })
+  requestDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+  ) {
+    return this.projects.requestProjectDeletion(user, id);
+  }
+
+  @Post(":id/deletion-requests/:requestId/approve")
+  @ApiOperation({ summary: "Owner approval and deletion-token preflight" })
+  approveDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("requestId") requestId: string,
+  ) {
+    return this.projects.approveProjectDeletion(user, id, requestId);
+  }
+
+  @Post(":id/deletion-requests/:requestId/active-sessions")
+  @ApiOperation({
+    summary:
+      "Owner chooses whether live project sessions should wait or be interrupted",
+  })
+  resolveDeletionSessions(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("requestId") requestId: string,
+    @Body() dto: ActiveSessionDecisionDto,
+  ) {
+    return this.projects.resolveProjectDeletionSessions(
+      user,
+      id,
+      requestId,
+      dto.action,
+    );
+  }
+
+  @Post(":id/deletion-requests/:requestId/cancel")
+  @ApiOperation({ summary: "Cancel an outstanding project deletion request" })
+  cancelDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("requestId") requestId: string,
+  ) {
+    return this.projects.cancelProjectDeletion(user, id, requestId);
+  }
+
+  @Post(":id/deletion-requests/:requestId/confirm")
+  @ApiOperation({
+    summary:
+      "Submit the owner Telegram token and permanently delete the project",
+  })
+  confirmDeletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("requestId") requestId: string,
+    @Body() dto: ConfirmProjectDeletionDto,
+  ) {
+    return this.projects.confirmProjectDeletion(user, id, requestId, dto.token);
   }
 
   @Get(":id/files/download")

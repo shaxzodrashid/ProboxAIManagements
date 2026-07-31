@@ -270,6 +270,13 @@ Creating a project through `POST /api/v1/projects` accepts `departmentId` and
 an optional `configurationTemplateId`. Omitting `departmentId` uses the default
 IT department. Empty projects are ready immediately. Templated projects return
 in `INITIALIZING` status and expose their latest persisted initialization attempt.
+If the target directory already exists, the first create request returns `409`
+with `code: "PROJECT_DIRECTORY_EXISTS"` and the available confirmation values.
+Resubmit the same request with `existingDirectoryAction: "KEEP"` to register the
+existing directory without changing its contents, or `"CLEAR"` to permanently
+remove all of its contents before creation while retaining the directory. `KEEP`
+is intentionally unavailable with a configuration template because templates
+are atomically materialized into a fresh directory; choose `CLEAR` to apply one.
 A project member or administrator can manage its settings, members, folders,
 uploads, moves, initialization cancellation, and clean retries.
 Other workspace accounts can list and download files only when that project's
@@ -284,6 +291,28 @@ Available project operations are `GET/POST /projects`, `GET/PUT /projects/:id`,
 All filesystem paths are project-relative. Traversal paths and symbolic links
 are rejected, uploads cannot overwrite an existing file, and the upload limit
 defaults to 100 MiB (configurable through `PROBOXAI_PROJECT_UPLOAD_MAX_BYTES`).
+
+### Secure deletion
+
+Each project can maintain a case-insensitive list of protected file extensions
+through `/projects/:id/protected-file-types`. Members, the owner, and workspace
+administrators may append an extension; only the immutable project owner (the
+project creator) may change or remove one. Deleting an unprotected file or
+folder moves it into the private project trash for 30 days. A protected file,
+or a folder containing one, first creates a five-minute confirmation request;
+the separate confirmation endpoint rechecks the target before moving it to
+trash. Trash is intentionally hidden from normal file APIs and can be listed
+and restored by members or administrators.
+
+Permanent project deletion is intentionally owner-controlled. A member may
+create a deletion request, but the owner must approve it. The service checks
+initialization and active sessions whose `cwd` is inside the project; the owner
+can wait or request an interruption. Once safe, the owner receives a one-time
+Telegram token valid for ten minutes and with five attempts. Submitting that
+token permanently removes the project directory and its trash. Session records,
+events, and artifacts are preserved as historical data because they are not
+deleted with the project. Project deletion audit records remain available to
+operators while the private quarantine purge is retried.
 
 ### Privileged creation of new `/opt` roots
 

@@ -7,9 +7,15 @@ import { ConfigurationTemplatesModule } from "../configuration-templates/configu
 import { ProjectInitializationService } from "./project-initialization.service";
 import { ProjectInitializationEventsService } from "./project-initialization-events.service";
 import { ProjectInitializationsController } from "./project-initializations.controller";
+import { SessionsModule } from "../sessions/sessions.module";
 
 @Module({
-  imports: [AuthModule, DepartmentsModule, ConfigurationTemplatesModule],
+  imports: [
+    AuthModule,
+    DepartmentsModule,
+    ConfigurationTemplatesModule,
+    SessionsModule,
+  ],
   controllers: [
     ProjectsController,
     SettingsController,
