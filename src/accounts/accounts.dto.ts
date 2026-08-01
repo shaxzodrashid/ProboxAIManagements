@@ -1,12 +1,17 @@
 import {
-  IsEnum,
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
+  IsIn,
   IsNotEmpty,
+  IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   MinLength,
 } from "class-validator";
-import { UserRole, UserStatus } from "@prisma/client";
+import { UserStatus } from "@prisma/client";
 import { Transform } from "class-transformer";
 import { ApiProperty } from "@nestjs/swagger";
 export class CreateUserDto {
@@ -23,9 +28,35 @@ export class CreateUserDto {
   @Matches(/^\+[1-9]\d{7,14}$/)
   phoneNumber!: string;
 
-  @ApiProperty({ enum: UserRole, example: UserRole.MANAGER })
-  @IsEnum(UserRole)
-  role!: UserRole;
+  @ApiProperty({
+    type: String,
+    isArray: true,
+    format: "uuid",
+    description: "One or more role IDs from GET /api/v1/authorization/roles.",
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsUUID("4", { each: true })
+  roleIds?: string[];
+
+  @ApiProperty({
+    required: false,
+    deprecated: true,
+    enum: ["ADMIN", "MANAGER", "MEMBER"],
+    description:
+      "Compatibility input for one built-in role. New clients must use roleIds.",
+  })
+  @IsOptional()
+  @IsIn(["ADMIN", "MANAGER", "MEMBER"])
+  role?: string;
+}
+
+export class UserRoleSummaryDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({ example: "MANAGER" }) key!: string;
+  @ApiProperty({ example: "Manager" }) name!: string;
 }
 
 export class UserResponseDto {
@@ -34,7 +65,16 @@ export class UserResponseDto {
   @ApiProperty({ example: "ada.lovelace", nullable: true })
   username!: string | null;
   @ApiProperty({ example: "+998901234567" }) phoneNumber!: string;
-  @ApiProperty({ enum: UserRole, example: UserRole.MANAGER }) role!: UserRole;
+  @ApiProperty({ type: UserRoleSummaryDto, isArray: true })
+  roles!: UserRoleSummaryDto[];
+  @ApiProperty({
+    nullable: true,
+    deprecated: true,
+    enum: ["ADMIN", "MANAGER", "MEMBER"],
+    description:
+      "Derived compatibility value. Null when no built-in role is assigned.",
+  })
+  role!: string | null;
   @ApiProperty({ enum: UserStatus, example: UserStatus.OPEN })
   status!: UserStatus;
   @ApiProperty({ type: String, format: "date-time", nullable: true })

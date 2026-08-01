@@ -7,12 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  ADMIN
-  MANAGER
-  MEMBER
-}
-
 enum UserStatus {
   PENDING
   OPEN
@@ -161,6 +155,7 @@ model Workspace {
   projects               Project[]
   configurationTemplates ConfigurationTemplate[]
   sessions               ProboxAiSession[]
+  roles                  Role[]
 }
 
 model User {
@@ -171,7 +166,6 @@ model User {
   fullName                  String
   username                  String?                           @unique
   passwordHash              String?
-  role                      UserRole
   status                    UserStatus                        @default(PENDING)
   telegramUserId            BigInt?                           @unique
   telegramChatId            BigInt?                           @unique
@@ -195,6 +189,67 @@ model User {
   fileDeletionRequests      ProjectFileDeletionConfirmation[] @relation("fileDeletionRequester")
   projectDeletionRequests   ProjectDeletionRequest[]          @relation("projectDeletionRequester")
   projectDeletionAudits     ProjectDeletionAudit[]            @relation("projectDeletionOwner")
+  roleAssignments           UserRoleAssignment[]              @relation("userRoleAssignments")
+  roleAssignmentsMade       UserRoleAssignment[]              @relation("roleAssignmentCreator")
+
+  @@unique([id, workspaceId])
+}
+
+model Permission {
+  key             String           @id
+  name            String
+  description     String
+  category        String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  rolePermissions RolePermission[]
+
+  @@index([category, name])
+}
+
+model Role {
+  id              String               @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  key             String
+  name            String
+  description     String?
+  isSystem        Boolean              @default(false)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  permissions     RolePermission[]
+  userAssignments UserRoleAssignment[]
+
+  @@unique([workspaceId, key])
+  @@unique([id, workspaceId])
+  @@index([workspaceId, name])
+}
+
+model RolePermission {
+  roleId        String
+  permissionKey String
+  role          Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permissionKey], references: [key], onDelete: Restrict)
+  createdAt     DateTime   @default(now())
+
+  @@id([roleId, permissionKey])
+  @@index([permissionKey])
+}
+
+model UserRoleAssignment {
+  userId       String
+  roleId       String
+  workspaceId  String
+  assignedById String?
+  user         User     @relation("userRoleAssignments", fields: [userId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  role         Role     @relation(fields: [roleId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  assignedBy   User?    @relation("roleAssignmentCreator", fields: [assignedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@index([workspaceId, roleId])
+  @@index([assignedById])
 }
 
 model Department {

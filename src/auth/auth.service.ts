@@ -360,16 +360,11 @@ export class AuthService {
       throw new UnauthorizedException("Invalid or expired temporary token");
   }
 
-  private signAccessToken(user: {
-    id: string;
-    workspaceId: string;
-    role: string;
-  }) {
+  private signAccessToken(user: { id: string; workspaceId: string }) {
     return this.jwt.sign(
       {
         id: user.id,
         workspaceId: user.workspaceId,
-        role: user.role,
         type: "access",
       },
       { expiresIn: ACCESS_TOKEN_TTL_SECONDS },

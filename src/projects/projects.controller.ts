@@ -13,7 +13,6 @@ import {
   UseGuards,
   UseInterceptors,
 } from "@nestjs/common";
-import { UserRole } from "@prisma/client";
 import { FileInterceptor } from "@nestjs/platform-express";
 import {
   ApiBody,
@@ -26,8 +25,8 @@ import {
   ApiQuery,
   ApiTags,
 } from "@nestjs/swagger";
-import { CurrentUser, Roles } from "../auth/auth.decorator";
-import { JwtAuthGuard, RolesGuard } from "../auth/auth.guards";
+import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
+import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
   AddProjectMemberDto,
@@ -56,9 +55,11 @@ import {
   ApiResourceErrors,
   ApiValidationErrors,
 } from "../openapi/api-docs";
+import { Permissions } from "../authorization/permission.catalog";
 
 @Controller("projects")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermissions(Permissions.PROJECTS_READ)
 @ApiTags("Projects")
 @ApiAccessToken()
 export class ProjectsController {
@@ -68,7 +69,7 @@ export class ProjectsController {
   @ApiOperation({
     summary: "List accessible projects",
     description:
-      "Administrators receive all workspace projects. Other users receive projects they belong to and projects with workspace read access enabled.",
+      "Callers with projects.read-all receive all workspace projects. Other users receive projects they belong to and projects with workspace read access enabled.",
   })
   @ApiOkResponse({
     description: "Projects ordered by latest update.",
@@ -81,11 +82,11 @@ export class ProjectsController {
   }
 
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @RequirePermissions(Permissions.PROJECTS_CREATE)
   @ApiOperation({
     summary: "Create a project",
     description:
-      "Administrator or manager only. Selects the workspace default department when departmentId is omitted. If the target directory already exists, the first request returns a conflict asking the caller to explicitly resubmit with existingDirectoryAction KEEP or CLEAR. Empty projects become ready immediately; selecting a published department template creates a persisted asynchronous initialization job. The creator is added as the first member.",
+      "Requires projects.create. Selects the workspace default department when departmentId is omitted. If the target directory already exists, the first request returns a conflict asking the caller to explicitly resubmit with existingDirectoryAction KEEP or CLEAR. Empty projects become ready immediately; selecting a published department template creates a persisted asynchronous initialization job. The creator is added as the first member.",
   })
   @ApiCreatedResponse({
     description: "Project and its backing directory created.",
@@ -105,7 +106,7 @@ export class ProjectsController {
   @ApiOperation({
     summary: "Get project details",
     description:
-      "Members and administrators receive the member list. Users with public read access receive project metadata only.",
+      "Project members and callers with projects.read-all receive the member list. Users with public read access receive project metadata only.",
   })
   @ApiParam({ name: "id", format: "uuid", description: "Project ID." })
   @ApiOkResponse({
@@ -119,9 +120,11 @@ export class ProjectsController {
   }
 
   @Put(":id")
+  @RequirePermissions(Permissions.PROJECTS_UPDATE)
   @ApiOperation({
     summary: "Update project settings",
-    description: "Available to project members and administrators.",
+    description:
+      "Requires projects.update and project membership unless projects.manage-all is also granted.",
   })
   @ApiParam({ name: "id", format: "uuid", description: "Project ID." })
   @ApiOkResponse({ description: "Updated project.", type: ProjectResponseDto })
@@ -137,10 +140,11 @@ export class ProjectsController {
   }
 
   @Post(":id/members")
+  @RequirePermissions(Permissions.PROJECT_MEMBERS_MANAGE)
   @ApiOperation({
     summary: "Add a project member",
     description:
-      "Available to project members and administrators. Existing members are returned unchanged.",
+      "Requires projects.members.manage and project membership unless projects.manage-all is also granted. Existing members are returned unchanged.",
   })
   @ApiParam({ name: "id", format: "uuid", description: "Project ID." })
   @ApiOkResponse({
@@ -159,9 +163,11 @@ export class ProjectsController {
   }
 
   @Delete(":id/members/:userId")
+  @RequirePermissions(Permissions.PROJECT_MEMBERS_MANAGE)
   @ApiOperation({
     summary: "Remove a project member",
-    description: "Available to project members and administrators.",
+    description:
+      "Requires projects.members.manage and project membership unless projects.manage-all is also granted.",
   })
   @ApiParam({ name: "id", format: "uuid", description: "Project ID." })
   @ApiParam({
@@ -184,6 +190,7 @@ export class ProjectsController {
   }
 
   @Post(":id/folders")
+  @RequirePermissions(Permissions.PROJECT_FILES_WRITE)
   @ApiOperation({
     summary: "Create a project folder",
     description:
@@ -206,6 +213,7 @@ export class ProjectsController {
   }
 
   @Get(":id/files")
+  @RequirePermissions(Permissions.PROJECT_FILES_READ)
   @ApiOperation({
     summary: "List a project directory",
     description:
@@ -234,6 +242,7 @@ export class ProjectsController {
   }
 
   @Post(":id/files/upload")
+  @RequirePermissions(Permissions.PROJECT_FILES_WRITE)
   @UseInterceptors(
     FileInterceptor("file", {
       limits: { fileSize: ProjectsService.maxUploadBytes() },
@@ -283,6 +292,7 @@ export class ProjectsController {
   }
 
   @Post(":id/files/move")
+  @RequirePermissions(Permissions.PROJECT_FILES_WRITE)
   @ApiOperation({
     summary: "Move or rename a project file or folder",
     description:
@@ -310,6 +320,7 @@ export class ProjectsController {
   }
 
   @Get(":id/protected-file-types")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "List protected file extensions" })
   listProtectedFileTypes(
     @CurrentUser() user: AuthenticatedUser,
@@ -319,6 +330,7 @@ export class ProjectsController {
   }
 
   @Post(":id/protected-file-types")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Append a protected file extension" })
   addProtectedFileType(
     @CurrentUser() user: AuthenticatedUser,
@@ -329,6 +341,7 @@ export class ProjectsController {
   }
 
   @Put(":id/protected-file-types/:typeId")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Update a protected file extension (owner only)" })
   updateProtectedFileType(
     @CurrentUser() user: AuthenticatedUser,
@@ -345,6 +358,7 @@ export class ProjectsController {
   }
 
   @Delete(":id/protected-file-types/:typeId")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Remove a protected file extension (owner only)" })
   removeProtectedFileType(
     @CurrentUser() user: AuthenticatedUser,
@@ -355,6 +369,7 @@ export class ProjectsController {
   }
 
   @Post(":id/files/delete")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({
     summary: "Move a file or folder to the recoverable project trash",
   })
@@ -367,6 +382,7 @@ export class ProjectsController {
   }
 
   @Post(":id/files/delete-confirmations/:confirmationId/confirm")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({
     summary: "Confirm deletion of a protected project file or folder",
   })
@@ -379,12 +395,14 @@ export class ProjectsController {
   }
 
   @Get(":id/trash")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "List recoverable project trash items" })
   listTrash(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.projects.listTrash(user, id);
   }
 
   @Post(":id/trash/:trashId/restore")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Restore a recoverable project trash item" })
   restoreTrash(
     @CurrentUser() user: AuthenticatedUser,
@@ -395,6 +413,7 @@ export class ProjectsController {
   }
 
   @Post(":id/deletion-requests")
+  @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({ summary: "Request permanent project deletion" })
   requestDeletion(
     @CurrentUser() user: AuthenticatedUser,
@@ -404,6 +423,7 @@ export class ProjectsController {
   }
 
   @Post(":id/deletion-requests/:requestId/approve")
+  @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({ summary: "Owner approval and deletion-token preflight" })
   approveDeletion(
     @CurrentUser() user: AuthenticatedUser,
@@ -414,6 +434,7 @@ export class ProjectsController {
   }
 
   @Post(":id/deletion-requests/:requestId/active-sessions")
+  @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({
     summary:
       "Owner chooses whether live project sessions should wait or be interrupted",
@@ -433,6 +454,7 @@ export class ProjectsController {
   }
 
   @Post(":id/deletion-requests/:requestId/cancel")
+  @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({ summary: "Cancel an outstanding project deletion request" })
   cancelDeletion(
     @CurrentUser() user: AuthenticatedUser,
@@ -443,6 +465,7 @@ export class ProjectsController {
   }
 
   @Post(":id/deletion-requests/:requestId/confirm")
+  @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({
     summary:
       "Submit the owner Telegram token and permanently delete the project",
@@ -457,6 +480,7 @@ export class ProjectsController {
   }
 
   @Get(":id/files/download")
+  @RequirePermissions(Permissions.PROJECT_FILES_READ)
   @ApiOperation({
     summary: "Download a project file",
     description:
@@ -500,8 +524,8 @@ export class ProjectsController {
 }
 
 @Controller("settings")
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermissions(Permissions.SETTINGS_MANAGE)
 @ApiTags("Settings")
 @ApiAccessToken()
 export class SettingsController {

@@ -11,6 +11,7 @@ import { ProjectsModule } from "./projects/projects.module";
 import { StorageModule } from "./storage/storage.module";
 import { DepartmentsModule } from "./departments/departments.module";
 import { ConfigurationTemplatesModule } from "./configuration-templates/configuration-templates.module";
+import { AuthorizationModule } from "./authorization/authorization.module";
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ConfigurationTemplatesModule } from "./configuration-templates/configur
     StorageModule,
     TelegramModule,
     AuthModule,
+    AuthorizationModule,
     AccountsModule,
     TasksModule,
     ProjectsModule,

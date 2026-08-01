@@ -8,22 +8,39 @@ import { Prisma, UserStatus } from "@prisma/client";
 import { parsePhoneNumber } from "libphonenumber-js";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateUserDto } from "./accounts.dto";
+import { AuthorizationService } from "../authorization/authorization.service";
+import { SystemRoleKeys } from "../authorization/permission.catalog";
 
 @Injectable()
 export class AccountsService {
-  constructor(private readonly prisma: PrismaService) {}
-  async create(workspaceId: string, dto: CreateUserDto) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authorization: AuthorizationService,
+  ) {}
+  async create(workspaceId: string, actorId: string, dto: CreateUserDto) {
+    const roleIds = await this.authorization.resolveRoleIds(
+      workspaceId,
+      dto.roleIds,
+      dto.role,
+    );
     try {
-      return await this.prisma.user.create({
+      const user = await this.prisma.user.create({
         data: {
           workspaceId,
           fullName: dto.fullName,
           phoneNumber: normalize(dto.phoneNumber),
-          role: dto.role,
           status: UserStatus.PENDING,
+          roleAssignments: {
+            create: roleIds.map((roleId) => ({
+              roleId,
+              workspaceId,
+              assignedById: actorId,
+            })),
+          },
         },
         select: userResponseSelect,
       });
+      return toUserResponse(user);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -64,11 +81,12 @@ export class AccountsService {
     }
   }
   async list(workspaceId: string) {
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: { workspaceId },
       orderBy: { createdAt: "desc" },
       select: userResponseSelect,
     });
+    return users.map(toUserResponse);
   }
   async ban(workspaceId: string, actorId: string, id: string) {
     return this.setTerminalStatus(workspaceId, actorId, id, UserStatus.BANNED);
@@ -83,9 +101,7 @@ export class AccountsService {
     status: UserStatus,
   ) {
     if (actorId === id)
-      throw new BadRequestException(
-        "Administrators cannot ban or delete themselves",
-      );
+      throw new BadRequestException("Users cannot ban or delete themselves");
     const user = await this.prisma.user.findFirst({
       where: { id, workspaceId },
     });
@@ -107,7 +123,7 @@ export class AccountsService {
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-      return updated;
+      return toUserResponse(updated);
     });
   }
 }
@@ -117,11 +133,28 @@ const userResponseSelect = {
   fullName: true,
   username: true,
   phoneNumber: true,
-  role: true,
+  roleAssignments: {
+    select: { role: { select: { id: true, key: true, name: true } } },
+    orderBy: { role: { name: "asc" } },
+  },
   status: true,
   verifiedAt: true,
   createdAt: true,
 } satisfies Prisma.UserSelect;
+
+function toUserResponse(user: any) {
+  const roles = (user.roleAssignments ?? []).map(({ role }: any) => role);
+  const priority = [
+    SystemRoleKeys.ADMIN,
+    SystemRoleKeys.MANAGER,
+    SystemRoleKeys.MEMBER,
+  ];
+  const role = priority.find((key) =>
+    roles.some((assigned: { key: string }) => assigned.key === key),
+  );
+  const { roleAssignments: _assignments, ...rest } = user;
+  return { ...rest, roles, role: role ?? null };
+}
 
 function normalize(value: string) {
   try {

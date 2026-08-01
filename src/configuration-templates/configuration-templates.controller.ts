@@ -14,7 +14,6 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { UserRole } from "@prisma/client";
 import { diskStorage } from "multer";
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -28,8 +27,8 @@ import {
   ApiOperation,
   ApiTags,
 } from "@nestjs/swagger";
-import { CurrentUser, Roles } from "../auth/auth.decorator";
-import { JwtAuthGuard, RolesGuard } from "../auth/auth.guards";
+import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
+import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
   ApiAccessToken,
@@ -47,10 +46,14 @@ import {
 } from "./configuration-templates.dto";
 import { ConfigurationTemplatesService } from "./configuration-templates.service";
 import { TemplateUploadCleanupInterceptor } from "./template-upload-cleanup.interceptor";
+import {
+  hasPermission,
+  Permissions,
+} from "../authorization/permission.catalog";
 
 @Controller("configuration-templates")
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN, UserRole.MANAGER)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermissions(Permissions.TEMPLATES_READ)
 @ApiTags("Configuration Templates")
 @ApiAccessToken()
 export class ConfigurationTemplatesController {
@@ -65,7 +68,7 @@ export class ConfigurationTemplatesController {
   ) {
     return this.templates.list(
       user.workspaceId,
-      user.role === UserRole.ADMIN,
+      hasPermission(user, Permissions.TEMPLATES_MANAGE),
       departmentId,
     );
   }
@@ -77,12 +80,12 @@ export class ConfigurationTemplatesController {
     return this.templates.get(
       user.workspaceId,
       id,
-      user.role === UserRole.ADMIN,
+      hasPermission(user, Permissions.TEMPLATES_MANAGE),
     );
   }
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Create a template with draft version 1" })
   @ApiCreatedResponse({ type: ConfigurationTemplateResponseDto })
   @ApiAuthenticationErrors()
@@ -96,7 +99,7 @@ export class ConfigurationTemplatesController {
   }
 
   @Patch(":id")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Update template metadata" })
   update(
     @CurrentUser() user: AuthenticatedUser,
@@ -107,7 +110,7 @@ export class ConfigurationTemplatesController {
   }
 
   @Post(":id/drafts")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({
     summary: "Clone the latest published version into a new draft",
   })
@@ -117,14 +120,14 @@ export class ConfigurationTemplatesController {
   }
 
   @Post(":id/archive")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Archive a configuration template" })
   archive(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.templates.archive(user.workspaceId, id);
   }
 
   @Put("versions/:versionId/manifest")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({
     summary: "Atomically replace draft folders and ordered command stages",
   })
@@ -138,7 +141,7 @@ export class ConfigurationTemplatesController {
   }
 
   @Post("versions/:versionId/files")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @UseInterceptors(
     FileInterceptor("file", {
       limits: { fileSize: ConfigurationTemplatesService.maxFileBytes() },
@@ -193,7 +196,7 @@ export class ConfigurationTemplatesController {
   }
 
   @Patch("versions/:versionId/files/:fileId")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Change a draft file destination path" })
   moveFile(
     @CurrentUser() user: AuthenticatedUser,
@@ -205,7 +208,7 @@ export class ConfigurationTemplatesController {
   }
 
   @Delete("versions/:versionId/files/:fileId")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Remove a file registration from a draft" })
   removeFile(
     @CurrentUser() user: AuthenticatedUser,
@@ -216,7 +219,7 @@ export class ConfigurationTemplatesController {
   }
 
   @Post("versions/:versionId/publish")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Validate and immutably publish a draft version" })
   publish(
     @CurrentUser() user: AuthenticatedUser,

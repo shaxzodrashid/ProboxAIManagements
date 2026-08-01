@@ -8,15 +8,14 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
-import { UserRole } from "@prisma/client";
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from "@nestjs/swagger";
-import { CurrentUser, Roles } from "../auth/auth.decorator";
-import { JwtAuthGuard, RolesGuard } from "../auth/auth.guards";
+import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
+import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
   ApiAccessToken,
@@ -31,10 +30,14 @@ import {
   UpdateDepartmentDto,
 } from "./departments.dto";
 import { DepartmentsService } from "./departments.service";
+import {
+  hasPermission,
+  Permissions,
+} from "../authorization/permission.catalog";
 
 @Controller("departments")
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN, UserRole.MANAGER)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermissions(Permissions.DEPARTMENTS_READ)
 @ApiTags("Departments")
 @ApiAccessToken()
 export class DepartmentsController {
@@ -50,7 +53,8 @@ export class DepartmentsController {
   ) {
     return this.departments.list(
       user.workspaceId,
-      user.role === UserRole.ADMIN && includeArchived === "true",
+      hasPermission(user, Permissions.DEPARTMENTS_MANAGE) &&
+        includeArchived === "true",
     );
   }
 
@@ -64,7 +68,7 @@ export class DepartmentsController {
   }
 
   @Post()
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.DEPARTMENTS_MANAGE)
   @ApiOperation({
     summary: "Create a department and provision its home directory",
   })
@@ -80,7 +84,7 @@ export class DepartmentsController {
   }
 
   @Patch(":id")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.DEPARTMENTS_MANAGE)
   @ApiOperation({ summary: "Update an unused department home or its name" })
   @ApiOkResponse({ type: DepartmentHomeProvisioningResponseDto })
   @ApiAuthenticationErrors()
@@ -95,7 +99,7 @@ export class DepartmentsController {
   }
 
   @Post(":id/default")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.DEPARTMENTS_MANAGE)
   @ApiOperation({ summary: "Make a department the workspace default" })
   @ApiOkResponse({ type: DepartmentResponseDto })
   setDefault(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
@@ -103,7 +107,7 @@ export class DepartmentsController {
   }
 
   @Post(":id/archive")
-  @Roles(UserRole.ADMIN)
+  @RequirePermissions(Permissions.DEPARTMENTS_MANAGE)
   @ApiOperation({ summary: "Archive a non-default department" })
   @ApiOkResponse({ type: DepartmentResponseDto })
   archive(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {

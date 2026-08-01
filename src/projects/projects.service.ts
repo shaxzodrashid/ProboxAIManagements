@@ -13,7 +13,6 @@ import {
   ProjectFileTrashStatus,
   ProjectDeletionRequestStatus,
   SessionStatus,
-  UserRole,
 } from "@prisma/client";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
@@ -30,11 +29,25 @@ import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
 import { ProjectInitializationService } from "./project-initialization.service";
 import { TelegramService } from "../telegram/telegram.service";
 import { ProboxAiRunner } from "../sessions/proboxai-runner.service";
+import {
+  hasPermission,
+  Permissions,
+  SystemRoleKeys,
+} from "../authorization/permission.catalog";
 
 type UploadedProjectFile = {
   originalname: string;
   buffer: Buffer;
   size: number;
+};
+
+const projectMemberUserSelect = {
+  id: true,
+  fullName: true,
+  roleAssignments: {
+    select: { role: { select: { id: true, key: true, name: true } } },
+    orderBy: { role: { name: "asc" as const } },
+  },
 };
 
 @Injectable()
@@ -94,7 +107,7 @@ export class ProjectsService {
     const projects = await this.prisma.project.findMany({
       where: {
         workspaceId: actor.workspaceId,
-        ...(actor.role === UserRole.ADMIN
+        ...(hasPermission(actor, Permissions.PROJECTS_READ_ALL)
           ? {}
           : {
               OR: [
@@ -181,7 +194,7 @@ export class ProjectsService {
           department: { select: { id: true, name: true, slug: true } },
           members: {
             include: {
-              user: { select: { id: true, fullName: true, role: true } },
+              user: { select: projectMemberUserSelect },
             },
           },
         },
@@ -191,7 +204,10 @@ export class ProjectsService {
           project.id,
           templateVersion.id,
         );
-        return { ...project, initializations: [initialization] };
+        return mapProjectMembers({
+          ...project,
+          initializations: [initialization],
+        });
       } catch (error) {
         await this.prisma.project.update({
           where: { id: project.id },
@@ -208,7 +224,7 @@ export class ProjectsService {
 
     // If the database write fails, deliberately keep the empty directory for an
     // operator to inspect; deleting it could race with a concurrent writer.
-    return this.prisma.project.create({
+    const project = await this.prisma.project.create({
       data: {
         workspaceId: actor.workspaceId,
         departmentId: department.id,
@@ -225,11 +241,12 @@ export class ProjectsService {
         department: { select: { id: true, name: true, slug: true } },
         members: {
           include: {
-            user: { select: { id: true, fullName: true, role: true } },
+            user: { select: projectMemberUserSelect },
           },
         },
       },
     });
+    return mapProjectMembers(project);
   }
 
   async get(actor: AuthenticatedUser, projectId: string) {
@@ -242,7 +259,7 @@ export class ProjectsService {
         initializations: { orderBy: { attempt: "desc" }, take: 1 },
         members: {
           include: {
-            user: { select: { id: true, fullName: true, role: true } },
+            user: { select: projectMemberUserSelect },
           },
           orderBy: { createdAt: "asc" },
         },
@@ -252,7 +269,7 @@ export class ProjectsService {
       const { members: _members, ...publicProject } = project;
       return publicProject;
     }
-    return project;
+    return mapProjectMembers(project);
   }
 
   async update(
@@ -281,14 +298,15 @@ export class ProjectsService {
       select: { id: true },
     });
     if (!user) throw new NotFoundException("User not found in this workspace");
-    return this.prisma.projectMember.upsert({
+    const membership = await this.prisma.projectMember.upsert({
       where: { projectId_userId: { projectId, userId } },
       update: {},
       create: { projectId, userId },
       include: {
-        user: { select: { id: true, fullName: true, role: true } },
+        user: { select: projectMemberUserSelect },
       },
     });
+    return mapProjectMembership(membership);
   }
 
   async removeMember(
@@ -1149,7 +1167,7 @@ export class ProjectsService {
       projectId,
     );
     const sensitive =
-      actor.role === UserRole.ADMIN ||
+      hasPermission(actor, Permissions.PROJECTS_READ_ALL) ||
       project.members.some((member) => member.userId === actor.id);
     if (!sensitive && !project.readAccessEnabled)
       throw new ForbiddenException("You do not have access to this project");
@@ -1165,7 +1183,7 @@ export class ProjectsService {
       projectId,
     );
     if (
-      actor.role !== UserRole.ADMIN &&
+      !hasPermission(actor, Permissions.PROJECTS_MANAGE_ALL) &&
       !project.members.some((member) => member.userId === actor.id)
     )
       throw new ForbiddenException(
@@ -1473,4 +1491,33 @@ function isErrno(error: unknown, code: string) {
     "code" in error &&
     error.code === code
   );
+}
+
+function mapProjectMembers<T extends { members?: any[] }>(project: T) {
+  if (!project.members) return project;
+  return {
+    ...project,
+    members: project.members.map(mapProjectMembership),
+  };
+}
+
+function mapProjectMembership<T extends { user?: any }>(membership: T) {
+  if (!membership.user?.roleAssignments) return membership;
+  const { roleAssignments, ...user } = membership.user;
+  const roles = roleAssignments.map(({ role }: any) => role);
+  const legacyRole = [
+    SystemRoleKeys.ADMIN,
+    SystemRoleKeys.MANAGER,
+    SystemRoleKeys.MEMBER,
+  ].find((key) =>
+    roles.some((assigned: { key: string }) => assigned.key === key),
+  );
+  return {
+    ...membership,
+    user: {
+      ...user,
+      roles,
+      role: legacyRole ?? null,
+    },
+  };
 }

@@ -5,9 +5,8 @@ import {
   ApiOperation,
   ApiTags,
 } from "@nestjs/swagger";
-import { UserRole } from "@prisma/client";
-import { CurrentUser, Roles } from "../auth/auth.decorator";
-import { JwtAuthGuard, RolesGuard } from "../auth/auth.guards";
+import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
+import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { CreateTaskDto, TaskResponseDto } from "./tasks.dto";
 import { TasksService } from "./tasks.service";
@@ -16,18 +15,22 @@ import {
   ApiAuthenticationErrors,
   ApiValidationErrors,
 } from "../openapi/api-docs";
+import {
+  hasPermission,
+  Permissions,
+} from "../authorization/permission.catalog";
 @Controller("tasks")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @ApiTags("Tasks")
 @ApiAccessToken()
 export class TasksController {
   constructor(private readonly tasks: TasksService) {}
   @Post()
-  @Roles(UserRole.MANAGER)
+  @RequirePermissions(Permissions.TASKS_CREATE)
   @ApiOperation({
     summary: "Create a task",
     description:
-      "Manager-only. The authenticated manager becomes both creator and assignee.",
+      "Requires tasks.create. The authenticated user becomes both creator and assignee.",
   })
   @ApiCreatedResponse({
     description: "Task created in the queued state.",
@@ -39,10 +42,11 @@ export class TasksController {
     return this.tasks.create(user.id, user.workspaceId, dto);
   }
   @Get()
+  @RequirePermissions(Permissions.TASKS_READ)
   @ApiOperation({
     summary: "List visible tasks",
     description:
-      "Administrators receive all workspace tasks; other users receive tasks assigned to them. Each result includes its manager and most recent session when available.",
+      "Callers with tasks.read-all receive all workspace tasks; other callers receive tasks assigned to them. Each result includes its manager and most recent session when available.",
   })
   @ApiOkResponse({
     description: "Tasks ordered by most recently updated.",
@@ -54,7 +58,7 @@ export class TasksController {
     return this.tasks.list(
       user.workspaceId,
       user.id,
-      user.role === UserRole.ADMIN,
+      hasPermission(user, Permissions.TASKS_READ_ALL),
     );
   }
 }

@@ -9,5 +9,6 @@ export const CurrentUser = createParamDecorator(
   (_: unknown, ctx: ExecutionContext): AuthenticatedUser =>
     ctx.switchToHttp().getRequest().user as AuthenticatedUser,
 );
-export const ROLES_KEY = "proboxai.roles";
-export const Roles = (...roles: string[]) => SetMetadata(ROLES_KEY, roles);
+export const PERMISSIONS_KEY = "proboxai.permissions";
+export const RequirePermissions = (...permissions: string[]) =>
+  SetMetadata(PERMISSIONS_KEY, permissions);

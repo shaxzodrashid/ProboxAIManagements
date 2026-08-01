@@ -3,7 +3,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
-import { JwtAuthGuard, RolesGuard } from "./auth.guards";
+import { JwtAuthGuard, PermissionsGuard } from "./auth.guards";
 import { TelegramModule } from "../telegram/telegram.module";
 
 @Module({
@@ -18,7 +18,7 @@ import { TelegramModule } from "../telegram/telegram.module";
     TelegramModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard, RolesGuard],
-  exports: [JwtModule, JwtAuthGuard, RolesGuard],
+  providers: [AuthService, JwtAuthGuard, PermissionsGuard],
+  exports: [JwtModule, JwtAuthGuard, PermissionsGuard],
 })
 export class AuthModule {}

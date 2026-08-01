@@ -7,7 +7,6 @@ import {
   MaxLength,
 } from "class-validator";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { UserRole } from "@prisma/client";
 
 const PROJECT_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,119}$/;
 
@@ -203,7 +202,24 @@ export class ProjectCreatorDto {
 }
 
 export class ProjectMemberUserDto extends ProjectCreatorDto {
-  @ApiProperty({ enum: UserRole, example: UserRole.MANAGER }) role!: UserRole;
+  @ApiProperty({
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        id: { type: "string", format: "uuid" },
+        key: { type: "string", example: "MANAGER" },
+        name: { type: "string", example: "Manager" },
+      },
+    },
+  })
+  roles!: Array<{ id: string; key: string; name: string }>;
+  @ApiProperty({
+    nullable: true,
+    deprecated: true,
+    enum: ["ADMIN", "MANAGER", "MEMBER"],
+  })
+  role!: string | null;
 }
 
 export class ProjectMemberResponseDto {

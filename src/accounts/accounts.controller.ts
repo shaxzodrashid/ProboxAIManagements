@@ -20,9 +20,8 @@ import {
   ApiSecurity,
   ApiTags,
 } from "@nestjs/swagger";
-import { UserRole } from "@prisma/client";
-import { JwtAuthGuard, RolesGuard } from "../auth/auth.guards";
-import { CurrentUser, Roles } from "../auth/auth.decorator";
+import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
+import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { TelegramService } from "../telegram/telegram.service";
 import { CreateUserDto, UserResponseDto } from "./accounts.dto";
@@ -34,6 +33,7 @@ import {
   ApiResourceErrors,
   ApiValidationErrors,
 } from "../openapi/api-docs";
+import { Permissions } from "../authorization/permission.catalog";
 
 @Controller()
 @ApiTags("Users")
@@ -43,13 +43,13 @@ export class AccountsController {
     private readonly telegram: TelegramService,
   ) {}
   @Get("users")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(Permissions.USERS_READ)
   @ApiAccessToken()
   @ApiOperation({
     summary: "List workspace users",
     description:
-      "Administrator-only. Results are ordered by newest account first.",
+      "Requires users.read. Results are ordered by newest account first.",
   })
   @ApiOkResponse({
     description: "Workspace users.",
@@ -61,13 +61,13 @@ export class AccountsController {
     return this.accounts.list(user.workspaceId);
   }
   @Post("users")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(Permissions.USERS_MANAGE)
   @ApiAccessToken()
   @ApiOperation({
     summary: "Create a pending workspace user",
     description:
-      "Administrator-only. The new identity starts in PENDING. Sharing the matching Telegram contact links the bot identity; successful platform registration later changes the status to OPEN.",
+      "Requires users.manage. The new identity starts in PENDING. Sharing the matching Telegram contact links the bot identity; successful platform registration later changes the status to OPEN.",
   })
   @ApiCreatedResponse({
     description: "Pending user created.",
@@ -81,16 +81,16 @@ export class AccountsController {
   @ApiAuthenticationErrors()
   @ApiValidationErrors()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateUserDto) {
-    return this.accounts.create(user.workspaceId, dto);
+    return this.accounts.create(user.workspaceId, user.id, dto);
   }
   @Post("users/:id/ban")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(Permissions.USERS_MANAGE)
   @ApiAccessToken()
   @ApiOperation({
     summary: "Ban a workspace user",
     description:
-      "Administrator-only. Banned users cannot sign in, refresh tokens, or use an existing access token.",
+      "Requires users.manage. Banned users cannot sign in, refresh tokens, or use an existing access token.",
   })
   @ApiParam({
     name: "id",
@@ -104,13 +104,13 @@ export class AccountsController {
     return this.accounts.ban(user.workspaceId, user.id, id);
   }
   @Delete("users/:id")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(Permissions.USERS_MANAGE)
   @ApiAccessToken()
   @ApiOperation({
     summary: "Delete a workspace user",
     description:
-      "Administrator-only. This is a soft deletion: the identity remains auditable with DELETED status, and every active session token is revoked.",
+      "Requires users.manage. This is a soft deletion: the identity remains auditable with DELETED status, and every active session token is revoked.",
   })
   @ApiParam({
     name: "id",

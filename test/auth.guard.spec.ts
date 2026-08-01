@@ -1,7 +1,12 @@
-import { ExecutionContext, UnauthorizedException } from "@nestjs/common";
+import {
+  ExecutionContext,
+  ForbiddenException,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { Reflector } from "@nestjs/core";
 import { JwtService } from "@nestjs/jwt";
-import { UserRole, UserStatus } from "@prisma/client";
-import { JwtAuthGuard } from "../src/auth/auth.guards";
+import { UserStatus } from "@prisma/client";
+import { JwtAuthGuard, PermissionsGuard } from "../src/auth/auth.guards";
 import { PrismaService } from "../src/prisma/prisma.service";
 
 describe("JwtAuthGuard", () => {
@@ -22,7 +27,6 @@ describe("JwtAuthGuard", () => {
       verify: jest.fn().mockReturnValue({
         id: "user-1",
         workspaceId: "workspace-old",
-        role: UserRole.MEMBER,
         type: "access",
       }),
     };
@@ -31,7 +35,27 @@ describe("JwtAuthGuard", () => {
         findFirst: jest.fn().mockResolvedValue({
           id: "user-1",
           workspaceId: "workspace-current",
-          role: UserRole.ADMIN,
+          roleAssignments: [
+            {
+              role: {
+                id: "role-1",
+                key: "REVIEWER",
+                name: "Reviewer",
+                permissions: [
+                  { permissionKey: "projects.read" },
+                  { permissionKey: "projects.files.read" },
+                ],
+              },
+            },
+            {
+              role: {
+                id: "role-2",
+                key: "REPORTER",
+                name: "Reporter",
+                permissions: [{ permissionKey: "projects.read" }],
+              },
+            },
+          ],
         }),
       },
     };
@@ -43,12 +67,31 @@ describe("JwtAuthGuard", () => {
     await expect(guard.canActivate(context)).resolves.toBe(true);
     expect(prisma.user.findFirst).toHaveBeenCalledWith({
       where: { id: "user-1", status: UserStatus.OPEN },
-      select: { id: true, workspaceId: true, role: true },
+      select: {
+        id: true,
+        workspaceId: true,
+        roleAssignments: {
+          select: {
+            role: {
+              select: {
+                id: true,
+                key: true,
+                name: true,
+                permissions: { select: { permissionKey: true } },
+              },
+            },
+          },
+        },
+      },
     });
     expect(request.user).toEqual({
       id: "user-1",
       workspaceId: "workspace-current",
-      role: UserRole.ADMIN,
+      roles: [
+        { id: "role-1", key: "REVIEWER", name: "Reviewer" },
+        { id: "role-2", key: "REPORTER", name: "Reporter" },
+      ],
+      permissions: ["projects.files.read", "projects.read"],
       type: "access",
     });
   });
@@ -81,5 +124,45 @@ describe("JwtAuthGuard", () => {
       UnauthorizedException,
     );
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("PermissionsGuard", () => {
+  it("requires every declared permission from the live request user", () => {
+    const reflector = {
+      getAllAndOverride: jest
+        .fn()
+        .mockReturnValue(["projects.read", "projects.files.read"]),
+    };
+    const guard = new PermissionsGuard(reflector as unknown as Reflector);
+    const context = {
+      getHandler: jest.fn(),
+      getClass: jest.fn(),
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: {
+            permissions: ["projects.read", "projects.files.read"],
+          },
+        }),
+      }),
+    } as unknown as ExecutionContext;
+
+    expect(guard.canActivate(context)).toBe(true);
+  });
+
+  it("rejects a user missing a declared permission", () => {
+    const reflector = {
+      getAllAndOverride: jest.fn().mockReturnValue(["authorization.manage"]),
+    };
+    const guard = new PermissionsGuard(reflector as unknown as Reflector);
+    const context = {
+      getHandler: jest.fn(),
+      getClass: jest.fn(),
+      switchToHttp: () => ({
+        getRequest: () => ({ user: { permissions: ["authorization.read"] } }),
+      }),
+    } as unknown as ExecutionContext;
+
+    expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
   });
 });

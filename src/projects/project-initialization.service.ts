@@ -15,7 +15,6 @@ import {
   ProjectStatus,
   TemplateCommandStageMode,
   TemplateCommandType,
-  UserRole,
 } from "@prisma/client";
 import { spawn, ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -28,6 +27,10 @@ import { manifestInclude } from "../configuration-templates/configuration-templa
 import { TemplateStorageService } from "../configuration-templates/template-storage.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
+import {
+  hasPermission,
+  Permissions,
+} from "../authorization/permission.catalog";
 import {
   InitializationEventMessage,
   ProjectInitializationEventsService,
@@ -721,7 +724,7 @@ export class ProjectInitializationService
     });
     if (!project) throw new NotFoundException("Project not found");
     if (
-      actor.role !== UserRole.ADMIN &&
+      !hasPermission(actor, Permissions.PROJECTS_READ_ALL) &&
       !project.readAccessEnabled &&
       !project.members.some((member) => member.userId === actor.id)
     )
@@ -732,7 +735,7 @@ export class ProjectInitializationService
   private async assertWriteAccess(actor: AuthenticatedUser, projectId: string) {
     const project = await this.assertReadAccess(actor, projectId);
     if (
-      actor.role !== UserRole.ADMIN &&
+      !hasPermission(actor, Permissions.PROJECTS_MANAGE_ALL) &&
       !project.members.some((member) => member.userId === actor.id)
     )
       throw new ForbiddenException(

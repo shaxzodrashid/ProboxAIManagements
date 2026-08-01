@@ -18,8 +18,9 @@ import {
   ApiTags,
 } from "@nestjs/swagger";
 import { Observable } from "rxjs";
-import { CurrentUser } from "../auth/auth.decorator";
-import { JwtAuthGuard, RolesGuard } from "../auth/auth.guards";
+import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
+import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
+import { Permissions } from "../authorization/permission.catalog";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
   ApiAccessToken,
@@ -29,7 +30,8 @@ import {
 import { ProjectInitializationService } from "./project-initialization.service";
 
 @Controller("projects/:projectId/initializations")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermissions(Permissions.PROJECT_INITIALIZATIONS_READ)
 @ApiTags("Project Initializations")
 @ApiAccessToken()
 export class ProjectInitializationsController {
@@ -93,6 +95,7 @@ export class ProjectInitializationsController {
   }
 
   @Post(":initializationId/cancel")
+  @RequirePermissions(Permissions.PROJECT_INITIALIZATIONS_MANAGE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Cancel a queued or running initialization" })
   @ApiOkResponse({ description: "Processes stopped and staging quarantined." })
@@ -107,6 +110,7 @@ export class ProjectInitializationsController {
   }
 
   @Post("retry")
+  @RequirePermissions(Permissions.PROJECT_INITIALIZATIONS_MANAGE)
   @ApiOperation({
     summary: "Retry the latest failed initialization from clean staging",
   })

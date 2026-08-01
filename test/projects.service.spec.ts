@@ -25,12 +25,20 @@ describe("ProjectsService filesystem permissions", () => {
   const member = {
     id: "member-1",
     workspaceId: "workspace-1",
-    role: "MEMBER" as const,
+    roles: [{ id: "member-role", key: "MEMBER", name: "Member" }],
+    permissions: [
+      "projects.read",
+      "projects.update",
+      "projects.files.read",
+      "projects.files.write",
+      "projects.files.delete",
+    ],
   };
   const reader = {
     id: "reader-1",
     workspaceId: "workspace-1",
-    role: "MEMBER" as const,
+    roles: [{ id: "member-role", key: "MEMBER", name: "Member" }],
+    permissions: ["projects.read", "projects.files.read"],
   };
 
   beforeEach(async () => {
@@ -176,7 +184,8 @@ describe("ProjectsService existing project directory confirmation", () => {
   const actor = {
     id: "manager-1",
     workspaceId: "workspace-1",
-    role: "MANAGER" as const,
+    roles: [{ id: "manager-role", key: "MANAGER", name: "Manager" }],
+    permissions: ["projects.read", "projects.create"],
   };
 
   beforeEach(async () => {

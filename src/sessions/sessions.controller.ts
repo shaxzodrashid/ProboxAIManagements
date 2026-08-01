@@ -16,7 +16,6 @@ import {
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
-import { UserRole } from "@prisma/client";
 import { map, Observable } from "rxjs";
 import {
   CreateSessionDto,
@@ -28,8 +27,8 @@ import {
 } from "./dto";
 import { SessionsService } from "./sessions.service";
 import { SessionEventsService } from "./session-events.service";
-import { JwtAuthGuard, RolesGuard } from "../auth/auth.guards";
-import { CurrentUser, Roles } from "../auth/auth.decorator";
+import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
+import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
   ApiAccessToken,
@@ -37,9 +36,10 @@ import {
   ApiResourceErrors,
   ApiValidationErrors,
 } from "../openapi/api-docs";
+import { Permissions } from "../authorization/permission.catalog";
 
 @Controller("sessions")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @ApiTags("Sessions")
 @ApiAccessToken()
 export class SessionsController {
@@ -48,11 +48,11 @@ export class SessionsController {
     private readonly events: SessionEventsService,
   ) {}
   @Post()
-  @Roles(UserRole.MANAGER)
+  @RequirePermissions(Permissions.SESSIONS_CREATE)
   @ApiOperation({
     summary: "Start a managed coding session",
     description:
-      "Manager-only. Creates the session immediately and starts its first turn asynchronously. Watch the SSE endpoint for runner events and completion.",
+      "Requires sessions.create. Creates the session immediately and starts its first turn asynchronously. Watch the SSE endpoint for runner events and completion.",
   })
   @ApiCreatedResponse({
     description: "Session created and queued for its first turn.",
@@ -68,6 +68,7 @@ export class SessionsController {
     return this.sessions.create(user.id, dto);
   }
   @Get(":id")
+  @RequirePermissions(Permissions.SESSIONS_READ)
   @ApiOperation({
     summary: "Get a session and its turns",
     description: "Available only to the task's assigned manager.",
@@ -83,11 +84,11 @@ export class SessionsController {
     return this.sessions.get(user.id, id);
   }
   @Post(":id/turns")
-  @Roles(UserRole.MANAGER)
+  @RequirePermissions(Permissions.SESSIONS_MANAGE)
   @ApiOperation({
     summary: "Start a follow-up turn",
     description:
-      "Manager-only. The session must not already have a running turn. The turn runs asynchronously after this response.",
+      "Requires sessions.manage. The session must not already have a running turn. The turn runs asynchronously after this response.",
   })
   @ApiParam({ name: "id", format: "uuid", description: "Session ID." })
   @ApiCreatedResponse({ description: "Follow-up turn accepted and started." })
@@ -104,11 +105,11 @@ export class SessionsController {
       .then(() => this.sessions.startTurn(id, dto.prompt));
   }
   @Post(":id/interrupt")
-  @Roles(UserRole.MANAGER)
+  @RequirePermissions(Permissions.SESSIONS_MANAGE)
   @ApiOperation({
     summary: "Interrupt the active local runner",
     description:
-      "Manager-only. Returns `404` when no active process exists for the session.",
+      "Requires sessions.manage. Returns `404` when no active process exists for the session.",
   })
   @ApiParam({ name: "id", format: "uuid", description: "Session ID." })
   @ApiOkResponse({
@@ -121,6 +122,7 @@ export class SessionsController {
     return this.sessions.interrupt(user.id, id);
   }
   @Sse(":id/events/stream")
+  @RequirePermissions(Permissions.SESSIONS_READ)
   @ApiOperation({
     summary: "Stream live session events",
     description:
@@ -135,10 +137,11 @@ export class SessionsController {
   })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
-  stream(
+  async stream(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
-  ): Observable<MessageEvent> {
+  ): Promise<Observable<MessageEvent>> {
+    await this.sessions.get(user.id, id);
     return this.events.stream(id).pipe(
       map(
         (event) =>

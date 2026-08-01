@@ -3,7 +3,6 @@ import { JwtService } from "@nestjs/jwt";
 import {
   AuthOtpPurpose,
   SessionTokenPurpose,
-  UserRole,
   UserStatus,
 } from "@prisma/client";
 import { AuthLocale } from "../src/auth/auth.dto";
@@ -19,7 +18,7 @@ describe("AuthService", () => {
     fullName: "Ada Lovelace",
     username: null,
     passwordHash: null,
-    role: UserRole.ADMIN,
+    roleAssignments: [],
     status: UserStatus.PENDING,
     telegramUserId: 100n,
     telegramChatId: 200n,
