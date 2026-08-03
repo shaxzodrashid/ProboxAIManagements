@@ -7,6 +7,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateRoleDto, UpdateRoleDto } from "./authorization.dto";
+import { Permissions } from "./permission.catalog";
 
 const roleDetails = {
   permissions: {
@@ -80,11 +81,14 @@ export class AuthorizationService {
     permissionKeys: string[],
   ) {
     const role = await this.roleInWorkspace(workspaceId, roleId, actorId);
-    if (role.userAssignments.length)
-      throw new BadRequestException(
-        "You cannot change permissions on a role assigned to yourself",
-      );
     await this.assertPermissionKeys(permissionKeys);
+    if (role.userAssignments.length)
+      await this.assertSafeSelfRolePermissionChange(
+        workspaceId,
+        actorId,
+        roleId,
+        permissionKeys,
+      );
     await this.prisma.$transaction([
       this.prisma.rolePermission.deleteMany({ where: { roleId } }),
       this.prisma.rolePermission.createMany({
@@ -122,9 +126,9 @@ export class AuthorizationService {
     userId: string,
     roleIds: string[],
   ) {
-    if (actorId === userId)
-      throw new BadRequestException("You cannot change your own roles");
     await this.assertUserAndRoles(workspaceId, userId, roleIds);
+    if (actorId === userId)
+      await this.assertSafeSelfRoleReplacement(workspaceId, actorId, roleIds);
     await this.prisma.$transaction([
       this.prisma.userRoleAssignment.deleteMany({ where: { userId } }),
       this.prisma.userRoleAssignment.createMany({
@@ -234,6 +238,101 @@ export class AuthorizationService {
     if (!user) throw new NotFoundException("User not found");
     await this.assertRoles(workspaceId, roleIds);
   }
+
+  private async assertSafeSelfRoleReplacement(
+    workspaceId: string,
+    userId: string,
+    roleIds: string[],
+  ) {
+    const [currentAssignments, requestedRoles] = await Promise.all([
+      this.prisma.userRoleAssignment.findMany({
+        where: { userId, workspaceId },
+        select: {
+          role: {
+            select: {
+              permissions: { select: { permissionKey: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.role.findMany({
+        where: { workspaceId, id: { in: roleIds } },
+        select: {
+          permissions: { select: { permissionKey: true } },
+        },
+      }),
+    ]);
+
+    this.assertSafeSelfAuthorizationChange(
+      permissionSet(currentAssignments.map(({ role }) => role)),
+      permissionSet(requestedRoles),
+    );
+  }
+
+  private async assertSafeSelfRolePermissionChange(
+    workspaceId: string,
+    userId: string,
+    roleId: string,
+    permissionKeys: string[],
+  ) {
+    const assignments = await this.prisma.userRoleAssignment.findMany({
+      where: { userId, workspaceId },
+      select: {
+        role: {
+          select: {
+            id: true,
+            permissions: { select: { permissionKey: true } },
+          },
+        },
+      },
+    });
+    const currentPermissions = permissionSet(
+      assignments.map(({ role }) => role),
+    );
+    const projectedPermissions = permissionSet(
+      assignments.map(({ role }) =>
+        role.id === roleId
+          ? {
+              permissions: permissionKeys.map((permissionKey) => ({
+                permissionKey,
+              })),
+            }
+          : role,
+      ),
+    );
+
+    this.assertSafeSelfAuthorizationChange(
+      currentPermissions,
+      projectedPermissions,
+    );
+  }
+
+  private assertSafeSelfAuthorizationChange(
+    currentPermissions: Set<string>,
+    requestedPermissions: Set<string>,
+  ) {
+    const addedPermissions = [...requestedPermissions].filter(
+      (permissionKey) => !currentPermissions.has(permissionKey),
+    );
+    if (addedPermissions.length)
+      throw new BadRequestException(
+        "You cannot grant yourself permissions you do not already have",
+      );
+    if (!requestedPermissions.has(Permissions.AUTHORIZATION_MANAGE))
+      throw new BadRequestException(
+        "You cannot remove your own authorization management access",
+      );
+  }
+}
+
+function permissionSet(
+  roles: Array<{ permissions: Array<{ permissionKey: string }> }>,
+) {
+  return new Set(
+    roles.flatMap(({ permissions }) =>
+      permissions.map(({ permissionKey }) => permissionKey),
+    ),
+  );
 }
 
 function toRoleResponse(role: any) {
