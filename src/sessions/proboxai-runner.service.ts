@@ -44,6 +44,7 @@ export class ProboxAiRunner {
     const args = [
       "exec",
       "--json",
+      "--skip-git-repo-check",
       "--sandbox",
       options.sandbox,
       "-C",
