@@ -65,6 +65,7 @@ export class ProboxAiRunner {
       shell: false,
       env: this.safeEnvironment(),
     });
+    child.stdin.end();
     this.processes.set(options.sessionId, child);
     const archivePath = await this.archivePath(options.sessionId);
     const consume = this.consumeJsonLines(child, archivePath, onEvent);

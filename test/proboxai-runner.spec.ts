@@ -97,7 +97,10 @@ describe("ProboxAiRunner start", () => {
   });
 
   it("starts Codex with the non-Git repository check skipped", async () => {
+    const stdin = new PassThrough();
+    const endSpy = jest.spyOn(stdin, "end");
     const child = Object.assign(new EventEmitter(), {
+      stdin,
       stderr: new PassThrough(),
       stdout: new PassThrough(),
     });
@@ -125,6 +128,7 @@ describe("ProboxAiRunner start", () => {
       },
       jest.fn(),
     );
+    expect(endSpy).toHaveBeenCalledTimes(1);
     await closeListenerReady;
     child.stdout.end();
     child.stderr.end();
