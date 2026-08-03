@@ -18,6 +18,8 @@ export interface RunnerOptions {
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   prompt: string;
   model?: string;
+  providerId: string;
+  reasoningEffort?: string;
 }
 export interface RunnerEvent {
   type: string;
@@ -50,7 +52,13 @@ export class ProboxAiRunner {
       "-C",
       options.cwd,
     ];
+    args.push("-c", `model_provider=${JSON.stringify(options.providerId)}`);
     if (options.model) args.push("--model", options.model);
+    if (options.reasoningEffort)
+      args.push(
+        "-c",
+        `model_reasoning_effort=${JSON.stringify(options.reasoningEffort)}`,
+      );
     args.push(options.prompt);
     const child = spawn(bin, args, {
       stdio: "pipe",
@@ -183,6 +191,13 @@ export class ProboxAiRunner {
       USERPROFILE,
       PROBOXAI_RUNNER_TOKEN,
       ANTHROPIC_API_KEY,
+      GEMINI_API_KEY,
+      AWS_ACCESS_KEY_ID,
+      AWS_SECRET_ACCESS_KEY,
+      AWS_SESSION_TOKEN,
+      AWS_PROFILE,
+      AWS_REGION,
+      AWS_DEFAULT_REGION,
     } = process.env;
     return {
       NODE_ENV,
@@ -191,6 +206,13 @@ export class ProboxAiRunner {
       USERPROFILE,
       PROBOXAI_RUNNER_TOKEN,
       ANTHROPIC_API_KEY,
+      GEMINI_API_KEY,
+      AWS_ACCESS_KEY_ID,
+      AWS_SECRET_ACCESS_KEY,
+      AWS_SESSION_TOKEN,
+      AWS_PROFILE,
+      AWS_REGION,
+      AWS_DEFAULT_REGION,
     };
   }
 

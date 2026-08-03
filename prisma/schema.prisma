@@ -627,28 +627,34 @@ model TemplateObjectCleanup {
 }
 
 model ProboxAiSession {
-  id            String            @id @default(uuid())
-  workspaceId   String
-  workspace     Workspace         @relation(fields: [workspaceId], references: [id])
-  taskId        String
-  task          Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  creatorId     String
-  creator       User              @relation("sessionCreator", fields: [creatorId], references: [id])
-  status        SessionStatus     @default(QUEUED)
-  cwd           String
-  sandbox       String
-  model         String?
-  codexThreadId String?           @unique
-  processId     Int?
-  startedAt     DateTime?
-  endedAt       DateTime?
-  lastSequence  Int               @default(0)
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  turns         ProboxAiTurn[]
-  events        SessionEvent[]
-  artifacts     SessionArtifact[]
-  approvals     ApprovalRequest[]
+  id                       String            @id @default(uuid())
+  workspaceId              String
+  workspace                Workspace         @relation(fields: [workspaceId], references: [id])
+  taskId                   String
+  task                     Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  creatorId                String
+  creator                  User              @relation("sessionCreator", fields: [creatorId], references: [id])
+  status                   SessionStatus     @default(QUEUED)
+  cwd                      String
+  sandbox                  String
+  model                    String?
+  providerId               String            @default("openai")
+  requestedModel           String?
+  effectiveModel           String?
+  requestedReasoningEffort String?
+  effectiveReasoningEffort String?
+  catalogSnapshot          Json?
+  codexThreadId            String?           @unique
+  processId                Int?
+  startedAt                DateTime?
+  endedAt                  DateTime?
+  lastSequence             Int               @default(0)
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  turns                    ProboxAiTurn[]
+  events                   SessionEvent[]
+  artifacts                SessionArtifact[]
+  approvals                ApprovalRequest[]
 
   @@index([taskId, createdAt])
   @@index([status, createdAt])

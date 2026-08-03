@@ -42,6 +42,27 @@ export class CreateSessionDto {
   @IsOptional()
   @IsString()
   model?: string;
+
+  @ApiPropertyOptional({
+    enum: ["openai", "amazon-bedrock", "anthropic", "deepmind"],
+    default: "openai",
+    description:
+      "Managed provider ID. The provider/model/effort combination is validated against the runtime catalog.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  providerId?: string;
+
+  @ApiPropertyOptional({
+    enum: ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+    description:
+      "Optional model-specific thinking effort. Omit it to use the selected model's catalog default.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  reasoningEffort?: string;
 }
 
 export class CreateTurnDto {
@@ -77,6 +98,15 @@ export class SessionResponseDto {
   @ApiProperty({ enum: ["read-only", "workspace-write", "danger-full-access"] })
   sandbox!: string;
   @ApiProperty({ nullable: true, example: "gpt-5.4" }) model!: string | null;
+  @ApiProperty({ example: "openai" }) providerId!: string;
+  @ApiProperty({ nullable: true, example: "gpt-5.6-terra" })
+  requestedModel!: string | null;
+  @ApiProperty({ nullable: true, example: "gpt-5.6-terra" })
+  effectiveModel!: string | null;
+  @ApiProperty({ nullable: true, example: "medium" })
+  requestedReasoningEffort!: string | null;
+  @ApiProperty({ nullable: true, example: "medium" })
+  effectiveReasoningEffort!: string | null;
   @ApiProperty({
     nullable: true,
     example: "019f92e1-d51b-7780-a795-13f9dabf0106",
@@ -94,6 +124,17 @@ export class SessionResponseDto {
   lastSequence!: number;
   @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
   @ApiProperty({ type: String, format: "date-time" }) updatedAt!: string;
+}
+
+export class ModelCatalogQueryDto {
+  @ApiPropertyOptional({
+    enum: ["openai", "amazon-bedrock", "anthropic", "deepmind"],
+    description:
+      "Return models for one provider. Omit to return all providers.",
+  })
+  @IsOptional()
+  @IsString()
+  providerId?: string;
 }
 
 export class TurnResponseDto {

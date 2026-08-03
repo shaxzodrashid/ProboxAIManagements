@@ -8,6 +8,7 @@ import { ProboxAiRunner, RunnerEvent } from "./proboxai-runner.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SessionEventsService } from "./session-events.service";
 import { CreateSessionDto } from "./dto";
+import { ModelCatalogService } from "./model-catalog.service";
 
 @Injectable()
 export class SessionsService {
@@ -15,6 +16,7 @@ export class SessionsService {
     private readonly prisma: PrismaService,
     private readonly runner: ProboxAiRunner,
     private readonly liveEvents: SessionEventsService,
+    private readonly modelCatalog: ModelCatalogService,
   ) {}
 
   async create(actorId: string, dto: CreateSessionDto) {
@@ -26,6 +28,11 @@ export class SessionsService {
       throw new ForbiddenException(
         "Only the assigned manager may start a session",
       );
+    const selection = this.modelCatalog.resolve(
+      dto.providerId,
+      dto.model,
+      dto.reasoningEffort,
+    );
     const session = await this.prisma.proboxAiSession.create({
       data: {
         workspaceId: task.workspaceId,
@@ -33,7 +40,13 @@ export class SessionsService {
         creatorId: actorId,
         cwd: dto.cwd,
         sandbox: dto.sandbox,
-        model: dto.model,
+        model: selection.effectiveModel,
+        providerId: selection.providerId,
+        requestedModel: selection.requestedModel,
+        effectiveModel: selection.effectiveModel,
+        requestedReasoningEffort: selection.requestedReasoningEffort,
+        effectiveReasoningEffort: selection.effectiveReasoningEffort,
+        catalogSnapshot: selection.catalogSnapshot as Prisma.InputJsonValue,
         status: SessionStatus.QUEUED,
       },
     });
@@ -71,6 +84,8 @@ export class SessionsService {
             "read-only" | "workspace-write" | "danger-full-access",
           prompt,
           model: session.model ?? undefined,
+          providerId: session.providerId,
+          reasoningEffort: session.effectiveReasoningEffort ?? undefined,
         },
         (event) => this.recordEvent(sessionId, turn.id, event),
       );
@@ -122,6 +137,13 @@ export class SessionsService {
         where: { sessionId },
         orderBy: { startedAt: "asc" },
       }),
+    };
+  }
+
+  listModelCatalog(providerId?: string) {
+    return {
+      version: this.modelCatalog.version,
+      providers: this.modelCatalog.list(providerId),
     };
   }
 

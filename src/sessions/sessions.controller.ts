@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Sse,
   UseGuards,
 } from "@nestjs/common";
@@ -23,6 +24,7 @@ import {
   InterruptSessionResponseDto,
   SessionDetailResponseDto,
   SessionEventDto,
+  ModelCatalogQueryDto,
   SessionResponseDto,
 } from "./dto";
 import { SessionsService } from "./sessions.service";
@@ -47,6 +49,19 @@ export class SessionsController {
     private readonly sessions: SessionsService,
     private readonly events: SessionEventsService,
   ) {}
+  @Get("model-catalog")
+  @RequirePermissions(Permissions.SESSIONS_CREATE)
+  @ApiOperation({
+    summary: "List managed session models and thinking efforts",
+    description:
+      "Returns the current managed catalog. Clients must only offer each model's supportedReasoningEfforts and use defaultReasoningEffort when no effort is chosen.",
+  })
+  @ApiOkResponse({ description: "Catalog used to validate new sessions." })
+  @ApiAuthenticationErrors()
+  @ApiValidationErrors()
+  modelCatalog(@Query() query: ModelCatalogQueryDto) {
+    return this.sessions.listModelCatalog(query.providerId);
+  }
   @Post()
   @RequirePermissions(Permissions.SESSIONS_CREATE)
   @ApiOperation({

@@ -29,7 +29,7 @@ describe("ProboxAiRunner hash chain", () => {
 describe("ProboxAiRunner managed-session environment", () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it("forwards the Anthropic key while retaining the credential allowlist", () => {
+  it("forwards provider credentials while retaining the credential allowlist", () => {
     jest.replaceProperty(process, "env", {
       NODE_ENV: "test",
       PATH: "/test/bin",
@@ -37,6 +37,10 @@ describe("ProboxAiRunner managed-session environment", () => {
       USERPROFILE: "C:\\test\\home",
       PROBOXAI_RUNNER_TOKEN: "runner-test-token",
       ANTHROPIC_API_KEY: "anthropic-test-key",
+      GEMINI_API_KEY: "gemini-test-key",
+      AWS_ACCESS_KEY_ID: "aws-access-key",
+      AWS_SECRET_ACCESS_KEY: "aws-secret-key",
+      AWS_REGION: "us-east-1",
       DATABASE_URL: "postgresql://must-not-be-forwarded",
       JWT_SECRET: "must-not-be-forwarded",
     });
@@ -52,6 +56,13 @@ describe("ProboxAiRunner managed-session environment", () => {
       USERPROFILE: "C:\\test\\home",
       PROBOXAI_RUNNER_TOKEN: "runner-test-token",
       ANTHROPIC_API_KEY: "anthropic-test-key",
+      GEMINI_API_KEY: "gemini-test-key",
+      AWS_ACCESS_KEY_ID: "aws-access-key",
+      AWS_SECRET_ACCESS_KEY: "aws-secret-key",
+      AWS_SESSION_TOKEN: undefined,
+      AWS_PROFILE: undefined,
+      AWS_REGION: "us-east-1",
+      AWS_DEFAULT_REGION: undefined,
     });
   });
 });
@@ -108,6 +119,8 @@ describe("ProboxAiRunner start", () => {
         cwd: "/opt/marketing/Brandbook_E2E",
         sandbox: "read-only",
         model: "gpt-5.4",
+        providerId: "openai",
+        reasoningEffort: "high",
         prompt: "Create the brandbook.",
       },
       jest.fn(),
@@ -128,8 +141,12 @@ describe("ProboxAiRunner start", () => {
         "read-only",
         "-C",
         "/opt/marketing/Brandbook_E2E",
+        "-c",
+        'model_provider="openai"',
         "--model",
         "gpt-5.4",
+        "-c",
+        'model_reasoning_effort="high"',
         "Create the brandbook.",
       ],
       expect.objectContaining({ shell: false }),
