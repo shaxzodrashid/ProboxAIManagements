@@ -48,10 +48,16 @@ All routes are under `/api/v1` and use an access bearer token.
 | `DELETE` | `/authorization/roles/:id`             | `authorization.manage` | Delete an unassigned custom role                         |
 | `PUT`    | `/authorization/users/:userId/roles`   | `authorization.manage` | Atomically replace a user's roles                        |
 
-Role mutation is workspace-scoped. Built-in roles cannot be deleted, assigned
-roles cannot be deleted, and callers cannot change their own roles or mutate a
-role currently providing their access. These constraints prevent accidental
-self-lockout while allowing another authorized administrator to make changes.
+Role mutation is workspace-scoped. Built-in roles cannot be deleted and
+assigned roles cannot be deleted. Callers may change their own role assignments
+or a role currently assigned to them only when the resulting effective
+permissions add nothing they do not already hold and still include
+`authorization.manage`. This permits a sole administrator to add a less
+privileged role while preventing self-escalation and accidental self-lockout.
+
+`PUT /authorization/users/:userId/roles` replaces the complete role list. To
+add a role without removing existing roles, clients must send both the existing
+role IDs and the new role ID.
 
 ## User API compatibility
 

@@ -134,15 +134,145 @@ describe("AuthorizationService", () => {
     });
   });
 
-  it("prevents administrators from replacing their own roles", async () => {
-    const service = new AuthorizationService({} as PrismaService);
+  it("allows an administrator to add a role without gaining permissions", async () => {
+    const prisma: any = {
+      user: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce({ id: "admin-1" })
+          .mockResolvedValueOnce({
+            id: "admin-1",
+            roleAssignments: [
+              {
+                role: {
+                  id: "role-admin",
+                  key: "ADMIN",
+                  name: "Administrator",
+                },
+              },
+              {
+                role: {
+                  id: "role-manager",
+                  key: "MANAGER",
+                  name: "Manager",
+                },
+              },
+            ],
+          }),
+      },
+      role: {
+        count: jest.fn().mockResolvedValue(2),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            permissions: [
+              { permissionKey: "authorization.manage" },
+              { permissionKey: "projects.read" },
+            ],
+          },
+          { permissions: [{ permissionKey: "projects.read" }] },
+        ]),
+      },
+      userRoleAssignment: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            role: {
+              permissions: [
+                { permissionKey: "authorization.manage" },
+                { permissionKey: "projects.read" },
+              ],
+            },
+          },
+        ]),
+        deleteMany: jest.fn().mockReturnValue("delete-roles"),
+        createMany: jest.fn().mockReturnValue("create-roles"),
+      },
+      $transaction: jest.fn().mockResolvedValue([]),
+    };
+    const service = new AuthorizationService(prisma as PrismaService);
+
     await expect(
-      service.setUserRoles("workspace-1", "admin-1", "admin-1", ["role-1"]),
-    ).rejects.toThrow("cannot change your own roles");
+      service.setUserRoles("workspace-1", "admin-1", "admin-1", [
+        "role-admin",
+        "role-manager",
+      ]),
+    ).resolves.toEqual({
+      id: "admin-1",
+      roles: [
+        { id: "role-admin", key: "ADMIN", name: "Administrator" },
+        { id: "role-manager", key: "MANAGER", name: "Manager" },
+      ],
+    });
   });
 
-  it("prevents changing permissions on a role used by the caller", async () => {
+  it("prevents administrators from granting themselves new permissions", async () => {
     const prisma: any = {
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "admin-1" }) },
+      role: {
+        count: jest.fn().mockResolvedValue(1),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            permissions: [
+              { permissionKey: "authorization.manage" },
+              { permissionKey: "projects.read" },
+            ],
+          },
+        ]),
+      },
+      userRoleAssignment: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            role: {
+              permissions: [{ permissionKey: "authorization.manage" }],
+            },
+          },
+        ]),
+      },
+    };
+    const service = new AuthorizationService(prisma as PrismaService);
+
+    await expect(
+      service.setUserRoles("workspace-1", "admin-1", "admin-1", [
+        "role-elevated",
+      ]),
+    ).rejects.toThrow("cannot grant yourself permissions");
+  });
+
+  it("prevents administrators from removing their own management access", async () => {
+    const prisma: any = {
+      user: { findFirst: jest.fn().mockResolvedValue({ id: "admin-1" }) },
+      role: {
+        count: jest.fn().mockResolvedValue(1),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { permissions: [{ permissionKey: "projects.read" }] },
+          ]),
+      },
+      userRoleAssignment: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            role: {
+              permissions: [
+                { permissionKey: "authorization.manage" },
+                { permissionKey: "projects.read" },
+              ],
+            },
+          },
+        ]),
+      },
+    };
+    const service = new AuthorizationService(prisma as PrismaService);
+
+    await expect(
+      service.setUserRoles("workspace-1", "admin-1", "admin-1", [
+        "role-manager",
+      ]),
+    ).rejects.toThrow("cannot remove your own authorization management");
+  });
+
+  it("prevents gaining permissions through a role assigned to the caller", async () => {
+    const prisma: any = {
+      permission: { count: jest.fn().mockResolvedValue(1) },
       role: {
         findFirst: jest.fn().mockResolvedValue({
           id: "role-admin",
@@ -150,10 +280,22 @@ describe("AuthorizationService", () => {
           userAssignments: [{ userId: "admin-1" }],
         }),
       },
+      userRoleAssignment: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            role: {
+              id: "role-admin",
+              permissions: [{ permissionKey: "authorization.manage" }],
+            },
+          },
+        ]),
+      },
     };
     const service = new AuthorizationService(prisma as PrismaService);
     await expect(
-      service.setRolePermissions("workspace-1", "admin-1", "role-admin", []),
-    ).rejects.toThrow("assigned to yourself");
+      service.setRolePermissions("workspace-1", "admin-1", "role-admin", [
+        "projects.read",
+      ]),
+    ).rejects.toThrow("cannot grant yourself permissions");
   });
 });
