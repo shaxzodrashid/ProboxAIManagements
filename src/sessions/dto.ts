@@ -44,7 +44,13 @@ export class CreateSessionDto {
   model?: string;
 
   @ApiPropertyOptional({
-    enum: ["openai", "amazon-bedrock", "anthropic", "deepmind"],
+    enum: [
+      "openai",
+      "amazon-bedrock",
+      "amazon-bedrock-runtime",
+      "anthropic",
+      "deepmind",
+    ],
     default: "openai",
     description:
       "Managed provider ID. The provider/model/effort combination is validated against the runtime catalog.",
@@ -55,7 +61,7 @@ export class CreateSessionDto {
   providerId?: string;
 
   @ApiPropertyOptional({
-    enum: ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+    enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
     description:
       "Optional model-specific thinking effort. Omit it to use the selected model's catalog default.",
   })
@@ -128,7 +134,13 @@ export class SessionResponseDto {
 
 export class ModelCatalogQueryDto {
   @ApiPropertyOptional({
-    enum: ["openai", "amazon-bedrock", "anthropic", "deepmind"],
+    enum: [
+      "openai",
+      "amazon-bedrock",
+      "amazon-bedrock-runtime",
+      "anthropic",
+      "deepmind",
+    ],
     description:
       "Return models for one provider. Omit to return all providers.",
   })

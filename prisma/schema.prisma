@@ -158,6 +158,38 @@ model Workspace {
   roles                  Role[]
 }
 
+// Telegram UI state is durable; identifiers are re-authorized on every use.
+model TelegramConversation {
+  userId          String   @id
+  projectId       String?
+  sessionId       String?
+  providerId      String   @default("openai")
+  model           String?
+  reasoningEffort String?
+  updatedAt       DateTime @updatedAt
+}
+
+model TelegramUpdate {
+  updateId  BigInt   @id
+  createdAt DateTime @default(now())
+}
+
+model TelegramSession {
+  sessionId     String          @id
+  session       ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId        String
+  chatId        BigInt
+  projectId     String
+  lastSequence  Int             @default(0)
+  toolMessageId Int?
+  toolState     Json            @default("{}")
+  finished      Boolean         @default(false)
+  createdAt     DateTime        @default(now())
+
+  @@index([finished, createdAt])
+  @@index([userId, projectId])
+}
+
 model User {
   id                        String                            @id @default(uuid())
   workspaceId               String
@@ -655,6 +687,7 @@ model ProboxAiSession {
   events                   SessionEvent[]
   artifacts                SessionArtifact[]
   approvals                ApprovalRequest[]
+  telegram                 TelegramSession?
 
   @@index([taskId, createdAt])
   @@index([status, createdAt])

@@ -36,6 +36,7 @@ describe("ProboxAiRunner managed-session environment", () => {
       HOME: "/test/home",
       USERPROFILE: "C:\\test\\home",
       PROBOXAI_RUNNER_TOKEN: "runner-test-token",
+      PROBOXAI_CODEX_BIN: "/test/custom-codex",
       ANTHROPIC_API_KEY: "anthropic-test-key",
       GEMINI_API_KEY: "gemini-test-key",
       AWS_ACCESS_KEY_ID: "aws-access-key",
@@ -55,6 +56,7 @@ describe("ProboxAiRunner managed-session environment", () => {
       HOME: "/test/home",
       USERPROFILE: "C:\\test\\home",
       PROBOXAI_RUNNER_TOKEN: "runner-test-token",
+      PROBOXAI_CODEX_BIN: "/test/custom-codex",
       ANTHROPIC_API_KEY: "anthropic-test-key",
       GEMINI_API_KEY: "gemini-test-key",
       AWS_ACCESS_KEY_ID: "aws-access-key",
@@ -96,64 +98,70 @@ describe("ProboxAiRunner start", () => {
     );
   });
 
-  it("starts Codex with the non-Git repository check skipped", async () => {
-    const stdin = new PassThrough();
-    const endSpy = jest.spyOn(stdin, "end");
-    const child = Object.assign(new EventEmitter(), {
-      stdin,
-      stderr: new PassThrough(),
-      stdout: new PassThrough(),
-    });
-    spawnMock.mockReturnValue(child as never);
-    const paths = { assertAllowedPath: jest.fn() };
-    const runner = new ProboxAiRunner(paths as never);
-    const closeListenerReady = new Promise<void>((resolve) => {
-      const onNewListener = (event: string | symbol) => {
-        if (event !== "close") return;
-        child.off("newListener", onNewListener);
-        resolve();
-      };
-      child.on("newListener", onNewListener);
-    });
+  it.each([undefined, "thread-123"])(
+    "starts/resumes Codex with the non-Git repository check skipped (%s)",
+    async (threadId) => {
+      const stdin = new PassThrough();
+      const endSpy = jest.spyOn(stdin, "end");
+      const child = Object.assign(new EventEmitter(), {
+        stdin,
+        stderr: new PassThrough(),
+        stdout: new PassThrough(),
+      });
+      spawnMock.mockReturnValue(child as never);
+      const paths = { assertAllowedPath: jest.fn() };
+      const runner = new ProboxAiRunner(paths as never);
+      const closeListenerReady = new Promise<void>((resolve) => {
+        const onNewListener = (event: string | symbol) => {
+          if (event !== "close") return;
+          child.off("newListener", onNewListener);
+          resolve();
+        };
+        child.on("newListener", onNewListener);
+      });
 
-    const start = runner.start(
-      {
-        sessionId: "session-1",
-        cwd: "/opt/marketing/Brandbook_E2E",
-        sandbox: "read-only",
-        model: "gpt-5.4",
-        providerId: "openai",
-        reasoningEffort: "high",
-        prompt: "Create the brandbook.",
-      },
-      jest.fn(),
-    );
-    expect(endSpy).toHaveBeenCalledTimes(1);
-    await closeListenerReady;
-    child.stdout.end();
-    child.stderr.end();
-    child.emit("close", 0);
+      const start = runner.start(
+        {
+          sessionId: "session-1",
+          cwd: "/opt/marketing/Brandbook_E2E",
+          sandbox: "read-only",
+          model: "gpt-5.4",
+          providerId: "openai",
+          reasoningEffort: "high",
+          prompt: "Create the brandbook.",
+          threadId,
+        },
+        jest.fn(),
+      );
+      await closeListenerReady;
+      expect(endSpy).toHaveBeenCalledTimes(1);
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("close", 0);
 
-    await expect(start).resolves.toBe(0);
-    expect(spawnMock).toHaveBeenCalledWith(
-      expect.any(String),
-      [
-        "exec",
-        "--json",
-        "--skip-git-repo-check",
-        "--sandbox",
-        "read-only",
-        "-C",
-        "/opt/marketing/Brandbook_E2E",
-        "-c",
-        'model_provider="openai"',
-        "--model",
-        "gpt-5.4",
-        "-c",
-        'model_reasoning_effort="high"',
-        "Create the brandbook.",
-      ],
-      expect.objectContaining({ shell: false }),
-    );
-  });
+      await expect(start).resolves.toBe(0);
+      expect(spawnMock).toHaveBeenCalledWith(
+        expect.any(String),
+        [
+          "exec",
+          "--json",
+          "--skip-git-repo-check",
+          "--sandbox",
+          "read-only",
+          "-C",
+          "/opt/marketing/Brandbook_E2E",
+          "-c",
+          'model_provider="openai"',
+          "--model",
+          "gpt-5.4",
+          "-c",
+          'model_reasoning_effort="high"',
+          ...(threadId ? ["resume", threadId] : []),
+          "--",
+          "Create the brandbook.",
+        ],
+        expect.objectContaining({ shell: false }),
+      );
+    },
+  );
 });

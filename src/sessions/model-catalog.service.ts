@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 
 export const REASONING_EFFORTS = [
+  "none",
   "minimal",
   "low",
   "medium",
@@ -42,8 +43,21 @@ const PROVIDERS: readonly ModelProviderCatalog[] = [
   {
     id: "openai",
     displayName: "OpenAI",
-    defaultModel: "gpt-5.6-terra",
+    defaultModel: "gpt-6-sol",
     models: [
+      model("gpt-6-astra", "GPT-6 Astra", "low", [
+        ...STANDARD_EFFORTS,
+        "ultra",
+      ]),
+      model("gpt-6-sol", "GPT-6 Sol", "medium", [
+        "none",
+        ...STANDARD_EFFORTS,
+        "ultra",
+      ]),
+      model("gpt-6-luna", "GPT-6 Luna", "medium", [
+        "none",
+        ...STANDARD_EFFORTS,
+      ]),
       model("gpt-5.6-sol", "GPT-5.6 Sol", "low", [
         ...STANDARD_EFFORTS,
         "ultra",
@@ -60,8 +74,17 @@ const PROVIDERS: readonly ModelProviderCatalog[] = [
   {
     id: "amazon-bedrock",
     displayName: "Amazon Bedrock",
-    defaultModel: "openai.gpt-5.6-terra",
+    defaultModel: "openai.gpt-6-sol",
     models: [
+      model("openai.gpt-6-sol", "GPT-6 Sol", "medium", [
+        "none",
+        ...STANDARD_EFFORTS,
+      ]),
+      model("openai.gpt-6-astra", "GPT-6 Astra", "low", STANDARD_EFFORTS),
+      model("openai.gpt-6-luna", "GPT-6 Luna", "medium", [
+        "none",
+        ...STANDARD_EFFORTS,
+      ]),
       model("openai.gpt-5.6-sol", "GPT-5.6 Sol", "low", STANDARD_EFFORTS),
       model(
         "openai.gpt-5.6-terra",
@@ -75,10 +98,61 @@ const PROVIDERS: readonly ModelProviderCatalog[] = [
     ],
   },
   {
+    id: "amazon-bedrock-runtime",
+    displayName: "Amazon Bedrock Runtime",
+    defaultModel: "global.openai.gpt-6-sol",
+    models: [
+      ...["global", "us"].flatMap((region) => [
+        model(`${region}.openai.gpt-6-sol`, `GPT-6 Sol (${region})`, "medium", [
+          "none",
+          ...STANDARD_EFFORTS,
+        ]),
+        model(
+          `${region}.openai.gpt-6-astra`,
+          `GPT-6 Astra (${region})`,
+          "low",
+          STANDARD_EFFORTS,
+        ),
+        model(
+          `${region}.openai.gpt-6-luna`,
+          `GPT-6 Luna (${region})`,
+          "medium",
+          ["none", ...STANDARD_EFFORTS],
+        ),
+        model(
+          `${region}.openai.gpt-5.6-sol`,
+          `GPT-5.6 Sol (${region})`,
+          "low",
+          STANDARD_EFFORTS,
+        ),
+        model(
+          `${region}.openai.gpt-5.6-terra`,
+          `GPT-5.6 Terra (${region})`,
+          "medium",
+          STANDARD_EFFORTS,
+        ),
+        model(
+          `${region}.openai.gpt-5.6-luna`,
+          `GPT-5.6 Luna (${region})`,
+          "medium",
+          STANDARD_EFFORTS,
+        ),
+      ]),
+    ],
+  },
+  {
     id: "anthropic",
     displayName: "Anthropic",
-    defaultModel: "claude-opus-5",
+    defaultModel: "claude-opus-5-5",
     models: [
+      model("claude-opus-5-5", "Claude Opus 5.5", "medium", STANDARD_EFFORTS),
+      model("claude-fable-5-1", "Claude Fable 5.1", "high", STANDARD_EFFORTS),
+      model(
+        "claude-mythos-5-1",
+        "Claude Mythos 5.1 (invite only)",
+        "high",
+        STANDARD_EFFORTS,
+      ),
       model("claude-opus-5", "Claude Opus 5", "high", STANDARD_EFFORTS),
       model("claude-sonnet-5", "Claude Sonnet 5", "high", STANDARD_EFFORTS),
       model("claude-fable-5", "Claude Fable 5", "high", STANDARD_EFFORTS),
@@ -96,6 +170,11 @@ const PROVIDERS: readonly ModelProviderCatalog[] = [
     defaultModel: "gemini-3.1-pro-preview",
     models: [
       model("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", "high", [
+        "low",
+        "medium",
+        "high",
+      ]),
+      model("gemini-3.8-flash", "Gemini 3.8 Flash", "medium", [
         "low",
         "medium",
         "high",
@@ -132,7 +211,7 @@ function model(
 
 @Injectable()
 export class ModelCatalogService {
-  readonly version = "2026-08-03";
+  readonly version = "2026-09-27";
 
   list(providerId?: string): readonly ModelProviderCatalog[] {
     if (!providerId) return PROVIDERS;

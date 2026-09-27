@@ -232,6 +232,56 @@ registering the webhook. Check `journalctl -u proboxai -f` for service logs;
 session JSONL, stderr, and final Git diffs are retained under
 `/var/lib/proboxai/archive`.
 
+## Telegram tasks and session updates
+
+After linking Telegram and completing account registration, open the bot in a
+private chat and use `/projects` to select an existing ready project. Use
+`/model` to choose the provider, model and reasoning effort, then send a task.
+The bot creates a task assigned to your account and runs it in that project's
+directory with `workspace-write` sandboxing. Subsequent messages resume the
+same Codex thread. `/new` starts a fresh session with the next message;
+`/sessions`, `/status` and `/stop` select recent sessions, report status and
+interrupt work. Model changes apply to new sessions.
+
+Assistant commentary and final replies stay in the chat. Consecutive tool
+events are combined into a temporary progress message: each refresh deletes
+the previous tool message and sends a replacement. A permanent tool summary
+is sent before the next assistant message or turn completion. Long replies
+are split safely. Local Markdown links and inline-code file references produce
+download buttons; clicking one rechecks the account, session and project access
+and sends the referenced file as a Telegram document (up to 49 MB). External
+URLs, paths outside the project, symbolic links and directories are excluded.
+
+Telegram commands use current role permissions, project membership and the
+session's assigned manager. Running a new task requires `tasks.create`,
+`sessions.create`, `sessions.read`, `projects.read` and `projects.files.write`;
+follow-ups and interrupts require `sessions.manage`. Download buttons require
+`projects.files.read`. Read-only workspace project access alone does not allow
+task execution.
+
+Deploy the `20260927000000_telegram_sessions` migration with
+`pnpm prisma:deploy`, regenerate Prisma, build, and restart the service. Register
+the existing webhook with both `message` and `callback_query` in
+`allowed_updates`, and the configured webhook secret. Keep one application
+instance for the process-local runner and Telegram worker. Do not start a
+second worker against the same database while the first is running.
+
+Project/model selection, Telegram session bindings, event cursors and webhook
+update IDs are persisted. A worker restart marks its interrupted runs and drains
+persisted messages; it never automatically reruns a prompt. Completed messages
+are not replayed during normal polling. Delivery is at least once: a crash after
+Telegram accepts a message but before its cursor is saved can repeat that
+message. Ambiguous command failures are not automatically retried; check
+`/status` or `/sessions` before submitting another task.
+
+The shared API/bot catalog follows **our custom Codex fork**, including OpenAI,
+Anthropic, Google DeepMind, Amazon Bedrock and Amazon Bedrock Runtime. The
+September 27 catalog adds GPT-6 Astra/Sol/Luna, Claude Opus 5.5/Fable 5.1/Mythos
+5.1, Gemini 3.8 Flash and Bedrock global/US routing variants. Provider-specific
+reasoning limits are validated; Mythos retains its invite-only label. Models
+still require the corresponding provider account/credentials. The default
+OpenAI model is GPT-6 Sol; Anthropic defaults to Claude Opus 5.5.
+
 ## Safety boundary
 
 Managed coding sessions never accept a runner executable from an API request.
@@ -242,8 +292,9 @@ administrator-only automation facility. Structured commands also use
 `shell: false`; shell commands use the fixed server-configured Bash path. Both
 run with a sanitized environment that excludes database, JWT, Telegram, and
 MinIO secrets. Managed coding sessions receive only their runtime variables,
-the optional runner token, and `ANTHROPIC_API_KEY` when configured so an
-explicitly selected Anthropic model can authenticate. Do not add other provider
+the optional runner token, the configured custom Codex binary path, and the
+allowlisted Anthropic, Gemini and AWS credentials when configured so the
+selected provider can authenticate. Do not add other provider
 or plugin credentials to this allowlist without a demonstrated managed-session
 requirement and a separate review.
 

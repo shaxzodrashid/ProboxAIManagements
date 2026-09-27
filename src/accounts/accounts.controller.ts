@@ -24,6 +24,7 @@ import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
 import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { TelegramService } from "../telegram/telegram.service";
+import { TelegramBotService } from "../telegram/telegram-bot.service";
 import { CreateUserDto, UserResponseDto } from "./accounts.dto";
 import { AccountsService } from "./accounts.service";
 import {
@@ -41,6 +42,7 @@ export class AccountsController {
   constructor(
     private readonly accounts: AccountsService,
     private readonly telegram: TelegramService,
+    private readonly bot: TelegramBotService,
   ) {}
   @Get("users")
   @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -128,9 +130,9 @@ export class AccountsController {
   @ApiTags("Telegram")
   @ApiSecurity("telegram-webhook-secret")
   @ApiOperation({
-    summary: "Receive Telegram contact-verification updates",
+    summary: "Receive Telegram contact, task and inline-keyboard updates",
     description:
-      "Telegram calls this endpoint after a pending user shares their own contact in a private chat. Invalid or irrelevant updates deliberately receive `200` so Telegram does not retry them.",
+      "Authenticated Telegram webhook for private-chat contact verification, project/model selection, tasks, session updates and file downloads. Commands use the linked account's current permissions. Invalid or irrelevant updates receive 200.",
   })
   @ApiHeader({
     name: "x-telegram-bot-api-secret-token",
@@ -163,8 +165,11 @@ export class AccountsController {
       secret !== process.env.TELEGRAM_WEBHOOK_SECRET
     )
       return;
+    if (!update || typeof update !== "object") return;
+    if (await this.bot.handle(update)) return;
     const message = update?.message;
     if (!message) return;
+    if (message.chat?.type !== "private") return;
     if (message.text === "/start") {
       await this.telegram.requestContact(String(message.chat.id));
       return;

@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { mkdir, appendFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { StringDecoder } from "node:string_decoder";
 import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
 
 const execFileAsync = promisify(execFile);
@@ -20,6 +21,7 @@ export interface RunnerOptions {
   model?: string;
   providerId: string;
   reasoningEffort?: string;
+  threadId?: string;
 }
 export interface RunnerEvent {
   type: string;
@@ -59,25 +61,34 @@ export class ProboxAiRunner {
         "-c",
         `model_reasoning_effort=${JSON.stringify(options.reasoningEffort)}`,
       );
-    args.push(options.prompt);
+    if (options.threadId) args.push("resume", options.threadId);
+    args.push("--", options.prompt);
+    const archivePath = await this.archivePath(options.sessionId);
     const child = spawn(bin, args, {
       stdio: "pipe",
       shell: false,
       env: this.safeEnvironment(),
+      windowsHide: true,
+      cwd: options.cwd,
     });
     child.stdin.end();
     this.processes.set(options.sessionId, child);
-    const archivePath = await this.archivePath(options.sessionId);
     const consume = this.consumeJsonLines(child, archivePath, onEvent);
     const stderr = this.consumeStderr(child, archivePath);
-    const exitCode = await new Promise<number>((resolveExit, reject) => {
+    const exit = new Promise<number>((resolveExit, reject) => {
       child.once("error", reject);
       child.once("close", (code) => resolveExit(code ?? -1));
     });
-    await Promise.all([consume, stderr]);
-    await this.captureFinalDiff(options, archivePath, onEvent);
-    this.processes.delete(options.sessionId);
-    return exitCode;
+    try {
+      const [exitCode] = await Promise.all([exit, consume, stderr]);
+      await this.captureFinalDiff(options, archivePath, onEvent);
+      return exitCode;
+    } catch (error) {
+      child.kill();
+      throw error;
+    } finally {
+      this.processes.delete(options.sessionId);
+    }
   }
 
   interrupt(sessionId: string): boolean {
@@ -92,13 +103,15 @@ export class ProboxAiRunner {
     onEvent: (event: RunnerEvent) => Promise<void>,
   ) {
     let remainder = "";
+    const decoder = new StringDecoder("utf8");
     for await (const chunk of child.stdout) {
-      remainder += chunk.toString("utf8");
+      remainder += decoder.write(chunk);
       const lines = remainder.split(/\r?\n/);
       remainder = lines.pop() ?? "";
       for (const line of lines)
         await this.consumeLine(line, archivePath, onEvent);
     }
+    remainder += decoder.end();
     if (remainder) await this.consumeLine(remainder, archivePath, onEvent);
   }
 
@@ -109,17 +122,21 @@ export class ProboxAiRunner {
   ) {
     if (!line.trim()) return;
     await appendFile(archivePath, `${line}\n`, "utf8");
+    let payload: Record<string, unknown>;
     try {
-      const payload = JSON.parse(line) as Record<string, unknown>;
-      const type = typeof payload.type === "string" ? payload.type : "unknown";
-      await onEvent({ type, payload, rawLine: line });
+      payload = JSON.parse(line) as Record<string, unknown>;
+      if (!payload || typeof payload !== "object" || Array.isArray(payload))
+        throw new Error("Expected an event object");
     } catch {
       await onEvent({
         type: "runner.invalid_json",
         payload: { line },
         rawLine: line,
       });
+      return;
     }
+    const type = typeof payload.type === "string" ? payload.type : "unknown";
+    await onEvent({ type, payload, rawLine: line });
   }
 
   private async consumeStderr(
@@ -191,6 +208,7 @@ export class ProboxAiRunner {
       HOME,
       USERPROFILE,
       PROBOXAI_RUNNER_TOKEN,
+      PROBOXAI_CODEX_BIN,
       ANTHROPIC_API_KEY,
       GEMINI_API_KEY,
       AWS_ACCESS_KEY_ID,
@@ -206,6 +224,7 @@ export class ProboxAiRunner {
       HOME,
       USERPROFILE,
       PROBOXAI_RUNNER_TOKEN,
+      PROBOXAI_CODEX_BIN,
       ANTHROPIC_API_KEY,
       GEMINI_API_KEY,
       AWS_ACCESS_KEY_ID,

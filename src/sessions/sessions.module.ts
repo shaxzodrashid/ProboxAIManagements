@@ -15,6 +15,6 @@ import { ModelCatalogService } from "./model-catalog.service";
     ProboxAiRunner,
     ModelCatalogService,
   ],
-  exports: [ProboxAiRunner],
+  exports: [ProboxAiRunner, SessionsService, ModelCatalogService],
 })
 export class SessionsModule {}

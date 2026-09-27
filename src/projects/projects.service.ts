@@ -86,6 +86,13 @@ export class ProjectsService {
     };
   }
 
+  async taskDirectory(actor: AuthenticatedUser, projectId: string) {
+    const project = await this.assertSensitiveAccess(actor, projectId);
+    this.assertProjectReady(project);
+    const directory = await this.resolveProjectPath(project, "", true);
+    return { project, directory };
+  }
+
   async setProjectsHome(workspaceId: string, requestedPath: string) {
     const department = await this.departments.defaultForWorkspace(workspaceId);
     const updated = await this.departments.update(workspaceId, department.id, {

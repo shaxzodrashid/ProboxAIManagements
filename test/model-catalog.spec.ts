@@ -8,10 +8,10 @@ describe("ModelCatalogService", () => {
     expect(catalog.resolve("anthropic")).toMatchObject({
       providerId: "anthropic",
       requestedModel: null,
-      effectiveModel: "claude-opus-5",
+      effectiveModel: "claude-opus-5-5",
       requestedReasoningEffort: null,
-      effectiveReasoningEffort: "high",
-      catalogSnapshot: { version: "2026-08-03" },
+      effectiveReasoningEffort: "medium",
+      catalogSnapshot: { version: "2026-09-27" },
     });
   });
 
@@ -39,5 +39,57 @@ describe("ModelCatalogService", () => {
   it("does not expose hidden models through the management catalog", () => {
     const openAi = catalog.list("openai")[0]!;
     expect(openAi.models.map((entry) => entry.id)).not.toContain("gpt-5.4");
+  });
+
+  it("matches the fork's new provider-specific efforts without substituting models", () => {
+    expect(catalog.resolve().effectiveModel).toBe("gpt-6-sol");
+    expect(
+      catalog.resolve("openai", "gpt-6-sol", "none").effectiveReasoningEffort,
+    ).toBe("none");
+    expect(
+      catalog.resolve("openai", "gpt-6-astra").effectiveReasoningEffort,
+    ).toBe("low");
+    expect(() => catalog.resolve("openai", "gpt-6-luna", "ultra")).toThrow();
+    expect(() => catalog.resolve("openai", "gpt-6-astra", "none")).toThrow();
+    expect(
+      catalog.resolve("anthropic", "claude-fable-5-1", "max").effectiveModel,
+    ).toBe("claude-fable-5-1");
+    expect(
+      catalog.resolve("anthropic", "claude-mythos-5-1")
+        .effectiveReasoningEffort,
+    ).toBe("high");
+    expect(
+      catalog.resolve("deepmind", "gemini-3.8-flash").effectiveReasoningEffort,
+    ).toBe("medium");
+    expect(() =>
+      catalog.resolve("deepmind", "gemini-3.8-flash", "minimal"),
+    ).toThrow();
+    expect(
+      catalog.resolve(
+        "amazon-bedrock-runtime",
+        "global.openai.gpt-6-sol",
+        "none",
+      ).effectiveModel,
+    ).toBe("global.openai.gpt-6-sol");
+    expect(() =>
+      catalog.resolve("amazon-bedrock", "global.openai.gpt-6-sol"),
+    ).toThrow();
+    expect(() =>
+      catalog.resolve(
+        "amazon-bedrock-runtime",
+        "global.openai.gpt-6-sol",
+        "ultra",
+      ),
+    ).toThrow();
+  });
+
+  it("keeps every Telegram selection callback within the 64-byte limit", () => {
+    for (const provider of catalog.list())
+      for (const model of provider.models) {
+        for (const effort of model.supportedReasoningEfforts)
+          expect(
+            Buffer.byteLength(`e:${provider.id}:${model.id}:${effort}`),
+          ).toBeLessThanOrEqual(64);
+      }
   });
 });

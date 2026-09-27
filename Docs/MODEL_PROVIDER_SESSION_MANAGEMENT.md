@@ -2,7 +2,14 @@
 
 **Status:** source-backed management specification
 
-**Catalog snapshot:** 3 August 2026
+**Catalog snapshot:** 27 September 2026
+
+Verified against our custom Codex checkout at `bd9b59ec80f39d19098fb36dddb9d40b7564b973`:
+`codex-rs/models-manager/models.json` and the Anthropic, DeepMind and Bedrock
+catalogs under `codex-rs/model-provider/src`. The official OpenAI-only catalog
+is not the source of truth for this fork. Existing selections remain stored;
+new OpenAI sessions default to `gpt-6-sol` and new Anthropic sessions to
+`claude-opus-5-5`. Telegram uses the same managed catalog as the API.
 
 ## Purpose
 
@@ -38,15 +45,16 @@ when the installed Codex version or provider availability changes.
 
 ## Provider inventory
 
-| Provider ID      | Provider                             | Selection source        | Authentication/runtime                                    |
-| ---------------- | ------------------------------------ | ----------------------- | --------------------------------------------------------- |
-| `openai`         | OpenAI                               | Built-in catalog        | Codex/OpenAI authentication                               |
-| `amazon-bedrock` | Amazon Bedrock                       | Built-in static catalog | AWS SigV4 credentials; optional AWS profile and region    |
-| `anthropic`      | Anthropic                            | Built-in static catalog | `ANTHROPIC_API_KEY`                                       |
-| `deepmind`       | Google DeepMind                      | Built-in static catalog | `GEMINI_API_KEY`                                          |
-| `ollama`         | Ollama                               | Local runtime discovery | An accessible Ollama server, normally `127.0.0.1:11434`   |
-| `lmstudio`       | LM Studio                            | Local runtime discovery | An accessible LM Studio server, normally `127.0.0.1:1234` |
-| configured ID    | Custom Responses-compatible provider | Runtime configuration   | Provider-specific configuration and credentials           |
+| Provider ID              | Provider                             | Selection source                   | Authentication/runtime                                    |
+| ------------------------ | ------------------------------------ | ---------------------------------- | --------------------------------------------------------- |
+| `openai`                 | OpenAI                               | Built-in catalog                   | Codex/OpenAI authentication                               |
+| `amazon-bedrock`         | Amazon Bedrock                       | Built-in static catalog            | AWS SigV4 credentials; optional AWS profile and region    |
+| `amazon-bedrock-runtime` | Amazon Bedrock Runtime               | Built-in global/US routing catalog | AWS SigV4 credentials                                     |
+| `anthropic`              | Anthropic                            | Built-in static catalog            | `ANTHROPIC_API_KEY`                                       |
+| `deepmind`               | Google DeepMind                      | Built-in static catalog            | `GEMINI_API_KEY`                                          |
+| `ollama`                 | Ollama                               | Local runtime discovery            | An accessible Ollama server, normally `127.0.0.1:11434`   |
+| `lmstudio`               | LM Studio                            | Local runtime discovery            | An accessible LM Studio server, normally `127.0.0.1:1234` |
+| configured ID            | Custom Responses-compatible provider | Runtime configuration              | Provider-specific configuration and credentials           |
 
 Ollama, LM Studio, and custom providers deliberately have no fixed model table:
 the available models and thinking controls are determined by the running local
@@ -57,6 +65,7 @@ time and show only the returned values.
 
 | Effort    | Meaning                                                                                    |
 | --------- | ------------------------------------------------------------------------------------------ |
+| `none`    | No reasoning; supported by GPT-6 Sol/Luna and their Bedrock variants                       |
 | `minimal` | Thinking disabled or minimized where the selected model supports it                        |
 | `low`     | Lowest supported latency and token use                                                     |
 | `medium`  | Balanced latency, cost, and reasoning depth                                                |
@@ -70,16 +79,18 @@ effort appears in the selected model's `supportedReasoningEfforts` list.
 
 ## OpenAI catalog
 
-| Model ID            | Display name      |  Default | Supported efforts                                | Visibility                   |
-| ------------------- | ----------------- | -------: | ------------------------------------------------ | ---------------------------- |
-| `gpt-5.6-sol`       | GPT-5.6 Sol       |    `low` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | Listed                       |
-| `gpt-5.6-terra`     | GPT-5.6 Terra     | `medium` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | Listed                       |
-| `gpt-5.6-luna`      | GPT-5.6 Luna      | `medium` | `low`, `medium`, `high`, `xhigh`, `max`          | Listed                       |
-| `gpt-5.5`           | GPT-5.5           | `medium` | `low`, `medium`, `high`, `xhigh`                 | Listed                       |
-| `gpt-5.2`           | GPT-5.2           | `medium` | `low`, `medium`, `high`, `xhigh`                 | Listed                       |
-| `gpt-5.4`           | GPT-5.4           | `medium` | `low`, `medium`, `high`, `xhigh`                 | Hidden but API-supported     |
-| `gpt-5.4-mini`      | GPT-5.4 Mini      | `medium` | `low`, `medium`, `high`, `xhigh`                 | Hidden but API-supported     |
-| `codex-auto-review` | Codex Auto Review | `medium` | `low`, `medium`, `high`, `xhigh`                 | Hidden internal review model |
+| Model ID            | Display name      |  Default | Supported efforts                                        | Visibility                   |
+| ------------------- | ----------------- | -------: | -------------------------------------------------------- | ---------------------------- |
+| `gpt-6-astra`       | GPT-6 Astra       |    `low` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra`         | Listed                       |
+| `gpt-6-sol`         | GPT-6 Sol         | `medium` | `none`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | Listed; provider default     |
+| `gpt-6-luna`        | GPT-6 Luna        | `medium` | `none`, `low`, `medium`, `high`, `xhigh`, `max`          | Listed                       |
+| `gpt-5.6-sol`       | GPT-5.6 Sol       |    `low` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra`         | Listed                       |
+| `gpt-5.6-terra`     | GPT-5.6 Terra     | `medium` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra`         | Listed                       |
+| `gpt-5.6-luna`      | GPT-5.6 Luna      | `medium` | `low`, `medium`, `high`, `xhigh`, `max`                  | Listed                       |
+| `gpt-5.5`           | GPT-5.5           | `medium` | `low`, `medium`, `high`, `xhigh`                         | Listed                       |
+| `gpt-5.2`           | GPT-5.2           | `medium` | `low`, `medium`, `high`, `xhigh`                         | Listed                       |
+| `gpt-5.4`           | GPT-5.4           | `medium` | `low`, `medium`, `high`, `xhigh`                         | Hidden but API-supported     |
+| `codex-auto-review` | Codex Auto Review | `medium` | `low`, `medium`, `high`, `xhigh`, `max`                  | Hidden internal review model |
 
 Hidden models must not appear in the normal management picker. They may be used
 only by an explicit, authorized system workflow.
@@ -89,38 +100,51 @@ only by an explicit, authorized system workflow.
 Amazon Bedrock uses provider-prefixed model IDs and supports the implicit
 default service tier only.
 
-| Model ID               | Display name  |  Default | Supported efforts                       |
-| ---------------------- | ------------- | -------: | --------------------------------------- |
-| `openai.gpt-5.6-sol`   | GPT-5.6 Sol   |    `low` | `low`, `medium`, `high`, `xhigh`, `max` |
-| `openai.gpt-5.6-terra` | GPT-5.6 Terra | `medium` | `low`, `medium`, `high`, `xhigh`, `max` |
-| `openai.gpt-5.6-luna`  | GPT-5.6 Luna  | `medium` | `low`, `medium`, `high`, `xhigh`, `max` |
-| `openai.gpt-5.5`       | GPT-5.5       | `medium` | `low`, `medium`, `high`, `xhigh`        |
-| `openai.gpt-5.4`       | GPT-5.4       | `medium` | `low`, `medium`, `high`, `xhigh`        |
+| Model ID               | Display name  |  Default | Supported efforts                               |
+| ---------------------- | ------------- | -------: | ----------------------------------------------- |
+| `openai.gpt-6-sol`     | GPT-6 Sol     | `medium` | `none`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `openai.gpt-6-astra`   | GPT-6 Astra   |    `low` | `low`, `medium`, `high`, `xhigh`, `max`         |
+| `openai.gpt-6-luna`    | GPT-6 Luna    | `medium` | `none`, `low`, `medium`, `high`, `xhigh`, `max` |
+| `openai.gpt-5.6-sol`   | GPT-5.6 Sol   |    `low` | `low`, `medium`, `high`, `xhigh`, `max`         |
+| `openai.gpt-5.6-terra` | GPT-5.6 Terra | `medium` | `low`, `medium`, `high`, `xhigh`, `max`         |
+| `openai.gpt-5.6-luna`  | GPT-5.6 Luna  | `medium` | `low`, `medium`, `high`, `xhigh`, `max`         |
+| `openai.gpt-5.5`       | GPT-5.5       | `medium` | `low`, `medium`, `high`, `xhigh`                |
+| `openai.gpt-5.4`       | GPT-5.4       | `medium` | `low`, `medium`, `high`, `xhigh`                |
+
+The separate `amazon-bedrock-runtime` provider accepts the six GPT-6 and
+GPT-5.6 models above prefixed with `global.` or `us.` (for example,
+`global.openai.gpt-6-sol`). Efforts and defaults match their Mantle variants;
+`ultra` is unavailable on either Bedrock endpoint. Runtime defaults to
+`global.openai.gpt-6-sol`, while `amazon-bedrock` defaults to `openai.gpt-6-sol`.
 
 ## Anthropic catalog
 
-All Anthropic catalog models default to `high` and support the same five
+Anthropic models default to `high`, except Opus 5.5 (`medium`), and support the same five
 efforts: `low`, `medium`, `high`, `xhigh`, and `max`.
 
-| Model ID                    | Display name     | Default | Notes                                                                 |
-| --------------------------- | ---------------- | ------: | --------------------------------------------------------------------- |
-| `claude-opus-5`             | Claude Opus 5    |  `high` | Default Anthropic model; adaptive thinking                            |
-| `claude-sonnet-5`           | Claude Sonnet 5  |  `high` | Balanced frontier option; adaptive thinking                           |
-| `claude-fable-5`            | Claude Fable 5   |  `high` | Highest-capability long-running agent option; adaptive thinking       |
-| `claude-haiku-4-5-20251001` | Claude Haiku 4.5 |  `high` | Mapped thinking budgets: 1K, 4K, 8K, 16K, and 32K tokens respectively |
+| Model ID                    | Display name                    |  Default | Notes                                                                 |
+| --------------------------- | ------------------------------- | -------: | --------------------------------------------------------------------- |
+| `claude-opus-5-5`           | Claude Opus 5.5                 | `medium` | Default Anthropic model; adaptive thinking                            |
+| `claude-fable-5-1`          | Claude Fable 5.1                |   `high` | Adaptive thinking                                                     |
+| `claude-mythos-5-1`         | Claude Mythos 5.1 (invite only) |   `high` | Requires an Anthropic invitation                                      |
+| `claude-opus-5`             | Claude Opus 5                   |   `high` | Previous generation; adaptive thinking                                |
+| `claude-sonnet-5`           | Claude Sonnet 5                 |   `high` | Balanced frontier option; adaptive thinking                           |
+| `claude-fable-5`            | Claude Fable 5                  |   `high` | Highest-capability long-running agent option; adaptive thinking       |
+| `claude-haiku-4-5-20251001` | Claude Haiku 4.5                |   `high` | Mapped thinking budgets: 1K, 4K, 8K, 16K, and 32K tokens respectively |
 
 For Haiku, the effort-to-budget mapping is `low` = 1K, `medium` = 4K,
 `high` = 8K, `xhigh` = 16K, and `max` = 32K thinking tokens.
 
 ## Google DeepMind catalog
 
-| Model ID                 | Display name           |   Default | Supported efforts                  |
-| ------------------------ | ---------------------- | --------: | ---------------------------------- |
-| `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview |    `high` | `low`, `medium`, `high`            |
-| `gemini-3.6-flash`       | Gemini 3.6 Flash       |  `medium` | `minimal`, `low`, `medium`, `high` |
-| `gemini-3.5-flash-lite`  | Gemini 3.5 Flash-Lite  | `minimal` | `minimal`, `low`, `medium`, `high` |
-| `gemma-4-31b-it`         | Gemma 4 31B IT         |    `high` | `minimal`, `high`                  |
-| `gemma-4-26b-a4b-it`     | Gemma 4 26B A4B IT     |    `high` | `minimal`, `high`                  |
+| Model ID                 | Display name           |   Default | Supported efforts                      |
+| ------------------------ | ---------------------- | --------: | -------------------------------------- |
+| `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview |    `high` | `low`, `medium`, `high`                |
+| `gemini-3.8-flash`       | Gemini 3.8 Flash       |  `medium` | `low`, `medium`, `high` (no `minimal`) |
+| `gemini-3.6-flash`       | Gemini 3.6 Flash       |  `medium` | `minimal`, `low`, `medium`, `high`     |
+| `gemini-3.5-flash-lite`  | Gemini 3.5 Flash-Lite  | `minimal` | `minimal`, `low`, `medium`, `high`     |
+| `gemma-4-31b-it`         | Gemma 4 31B IT         |    `high` | `minimal`, `high`                      |
+| `gemma-4-26b-a4b-it`     | Gemma 4 26B A4B IT     |    `high` | `minimal`, `high`                      |
 
 Provider responses are authoritative. In particular, an effort advertised by
 documentation but rejected by the active Gemini endpoint must be removed from

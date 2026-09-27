@@ -1,6 +1,7 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { Prisma, SessionStatus, TaskStatus, TurnStatus } from "@prisma/client";
@@ -12,6 +13,8 @@ import { ModelCatalogService } from "./model-catalog.service";
 
 @Injectable()
 export class SessionsService {
+  private readonly logger = new Logger(SessionsService.name);
+  private readonly interrupted = new Set<string>();
   constructor(
     private readonly prisma: PrismaService,
     private readonly runner: ProboxAiRunner,
@@ -19,7 +22,7 @@ export class SessionsService {
     private readonly modelCatalog: ModelCatalogService,
   ) {}
 
-  async create(actorId: string, dto: CreateSessionDto) {
+  async create(actorId: string, dto: CreateSessionDto, start = true) {
     const task = await this.prisma.task.findUnique({
       where: { id: dto.taskId },
     });
@@ -54,8 +57,14 @@ export class SessionsService {
       where: { id: task.id },
       data: { status: TaskStatus.RUNNING },
     });
-    void this.startTurn(session.id, dto.prompt);
+    if (start) this.launchTurn(session.id, dto.prompt);
     return session;
+  }
+
+  launchTurn(sessionId: string, prompt: string) {
+    void this.startTurn(sessionId, prompt).catch(() =>
+      this.logger.error(`Unable to start turn for session ${sessionId}`),
+    );
   }
 
   async startTurn(sessionId: string, prompt: string) {
@@ -63,19 +72,32 @@ export class SessionsService {
       where: { id: sessionId },
     });
     if (!session) throw new NotFoundException("Session not found");
-    if (session.status === SessionStatus.RUNNING)
-      throw new ForbiddenException("A session can have one active turn");
-    const turn = await this.prisma.proboxAiTurn.create({
-      data: { sessionId, prompt, status: TurnStatus.RUNNING },
-    });
-    await this.prisma.proboxAiSession.update({
-      where: { id: sessionId },
+    const claimed = await this.prisma.proboxAiSession.updateMany({
+      where: {
+        id: sessionId,
+        status: {
+          in: ["QUEUED", "COMPLETED", "FAILED", "PAUSED", "INTERRUPTED"],
+        },
+      },
       data: {
         status: SessionStatus.RUNNING,
+        endedAt: null,
         startedAt: session.startedAt ?? new Date(),
       },
     });
+    if (!claimed.count)
+      throw new ForbiddenException("A session can have one active turn");
+    let turn: { id: string } | undefined;
     try {
+      await this.prisma.task.update({
+        where: { id: session.taskId },
+        data: { status: TaskStatus.RUNNING },
+      });
+      turn = await this.prisma.proboxAiTurn.create({
+        data: { sessionId, prompt, status: TurnStatus.RUNNING },
+      });
+      const turnId = turn.id;
+      let failed = false;
       const code = await this.runner.start(
         {
           sessionId,
@@ -86,39 +108,72 @@ export class SessionsService {
           model: session.model ?? undefined,
           providerId: session.providerId,
           reasoningEffort: session.effectiveReasoningEffort ?? undefined,
+          threadId: session.codexThreadId ?? undefined,
         },
-        (event) => this.recordEvent(sessionId, turn.id, event),
+        (event) => {
+          if (["turn.failed", "error"].includes(event.type)) failed = true;
+          return this.recordEvent(sessionId, turnId, event);
+        },
       );
       await this.prisma.proboxAiTurn.update({
         where: { id: turn.id },
         data: {
-          status: code === 0 ? TurnStatus.COMPLETED : TurnStatus.FAILED,
+          status: this.interrupted.has(sessionId)
+            ? TurnStatus.INTERRUPTED
+            : code === 0 && !failed
+              ? TurnStatus.COMPLETED
+              : TurnStatus.FAILED,
           endedAt: new Date(),
         },
       });
       await this.prisma.proboxAiSession.update({
         where: { id: sessionId },
         data: {
-          status: code === 0 ? SessionStatus.COMPLETED : SessionStatus.FAILED,
+          status: this.interrupted.has(sessionId)
+            ? SessionStatus.INTERRUPTED
+            : code === 0 && !failed
+              ? SessionStatus.COMPLETED
+              : SessionStatus.FAILED,
           endedAt: new Date(),
         },
       });
+      await this.prisma.task.update({
+        where: { id: session.taskId },
+        data: {
+          status: this.interrupted.has(sessionId)
+            ? TaskStatus.CANCELLED
+            : code === 0 && !failed
+              ? TaskStatus.COMPLETED
+              : TaskStatus.FAILED,
+        },
+      });
     } catch (error) {
-      await this.prisma.proboxAiTurn.update({
-        where: { id: turn.id },
-        data: { status: TurnStatus.FAILED, endedAt: new Date() },
-      });
-      await this.prisma.proboxAiSession.update({
-        where: { id: sessionId },
-        data: { status: SessionStatus.FAILED, endedAt: new Date() },
-      });
-      await this.recordEvent(sessionId, turn.id, {
+      if (turn)
+        await this.prisma.proboxAiTurn.update({
+          where: { id: turn.id },
+          data: { status: TurnStatus.FAILED, endedAt: new Date() },
+        });
+      await this.recordEvent(sessionId, turn?.id ?? null, {
         type: "runner.error",
         payload: {
           message: error instanceof Error ? error.message : String(error),
         },
         rawLine: "",
+      }).catch(() =>
+        this.logger.error(
+          `Unable to record runner failure for session ${sessionId}`,
+        ),
+      );
+      await this.prisma.proboxAiSession.update({
+        where: { id: sessionId },
+        data: { status: SessionStatus.FAILED, endedAt: new Date() },
       });
+      await this.prisma.task.update({
+        where: { id: session.taskId },
+        data: { status: TaskStatus.FAILED },
+      });
+    } finally {
+      this.interrupted.delete(sessionId);
     }
   }
 
@@ -126,6 +181,7 @@ export class SessionsService {
     await this.assertManager(actorId, sessionId);
     if (!this.runner.interrupt(sessionId))
       throw new NotFoundException("No active local session process");
+    this.interrupted.add(sessionId);
     return { interrupted: true };
   }
 
@@ -149,7 +205,7 @@ export class SessionsService {
 
   private async recordEvent(
     sessionId: string,
-    turnId: string,
+    turnId: string | null,
     event: RunnerEvent,
   ) {
     const session = await this.prisma.proboxAiSession.findUniqueOrThrow({
@@ -199,6 +255,7 @@ export class SessionsService {
       }),
     ]);
     if (
+      turnId &&
       event.type === "turn.completed" &&
       typeof event.payload.usage === "object" &&
       event.payload.usage

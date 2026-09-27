@@ -1,11 +1,14 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
-import { Bot } from "grammy";
+import { Bot, InputFile } from "grammy";
+import { InlineKeyboardMarkup } from "grammy/types";
 import { AuthOtpPurpose } from "@prisma/client";
 import { AuthLocale } from "../auth/auth.dto";
+import { setTimeout as delay } from "node:timers/promises";
 
 @Injectable()
 export class TelegramService {
   private readonly bot?: Bot;
+  private readonly sends = new Map<string, Promise<unknown>>();
   constructor() {
     if (process.env.TELEGRAM_BOT_TOKEN)
       this.bot = new Bot(process.env.TELEGRAM_BOT_TOKEN);
@@ -14,6 +17,75 @@ export class TelegramService {
     if (!this.bot)
       throw new ServiceUnavailableException("Telegram bot is not configured");
     await this.bot.api.sendMessage(chatId.toString(), text);
+  }
+  get configured() {
+    return Boolean(this.bot);
+  }
+
+  async sendMessage(
+    chatId: bigint,
+    text: string,
+    keyboard?: InlineKeyboardMarkup,
+  ) {
+    if (!this.bot)
+      throw new ServiceUnavailableException("Telegram bot is not configured");
+    return this.queued(chatId, () =>
+      this.bot!.api.sendMessage(chatId.toString(), text, {
+        reply_markup: keyboard,
+        link_preview_options: { is_disabled: true },
+      }),
+    );
+  }
+
+  async deleteMessage(chatId: bigint, messageId: number) {
+    if (!this.bot)
+      throw new ServiceUnavailableException("Telegram bot is not configured");
+    await this.bot.api.deleteMessage(chatId.toString(), messageId);
+  }
+
+  async answerCallback(id: string) {
+    if (!this.bot)
+      throw new ServiceUnavailableException("Telegram bot is not configured");
+    await this.bot.api.answerCallbackQuery(id);
+  }
+
+  async sendDocument(chatId: bigint, bytes: Buffer, name: string) {
+    if (!this.bot)
+      throw new ServiceUnavailableException("Telegram bot is not configured");
+    await this.queued(chatId, () =>
+      this.bot!.api.sendDocument(chatId.toString(), new InputFile(bytes, name)),
+    );
+  }
+
+  private async queued<T>(chatId: bigint, send: () => Promise<T>): Promise<T> {
+    const key = chatId.toString();
+    const previous = this.sends.get(key) ?? Promise.resolve();
+    const result = previous.then(async () => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await send();
+        } catch (error) {
+          const retry = error as {
+            error_code?: number;
+            parameters?: { retry_after?: number };
+          };
+          if (
+            retry.error_code !== 429 ||
+            attempt >= 2 ||
+            !retry.parameters?.retry_after ||
+            retry.parameters.retry_after > 60
+          )
+            throw error;
+          await delay(retry.parameters.retry_after * 1000);
+        }
+      }
+    });
+    const tail = result.catch(() => undefined).then(() => delay(1100));
+    this.sends.set(key, tail);
+    void tail.then(() => {
+      if (this.sends.get(key) === tail) this.sends.delete(key);
+    });
+    return result;
   }
   async sendOtp(
     chatId: bigint,
