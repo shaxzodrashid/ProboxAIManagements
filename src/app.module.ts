@@ -12,6 +12,7 @@ import { StorageModule } from "./storage/storage.module";
 import { DepartmentsModule } from "./departments/departments.module";
 import { ConfigurationTemplatesModule } from "./configuration-templates/configuration-templates.module";
 import { AuthorizationModule } from "./authorization/authorization.module";
+import { GroupsModule } from "./groups/groups.module";
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { AuthorizationModule } from "./authorization/authorization.module";
     DepartmentsModule,
     ConfigurationTemplatesModule,
     SessionsModule,
+    GroupsModule,
   ],
   controllers: [HealthController],
 })

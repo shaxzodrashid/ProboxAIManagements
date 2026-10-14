@@ -27,6 +27,10 @@ import { parsePhoneNumber } from "libphonenumber-js";
 import { PrismaService } from "../prisma/prisma.service";
 import { TelegramService } from "../telegram/telegram.service";
 import {
+  authenticationUnavailable,
+  authenticationDependency,
+} from "./authentication-failures";
+import {
   AuthLocale,
   LoginDto,
   RegisterDto,
@@ -147,10 +151,12 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string) {
-    const token = await this.prisma.sessionToken.findUnique({
-      where: { tokenHash: hashToken(refreshToken) },
-      include: { user: true },
-    });
+    const token = await authenticationDependency(() =>
+      this.prisma.sessionToken.findUnique({
+        where: { tokenHash: hashToken(refreshToken) },
+        include: { user: true },
+      }),
+    );
     if (
       !token ||
       token.purpose !== SessionTokenPurpose.REFRESH ||
@@ -160,7 +166,11 @@ export class AuthService {
       token.user.status !== UserStatus.OPEN
     )
       throw new UnauthorizedException("Invalid or expired refresh token");
-    return { accessToken: this.signAccessToken(token.user) };
+    try {
+      return { accessToken: this.signAccessToken(token.user) };
+    } catch {
+      throw authenticationUnavailable();
+    }
   }
 
   async resetPassword(

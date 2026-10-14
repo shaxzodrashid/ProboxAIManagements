@@ -4,6 +4,7 @@ import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
+import { backendReleaseVersion } from "./release-version";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -30,7 +31,7 @@ async function bootstrap() {
         "Published configuration-template versions are immutable. Template files are stored privately in MinIO, and project initialization is persisted, staged, observable over REST or SSE, cancellable, and retryable.",
       ].join("\n"),
     )
-    .setVersion("v1")
+    .setVersion(backendReleaseVersion)
     .addServer("/api/v1", "Current deployment")
     .addBearerAuth(
       {
@@ -66,7 +67,10 @@ async function bootstrap() {
       "Telegram-backed registration and password recovery, plus username/password login and refresh tokens.",
     )
     .addTag("Health", "Deployment health check.")
-    .addTag("Users", "Administrator-only workspace user management.")
+    .addTag(
+      "Users",
+      "Self profile and permission-gated workspace user management.",
+    )
     .addTag("Telegram", "Webhook endpoint called by Telegram.")
     .addTag("Tasks", "Workspace task lifecycle.")
     .addTag(

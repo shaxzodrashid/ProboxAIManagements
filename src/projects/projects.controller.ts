@@ -1,8 +1,20 @@
 import {
+  ProjectDeletionHistoryResponseDto,
+  ProjectDeletionStateResponseDto,
+  ProjectDeletionRequestResponseDto,
+  DeletionSessionDecisionResponseDto,
+  ConfirmProjectDeletionResponseDto,
+} from "./project-deletion-contracts";
+import { ExpectedRevision, ApiRevision } from "../openapi/revision";
+import { ProjectListQueryDto } from "./project-archive.dto";
+import {
   Body,
   Controller,
   Delete,
   Get,
+  Header,
+  HttpCode,
+  ParseUUIDPipe,
   Param,
   ParseFilePipe,
   Post,
@@ -13,11 +25,17 @@ import {
   UseGuards,
   UseInterceptors,
 } from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
+import { EffectiveFileInterceptor } from "../storage/upload-limits";
 import {
+  ApiExtraModels,
+  getSchemaPath,
   ApiBody,
   ApiConsumes,
   ApiCreatedResponse,
+  ApiAcceptedResponse,
+  ApiConflictResponse,
+  ApiServiceUnavailableResponse,
+  ApiResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -29,6 +47,12 @@ import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
 import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
+  ProjectUploadConfigurationResponseDto,
+  ProjectFileDeletionConfirmationResponseDto,
+  ProjectFileTrashedResponseDto,
+  ProjectFileOperationResponseDto,
+  ProjectTrashItemResponseDto,
+  ProjectTrashRestoredResponseDto,
   AddProjectMemberDto,
   CreateProjectDto,
   CreateProjectFolderDto,
@@ -38,6 +62,10 @@ import {
   ProjectFolderResponseDto,
   ProjectMemberResponseDto,
   ProjectResponseDto,
+  ProjectScalarResponseDto,
+  ProjectCreatedResponseDto,
+  ProjectListItemResponseDto,
+  ProjectMembershipScalarResponseDto,
   ProjectsHomeResponseDto,
   SetProjectsHomeDto,
   UploadedProjectFileResponseDto,
@@ -50,6 +78,11 @@ import {
 } from "./projects.dto";
 import { ProjectsService } from "./projects.service";
 import {
+  SubmitProjectCreationDto,
+  ProjectCreationOutcomeDto,
+} from "./project-creation-submission.dto";
+import {
+  ApiUploadSizeError,
   ApiAccessToken,
   ApiAuthenticationErrors,
   ApiResourceErrors,
@@ -65,20 +98,71 @@ import { Permissions } from "../authorization/permission.catalog";
 export class ProjectsController {
   constructor(private readonly projects: ProjectsService) {}
 
+  @Post("creation-submissions")
+  @HttpCode(202)
+  @Header("Cache-Control", "no-store")
+  @RequirePermissions(Permissions.PROJECTS_CREATE)
+  @ApiOperation({
+    summary:
+      "Submit identifiable project creation without replaying filesystem work",
+    description:
+      "Keep requestId through response loss. Repeated identical submissions only read outcome. UNRESOLVED requires inspection, never automatic CLEAR or a new request identity. Legacy POST /projects remains available without submission readback.",
+  })
+  @ApiAcceptedResponse({ type: ProjectCreationOutcomeDto })
+  @ApiConflictResponse({
+    description: "Identity reuse or overlapping unresolved creation.",
+  })
+  @ApiServiceUnavailableResponse({
+    description: "PROJECT_CREATION_OUTCOME_UNKNOWN; read the same identity.",
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
+  submitCreation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SubmitProjectCreationDto,
+  ) {
+    return this.projects.submitCreation(user, dto);
+  }
+
+  @Get("creation-submissions/:requestId")
+  @Header("Cache-Control", "no-store")
+  @RequirePermissions(Permissions.PROJECTS_CREATE)
+  @ApiOperation({
+    summary:
+      "Read the caller's own creation outcome without project-list access",
+    description:
+      "Current projects.create required. Foreign workspace/owner and unknown identities are 404; absence does not prove an earlier submission cannot commit.",
+  })
+  @ApiOkResponse({ type: ProjectCreationOutcomeDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
+  creationOutcome(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("requestId", new ParseUUIDPipe({ version: "4" })) requestId: string,
+  ) {
+    return this.projects.creationOutcome(user, requestId);
+  }
+
   @Get()
+  @Header("Cache-Control", "no-store")
   @ApiOperation({
     summary: "List accessible projects",
     description:
-      "Callers with projects.read-all receive all workspace projects. Other users receive projects they belong to and projects with workspace read access enabled.",
+      "Current projects.read is required. Ordinary lists exclude archived projects; lifecycle=archived returns only archives with the same access checks. Callers with projects.read-all receive all matching workspace projects; others receive membership/public-read projects. isMember reports only persisted membership. Authorization, scope and viewer relationship share one snapshot.",
   })
   @ApiOkResponse({
     description: "Projects ordered by latest update.",
-    type: ProjectResponseDto,
+    type: ProjectListItemResponseDto,
     isArray: true,
   })
   @ApiAuthenticationErrors()
-  list(@CurrentUser() user: AuthenticatedUser) {
-    return this.projects.list(user);
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ProjectListQueryDto,
+  ) {
+    return this.projects.list(user, query.lifecycle);
   }
 
   @Post()
@@ -86,11 +170,16 @@ export class ProjectsController {
   @ApiOperation({
     summary: "Create a project",
     description:
-      "Requires projects.create. Selects the workspace default department when departmentId is omitted. If the target directory already exists, the first request returns a conflict asking the caller to explicitly resubmit with existingDirectoryAction KEEP or CLEAR. Empty projects become ready immediately; selecting a published department template creates a persisted asynchronous initialization job. The creator is added as the first member.",
+      "Requires projects.create. Selects the workspace default department when departmentId is omitted. Existing directories require an explicit KEEP choice here; CLEAR must use POST /projects/creation-submissions with a client-generated requestId (legacy CLEAR returns 428). Empty projects become ready immediately; a published template registers asynchronous setup. The creator becomes the first member. Use keyed creation-submissions for original-response readback; this legacy route does not supply a client submission identity.",
   })
   @ApiCreatedResponse({
     description: "Project and its backing directory created.",
-    type: ProjectResponseDto,
+    type: ProjectCreatedResponseDto,
+  })
+  @ApiResponse({
+    status: 428,
+    description:
+      "PROJECT_CREATION_ID_REQUIRED: CLEAR must use keyed creation-submissions.",
   })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
@@ -103,10 +192,11 @@ export class ProjectsController {
   }
 
   @Get(":id")
+  @Header("Cache-Control", "no-store")
   @ApiOperation({
     summary: "Get project details",
     description:
-      "Project members and callers with projects.read-all receive the member list. Users with public read access receive project metadata only.",
+      "Current projects.read plus project read scope. Members/read-all callers receive the existing member list; public-read nonmembers receive metadata with members omitted. isMember independently reports the current caller's actual membership in the same snapshot; it is not an access grant or personalization ranking.",
   })
   @ApiParam({ name: "id", format: "uuid", description: "Project ID." })
   @ApiOkResponse({
@@ -127,7 +217,11 @@ export class ProjectsController {
       "Requires projects.update and project membership unless projects.manage-all is also granted.",
   })
   @ApiParam({ name: "id", format: "uuid", description: "Project ID." })
-  @ApiOkResponse({ description: "Updated project.", type: ProjectResponseDto })
+  @ApiOkResponse({
+    description:
+      "Updated project scalars only. Relational data is omitted; refresh detail or retain existing relations when merging.",
+    type: ProjectScalarResponseDto,
+  })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
   @ApiValidationErrors()
@@ -144,10 +238,10 @@ export class ProjectsController {
   @ApiOperation({
     summary: "Add a project member",
     description:
-      "Requires projects.members.manage and project membership unless projects.manage-all is also granted. Existing members are returned unchanged.",
+      "Requires projects.members.manage and project membership unless projects.manage-all is also granted. New members must be OPEN accounts in this workspace. Existing inactive memberships are returned unchanged until explicitly removed; they grant no active account authority.",
   })
   @ApiParam({ name: "id", format: "uuid", description: "Project ID." })
-  @ApiOkResponse({
+  @ApiCreatedResponse({
     description: "Project membership.",
     type: ProjectMemberResponseDto,
   })
@@ -177,7 +271,7 @@ export class ProjectsController {
   })
   @ApiOkResponse({
     description: "Removed membership record.",
-    type: ProjectMemberResponseDto,
+    type: ProjectMembershipScalarResponseDto,
   })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
@@ -241,12 +335,30 @@ export class ProjectsController {
     return this.projects.listFiles(user, id, relativePath);
   }
 
+  @Get(":id/files/upload-configuration")
+  @RequirePermissions(Permissions.PROJECT_FILES_WRITE)
+  @ApiOperation({
+    summary: "Read effective project upload configuration",
+    description:
+      "Same membership/admin and READY gates as uploads; does not read storage or imply storage health. Unavailable requests return errors, never client defaults.",
+  })
+  @ApiOkResponse({ type: ProjectUploadConfigurationResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
+  uploadConfiguration(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+  ) {
+    return this.projects.uploadConfiguration(user, id);
+  }
+
   @Post(":id/files/upload")
   @RequirePermissions(Permissions.PROJECT_FILES_WRITE)
   @UseInterceptors(
-    FileInterceptor("file", {
-      limits: { fileSize: ProjectsService.maxUploadBytes() },
-    }),
+    EffectiveFileInterceptor(() => ({
+      limits: { fileSize: ProjectsService.maxUploadBytes() + 1 },
+    })),
   )
   @ApiOperation({
     summary: "Upload a project file",
@@ -281,6 +393,7 @@ export class ProjectsController {
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
   @ApiValidationErrors()
+  @ApiUploadSizeError()
   upload(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -373,12 +486,27 @@ export class ProjectsController {
   @ApiOperation({
     summary: "Move a file or folder to the recoverable project trash",
   })
+  @ApiExtraModels(
+    ProjectFileDeletionConfirmationResponseDto,
+    ProjectFileTrashedResponseDto,
+  )
+  @ApiCreatedResponse({
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(ProjectFileDeletionConfirmationResponseDto) },
+        { $ref: getSchemaPath(ProjectFileTrashedResponseDto) },
+      ],
+    },
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   deleteFile(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
     @Body() dto: DeleteProjectFileDto,
   ) {
-    return this.projects.deleteFile(user, id, dto.path);
+    return this.projects.deleteFile(user, id, dto.path, dto.operationId);
   }
 
   @Post(":id/files/delete-confirmations/:confirmationId/confirm")
@@ -386,6 +514,10 @@ export class ProjectsController {
   @ApiOperation({
     summary: "Confirm deletion of a protected project file or folder",
   })
+  @ApiCreatedResponse({ type: ProjectFileTrashedResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   confirmFileDeletion(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -394,9 +526,54 @@ export class ProjectsController {
     return this.projects.confirmFileDeletion(user, id, confirmationId);
   }
 
+  @Get(":id/file-operations")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
+  @ApiOkResponse({ type: ProjectFileOperationResponseDto, isArray: true })
+  fileOperations(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+  ) {
+    return this.projects.listFileOperations(user, id);
+  }
+
+  @Get(":id/file-operations/:operationId")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
+  @ApiOkResponse({ type: ProjectFileOperationResponseDto })
+  fileOperation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("operationId") operationId: string,
+  ) {
+    return this.projects.fileOperation(user, id, operationId);
+  }
+
+  @Post(":id/file-operations/:operationId/reconcile")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
+  @ApiOperation({
+    summary:
+      "Inspect a deletion outcome and repair its database state without moving bytes",
+  })
+  @ApiCreatedResponse({ type: ProjectFileOperationResponseDto })
+  reconcileFileOperation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("operationId") operationId: string,
+  ) {
+    return this.projects.reconcileFileOperation(user, id, operationId);
+  }
+
   @Get(":id/trash")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "List recoverable project trash items" })
+  @ApiOkResponse({
+    type: ProjectTrashItemResponseDto,
+    isArray: true,
+    description:
+      "ACTIVE rows newest first, including expired rows awaiting cleanup. Sensitive access required; READY is not required for this metadata list.",
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   listTrash(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.projects.listTrash(user, id);
   }
@@ -404,6 +581,10 @@ export class ProjectsController {
   @Post(":id/trash/:trashId/restore")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Restore a recoverable project trash item" })
+  @ApiCreatedResponse({ type: ProjectTrashRestoredResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   restoreTrash(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -412,9 +593,52 @@ export class ProjectsController {
     return this.projects.restoreTrash(user, id, trashId);
   }
 
+  @Get(":id/deletion-requests")
+  @Header("Cache-Control", "no-store")
+  @RequirePermissions(Permissions.PROJECTS_DELETE)
+  @ApiOperation({
+    summary: "Read recent deletion state",
+    description:
+      "Owner/member within current workspace; after project removal only the persisted owner or requester within the resource's saved workspace. Latest 100 requests and audits, newest first. Unknown legacy audit scope fails closed.",
+  })
+  @ApiOkResponse({ type: ProjectDeletionHistoryResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
+  deletionHistory(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", new ParseUUIDPipe({ version: "4" })) id: string,
+  ) {
+    return this.projects.deletionHistory(user, id);
+  }
+
+  @Get(":id/deletion-requests/:requestId")
+  @Header("Cache-Control", "no-store")
+  @RequirePermissions(Permissions.PROJECTS_DELETE)
+  @ApiOperation({
+    summary: "Reconcile a known deletion request",
+    description:
+      "Same scope as deletion history; works after request/project removal through the durable audit. Does not perform filesystem work, reissue tokens or confirm deletion.",
+  })
+  @ApiOkResponse({ type: ProjectDeletionStateResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
+  deletionState(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", new ParseUUIDPipe({ version: "4" })) id: string,
+    @Param("requestId", new ParseUUIDPipe({ version: "4" })) requestId: string,
+  ) {
+    return this.projects.deletionHistory(user, id, requestId);
+  }
+
   @Post(":id/deletion-requests")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({ summary: "Request permanent project deletion" })
+  @ApiCreatedResponse({ type: ProjectDeletionRequestResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
   requestDeletion(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -423,8 +647,12 @@ export class ProjectsController {
   }
 
   @Post(":id/deletion-requests/:requestId/approve")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({ summary: "Owner approval and deletion-token preflight" })
+  @ApiCreatedResponse({ type: ProjectDeletionRequestResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
   approveDeletion(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -434,11 +662,16 @@ export class ProjectsController {
   }
 
   @Post(":id/deletion-requests/:requestId/active-sessions")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({
     summary:
       "Owner chooses whether live project sessions should wait or be interrupted",
   })
+  @ApiCreatedResponse({ type: DeletionSessionDecisionResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   resolveDeletionSessions(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -454,8 +687,12 @@ export class ProjectsController {
   }
 
   @Post(":id/deletion-requests/:requestId/cancel")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({ summary: "Cancel an outstanding project deletion request" })
+  @ApiCreatedResponse({ type: ProjectDeletionRequestResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
   cancelDeletion(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -465,11 +702,16 @@ export class ProjectsController {
   }
 
   @Post(":id/deletion-requests/:requestId/confirm")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.PROJECTS_DELETE)
   @ApiOperation({
     summary:
       "Submit the owner Telegram token and permanently delete the project",
   })
+  @ApiCreatedResponse({ type: ConfirmProjectDeletionResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   confirmDeletion(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -535,7 +777,7 @@ export class SettingsController {
   @ApiOperation({
     summary: "Get the legacy default projects home",
     description:
-      "Backward-compatible administrator endpoint. Returns the default department home. New integrations should use the Departments API.",
+      "Legacy administrator endpoint. Returns the active default department home, departmentId and revision. New integrations should use the Departments API.",
   })
   @ApiOkResponse({
     description: "Effective projects home.",
@@ -547,10 +789,11 @@ export class SettingsController {
   }
 
   @Put("projects-home")
+  @ApiRevision()
   @ApiOperation({
     summary: "Set the legacy default projects home",
     description:
-      "Backward-compatible administrator endpoint. Creates or updates the default department home when it is allowlisted. It cannot change after the department owns a project. New integrations should use the Departments API.",
+      "Requires the current quoted If-Match revision and departmentId from GET. Updates the active default home under the department/project lock; a changed default returns 409. The home cannot change after the department owns a project. Preserve entered data and reconcile unknown outcomes before retrying.",
   })
   @ApiOkResponse({
     description: "Projects home updated.",
@@ -562,7 +805,13 @@ export class SettingsController {
   setProjectsHome(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SetProjectsHomeDto,
+    @ExpectedRevision() revision: number,
   ) {
-    return this.projects.setProjectsHome(user.workspaceId, dto.path);
+    return this.projects.setProjectsHome(
+      user.workspaceId,
+      dto.path,
+      revision,
+      dto.departmentId,
+    );
   }
 }

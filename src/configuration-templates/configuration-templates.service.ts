@@ -1,6 +1,6 @@
 import {
   BadRequestException,
-  ConflictException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -14,9 +14,26 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";
+import { finished } from "node:stream/promises";
 import * as path from "node:path";
 import { PrismaService } from "../prisma/prisma.service";
 import { normalizeProjectRelativePath } from "../storage/workspace-path-policy.service";
+import { configuredUploadLimit } from "../storage/upload-limits";
+import { operationError } from "../openapi/operation-errors";
+import {
+  manifestIssue,
+  objectMissing,
+  storageUnavailable,
+  templateWriteError,
+} from "./template-errors";
+import {
+  templateScalar,
+  versionScalar,
+  templateFile,
+  templateManifest,
+  templateWithVersions,
+} from "./template-projections";
+import { structuredCommandArguments } from "./command-arguments";
 import {
   CreateConfigurationTemplateDto,
   MoveTemplateFileDto,
@@ -41,21 +58,38 @@ export class ConfigurationTemplatesService {
   ) {}
 
   static maxFileBytes() {
-    return configuredLimit(
+    return configuredUploadLimit(
       "PROBOXAI_TEMPLATE_FILE_MAX_BYTES",
       100 * 1024 * 1024,
     );
   }
 
   static maxVersionBytes() {
-    return configuredLimit(
+    return configuredUploadLimit(
       "PROBOXAI_TEMPLATE_TOTAL_MAX_BYTES",
       1024 * 1024 * 1024,
     );
   }
 
-  list(workspaceId: string, admin: boolean, departmentId?: string) {
-    return this.prisma.configurationTemplate.findMany({
+  uploadConfiguration() {
+    return {
+      maxFileBytes: ConfigurationTemplatesService.maxFileBytes(),
+      maxVersionBytes: ConfigurationTemplatesService.maxVersionBytes(),
+      requestMode: "single-file" as const,
+    };
+  }
+
+  async revision(workspaceId: string, id: string) {
+    const version = await this.prisma.configurationTemplateVersion.findFirst({
+      where: { id, template: { workspaceId } },
+      select: { revision: true },
+    });
+    if (!version) throw new NotFoundException("Template version not found");
+    return version;
+  }
+
+  async list(workspaceId: string, admin: boolean, departmentId?: string) {
+    const templates = await this.prisma.configurationTemplate.findMany({
       where: {
         workspaceId,
         ...(departmentId ? { departmentId } : {}),
@@ -73,6 +107,7 @@ export class ConfigurationTemplatesService {
       },
       orderBy: { name: "asc" },
     });
+    return templates.map((t) => templateWithVersions(t, versionScalar));
   }
 
   async get(workspaceId: string, id: string, admin: boolean) {
@@ -94,8 +129,13 @@ export class ConfigurationTemplatesService {
       },
     });
     if (!template)
-      throw new NotFoundException("Configuration template not found");
-    return template;
+      throw operationError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        "Configuration template not found",
+        "readTemplate",
+      );
+    return templateWithVersions(template, templateManifest);
   }
 
   async create(
@@ -109,7 +149,7 @@ export class ConfigurationTemplatesService {
     });
     if (!department) throw new NotFoundException("Active department not found");
     try {
-      return await this.prisma.configurationTemplate.create({
+      const created = await this.prisma.configurationTemplate.create({
         data: {
           workspaceId,
           departmentId: department.id,
@@ -121,12 +161,9 @@ export class ConfigurationTemplatesService {
         },
         include: { versions: true, department: true },
       });
+      return templateWithVersions(created, versionScalar);
     } catch (error) {
-      if (isUniqueError(error))
-        throw new ConflictException(
-          "A template with this name exists in the department",
-        );
-      throw error;
+      templateWriteError(error, "writeTemplateMetadata");
     }
   }
 
@@ -137,7 +174,7 @@ export class ConfigurationTemplatesService {
   ) {
     await this.assertTemplate(workspaceId, id);
     try {
-      return await this.prisma.configurationTemplate.update({
+      const updated = await this.prisma.configurationTemplate.update({
         where: { id },
         data: {
           ...(dto.name !== undefined
@@ -148,120 +185,172 @@ export class ConfigurationTemplatesService {
             : {}),
         },
       });
+      return templateScalar(updated);
     } catch (error) {
-      if (isUniqueError(error))
-        throw new ConflictException(
-          "A template with this name exists in the department",
-        );
-      throw error;
+      templateWriteError(error, "writeTemplateMetadata");
     }
   }
 
   async createDraft(workspaceId: string, templateId: string, actorId: string) {
-    const template = await this.assertTemplate(workspaceId, templateId);
-    if (template.status === ConfigurationTemplateStatus.ARCHIVED)
-      throw new ConflictException(
-        "Archived templates cannot receive new drafts",
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "ConfigurationTemplate" WHERE "id" = ${templateId} AND "workspaceId" = ${workspaceId} FOR UPDATE`;
+          const template = await tx.configurationTemplate.findFirst({
+            where: { id: templateId, workspaceId },
+          });
+          if (!template)
+            throw new NotFoundException("Configuration template not found");
+          if (template.status === ConfigurationTemplateStatus.ARCHIVED)
+            throw operationError(
+              409,
+              "TEMPLATE_ARCHIVED",
+              "Archived templates cannot receive new drafts",
+              "createTemplateDraft",
+            );
+          const versions = await tx.configurationTemplateVersion.findMany({
+            where: { templateId },
+            include: manifestInclude,
+            orderBy: { version: "desc" },
+          });
+          if (
+            versions.some(
+              (version) =>
+                version.status === ConfigurationTemplateVersionStatus.DRAFT,
+            )
+          )
+            throw operationError(
+              409,
+              "TEMPLATE_DRAFT_EXISTS",
+              "The template already has an editable draft",
+              "createTemplateDraft",
+            );
+          const source = versions.find(
+            (version) =>
+              version.status === ConfigurationTemplateVersionStatus.PUBLISHED,
+          );
+          if (!source)
+            throw operationError(
+              409,
+              "TEMPLATE_PUBLISHED_VERSION_MISSING",
+              "The template has no published version to clone",
+              "createTemplateDraft",
+            );
+          const draft = await tx.configurationTemplateVersion
+            .create({
+              data: {
+                templateId,
+                version: source.version + 1,
+                creatorId: actorId,
+                folders: {
+                  create: source.folders.map((folder) => ({
+                    path: folder.path,
+                  })),
+                },
+                files: {
+                  create: source.files.map((file) => ({
+                    destinationPath: file.destinationPath,
+                    objectKey: file.objectKey,
+                    originalName: file.originalName,
+                    contentType: file.contentType,
+                    size: file.size,
+                    sha256: file.sha256,
+                  })),
+                },
+                commandStages: {
+                  create: source.commandStages.map((stage) => ({
+                    name: stage.name,
+                    position: stage.position,
+                    mode: stage.mode,
+                    maxConcurrency: stage.maxConcurrency,
+                    commands: {
+                      create: stage.commands.map((command) => ({
+                        name: command.name,
+                        position: command.position,
+                        type: command.type,
+                        executable: command.executable,
+                        arguments:
+                          command.type === TemplateCommandType.STRUCTURED
+                            ? structuredCommandArguments(
+                                command.arguments,
+                                true,
+                              )
+                            : Prisma.JsonNull,
+                        script: command.script,
+                        workingDirectory: command.workingDirectory,
+                        timeoutSeconds: command.timeoutSeconds,
+                      })),
+                    },
+                  })),
+                },
+              },
+              include: manifestInclude,
+            })
+            .catch((error) => templateWriteError(error, "createTemplateDraft"));
+          return templateManifest(draft);
+        },
+        { timeout: 30000 },
       );
-    const versions = await this.prisma.configurationTemplateVersion.findMany({
-      where: { templateId },
-      include: manifestInclude,
-      orderBy: { version: "desc" },
-    });
-    if (
-      versions.some(
-        (version) =>
-          version.status === ConfigurationTemplateVersionStatus.DRAFT,
-      )
-    )
-      throw new ConflictException("The template already has an editable draft");
-    const source = versions.find(
-      (version) =>
-        version.status === ConfigurationTemplateVersionStatus.PUBLISHED,
-    );
-    if (!source)
-      throw new ConflictException(
-        "The template has no published version to clone",
-      );
-    return this.prisma.configurationTemplateVersion.create({
-      data: {
-        templateId,
-        version: source.version + 1,
-        creatorId: actorId,
-        folders: {
-          create: source.folders.map((folder) => ({ path: folder.path })),
-        },
-        files: {
-          create: source.files.map((file) => ({
-            destinationPath: file.destinationPath,
-            objectKey: file.objectKey,
-            originalName: file.originalName,
-            contentType: file.contentType,
-            size: file.size,
-            sha256: file.sha256,
-          })),
-        },
-        commandStages: {
-          create: source.commandStages.map((stage) => ({
-            name: stage.name,
-            position: stage.position,
-            mode: stage.mode,
-            maxConcurrency: stage.maxConcurrency,
-            commands: {
-              create: stage.commands.map((command) => ({
-                name: command.name,
-                position: command.position,
-                type: command.type,
-                executable: command.executable,
-                arguments: command.arguments ?? undefined,
-                script: command.script,
-                workingDirectory: command.workingDirectory,
-                timeoutSeconds: command.timeoutSeconds,
-              })),
-            },
-          })),
-        },
-      },
-      include: manifestInclude,
-    });
+    } catch (error) {
+      templateWriteError(error, "createTemplateDraft");
+    }
   }
 
   async replaceManifest(
     workspaceId: string,
     versionId: string,
     dto: ReplaceTemplateManifestDto,
+    expectedRevision?: number,
   ) {
-    const version = await this.assertDraft(workspaceId, versionId);
     const manifest = validateManifest(dto);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.configurationTemplateCommandStage.deleteMany({
-        where: { versionId },
-      });
-      await tx.configurationTemplateFolder.deleteMany({ where: { versionId } });
-      if (manifest.folders.length)
-        await tx.configurationTemplateFolder.createMany({
-          data: manifest.folders.map((folder) => ({
-            versionId,
-            path: folder.path,
-          })),
+    return this.mutateDraft(
+      workspaceId,
+      versionId,
+      expectedRevision,
+      async (tx, version) => {
+        validatePublishedManifest({
+          folders: manifest.folders,
+          files: version.files,
+          commandStages: [],
         });
-      for (const stage of manifest.commandStages) {
-        await tx.configurationTemplateCommandStage.create({
-          data: {
-            versionId,
-            name: stage.name,
-            position: stage.position,
-            mode: stage.mode,
-            maxConcurrency: stage.maxConcurrency,
-            commands: { create: stage.commands },
-          },
+        for (const file of version.files)
+          validateFileParent(
+            file.destinationPath,
+            manifest.folders.map((f) => f.path),
+          );
+        await tx.configurationTemplateCommandStage.deleteMany({
+          where: { versionId },
         });
-      }
-    });
-    return this.prisma.configurationTemplateVersion.findUniqueOrThrow({
-      where: { id: version.id },
-      include: manifestInclude,
-    });
+        await tx.configurationTemplateFolder.deleteMany({
+          where: { versionId },
+        });
+        if (manifest.folders.length)
+          await tx.configurationTemplateFolder.createMany({
+            data: manifest.folders.map((folder) => ({
+              versionId,
+              path: folder.path,
+            })),
+          });
+        for (const stage of manifest.commandStages) {
+          await tx.configurationTemplateCommandStage.create({
+            data: {
+              versionId,
+              name: stage.name,
+              position: stage.position,
+              mode: stage.mode,
+              maxConcurrency: stage.maxConcurrency,
+              commands: { create: stage.commands },
+            },
+          });
+        }
+
+        const saved = await tx.configurationTemplateVersion.findUniqueOrThrow({
+          where: { id: versionId },
+          include: manifestInclude,
+        });
+        return templateManifest(saved);
+      },
+    );
   }
 
   async uploadFile(
@@ -269,16 +358,35 @@ export class ConfigurationTemplatesService {
     versionId: string,
     destinationPath: string,
     file: UploadedTemplateFile,
+    expectedRevision?: number,
   ) {
-    const version = await this.assertDraft(workspaceId, versionId);
-    const normalized = normalizeProjectRelativePath(destinationPath);
+    const version = await this.assertDraft(
+      workspaceId,
+      versionId,
+      expectedRevision,
+    );
+    const normalized = checkedRelativePath(
+      destinationPath,
+      false,
+      "destinationPath",
+    );
     validateFileParent(
       normalized,
       version.folders.map((folder) => folder.path),
     );
+    if (
+      !Number.isSafeInteger(file.size) ||
+      file.size < 0 ||
+      (file.buffer && file.buffer.length !== file.size)
+    )
+      throw new BadRequestException("Uploaded file size is invalid");
     if (file.size > ConfigurationTemplatesService.maxFileBytes())
-      throw new BadRequestException(
+      throw operationError(
+        400,
+        "TEMPLATE_FILE_LIMIT",
         "Template file exceeds the configured limit",
+        "uploadTemplateFile",
+        "file",
       );
     const aggregate = await this.prisma.configurationTemplateFile.aggregate({
       where: { versionId },
@@ -288,8 +396,12 @@ export class ConfigurationTemplatesService {
       (aggregate._sum.size ?? 0) + file.size >
       ConfigurationTemplatesService.maxVersionBytes()
     )
-      throw new BadRequestException(
+      throw operationError(
+        400,
+        "TEMPLATE_VERSION_LIMIT",
         "Template version exceeds the configured total size",
+        "uploadTemplateFile",
+        "file",
       );
     const existing = await this.prisma.configurationTemplateFile.findUnique({
       where: {
@@ -297,35 +409,92 @@ export class ConfigurationTemplatesService {
       },
     });
     if (existing)
-      throw new ConflictException("A file is already registered at this path");
+      throw operationError(
+        409,
+        "TEMPLATE_FILE_CONFLICT",
+        "A file is already registered at this path",
+        "uploadTemplateFile",
+        "destinationPath",
+      );
     if (!file.buffer && !file.path)
       throw new BadRequestException("Uploaded file content is unavailable");
     const sha256 = file.buffer
       ? createHash("sha256").update(file.buffer).digest("hex")
       : await hashFile(file.path!);
     const objectKey = `workspaces/${workspaceId}/templates/${version.templateId}/versions/${version.version}/${randomUUID()}`;
-    await this.storage.putObject(
-      objectKey,
-      file.buffer ?? createReadStream(file.path!),
-      file.size,
-      file.mimetype || "application/octet-stream",
-      sha256,
-    );
+    const body = file.buffer ?? createReadStream(file.path!);
+    const streamClosed = Buffer.isBuffer(body)
+      ? Promise.resolve()
+      : finished(body).catch(() => undefined);
     try {
-      return await this.prisma.configurationTemplateFile.create({
-        data: {
-          versionId,
-          destinationPath: normalized,
-          objectKey,
-          originalName: safeOriginalName(file.originalname),
-          contentType: file.mimetype || "application/octet-stream",
-          size: file.size,
-          sha256,
+      await this.storage.putObject(
+        objectKey,
+        body,
+        file.size,
+        file.mimetype || "application/octet-stream",
+        sha256,
+      );
+    } catch {
+      storageUnavailable();
+    } finally {
+      if (!Buffer.isBuffer(body)) body.destroy();
+      await streamClosed;
+    }
+    try {
+      return await this.mutateDraft(
+        workspaceId,
+        versionId,
+        expectedRevision ?? version.revision,
+        async (tx, current) => {
+          validateFileParent(
+            normalized,
+            current.folders.map((f) => f.path),
+          );
+          validatePublishedManifest({
+            folders: current.folders,
+            files: [...current.files, { destinationPath: normalized }],
+            commandStages: [],
+          });
+          const sum = current.files.reduce(
+            (total, item) => total + item.size,
+            0,
+          );
+          if (sum + file.size > ConfigurationTemplatesService.maxVersionBytes())
+            throw operationError(
+              400,
+              "TEMPLATE_VERSION_LIMIT",
+              "Template version exceeds the configured total size",
+              "uploadTemplateFile",
+              "file",
+            );
+          const registered = await tx.configurationTemplateFile.create({
+            data: {
+              versionId,
+              destinationPath: normalized,
+              objectKey,
+              originalName: safeOriginalName(file.originalname),
+              contentType: file.mimetype || "application/octet-stream",
+              size: file.size,
+              sha256,
+            },
+          });
+          return {
+            ...templateFile(registered),
+            versionRevision: current.revision,
+          };
         },
-      });
+      );
     } catch (error) {
-      await this.queueCleanup(objectKey);
-      throw error;
+      // Preserve the uploaded object if a successful commit lost its acknowledgement.
+      if (
+        (error instanceof HttpException &&
+          [400, 404, 409].includes(error.getStatus())) ||
+        error instanceof Prisma.PrismaClientValidationError ||
+        (error instanceof Prisma.PrismaClientKnownRequestError &&
+          ["P2002", "P2003", "P2025", "P2034"].includes(error.code))
+      )
+        await this.queueCleanup(objectKey);
+      templateWriteError(error, "registerTemplateFile");
     }
   }
 
@@ -334,76 +503,143 @@ export class ConfigurationTemplatesService {
     versionId: string,
     fileId: string,
     dto: MoveTemplateFileDto,
+    expectedRevision?: number,
   ) {
-    const version = await this.assertDraft(workspaceId, versionId);
-    const normalized = normalizeProjectRelativePath(dto.destinationPath);
-    validateFileParent(
-      normalized,
-      version.folders.map((folder) => folder.path),
+    const normalized = checkedRelativePath(
+      dto.destinationPath,
+      false,
+      "destinationPath",
     );
-    const file = await this.prisma.configurationTemplateFile.findFirst({
-      where: { id: fileId, versionId },
-    });
-    if (!file) throw new NotFoundException("Template file not found");
-    return this.prisma.configurationTemplateFile.update({
-      where: { id: fileId },
-      data: { destinationPath: normalized },
-    });
+    return this.mutateDraft(
+      workspaceId,
+      versionId,
+      expectedRevision,
+      async (tx, version) => {
+        validateFileParent(
+          normalized,
+          version.folders.map((f) => f.path),
+        );
+        const file = version.files.find((f) => f.id === fileId);
+        if (!file)
+          throw operationError(
+            404,
+            "RESOURCE_NOT_FOUND",
+            "Template file not found",
+            "readTemplateFile",
+          );
+        validatePublishedManifest({
+          folders: version.folders,
+          files: [
+            ...version.files.filter((f) => f.id !== fileId),
+            { destinationPath: normalized },
+          ],
+          commandStages: [],
+        });
+        const moved = await tx.configurationTemplateFile.update({
+          where: { id: fileId },
+          data: { destinationPath: normalized },
+        });
+        return { ...templateFile(moved), versionRevision: version.revision };
+      },
+    );
   }
-
-  async removeFile(workspaceId: string, versionId: string, fileId: string) {
-    await this.assertDraft(workspaceId, versionId);
-    const file = await this.prisma.configurationTemplateFile.findFirst({
-      where: { id: fileId, versionId },
-    });
-    if (!file) throw new NotFoundException("Template file not found");
-    await this.prisma.configurationTemplateFile.delete({
-      where: { id: fileId },
-    });
+  async removeFile(
+    workspaceId: string,
+    versionId: string,
+    fileId: string,
+    expectedRevision?: number,
+  ) {
+    const removed = await this.mutateDraft(
+      workspaceId,
+      versionId,
+      expectedRevision,
+      async (tx, version) => {
+        const file = version.files.find((f) => f.id === fileId);
+        if (!file)
+          throw operationError(
+            404,
+            "RESOURCE_NOT_FOUND",
+            "Template file not found",
+            "readTemplateFile",
+          );
+        await tx.configurationTemplateFile.delete({ where: { id: fileId } });
+        return { objectKey: file.objectKey, versionRevision: version.revision };
+      },
+    );
     const remaining = await this.prisma.configurationTemplateFile.count({
-      where: { objectKey: file.objectKey },
+      where: { objectKey: removed.objectKey },
     });
-    if (!remaining) await this.queueCleanup(file.objectKey);
-    return { deleted: true };
+    if (!remaining) await this.queueCleanup(removed.objectKey);
+    return { deleted: true, versionRevision: removed.versionRevision };
   }
 
-  async publish(workspaceId: string, versionId: string, actorId: string) {
-    const version = await this.assertDraft(workspaceId, versionId);
+  async publish(
+    workspaceId: string,
+    versionId: string,
+    actorId: string,
+    expectedRevision?: number,
+  ) {
+    const version = await this.assertDraft(
+      workspaceId,
+      versionId,
+      expectedRevision,
+    );
     validatePublishedManifest(version);
-    for (const file of version.files) {
+    for (const [index, file] of version.files.entries()) {
       let head;
       try {
         head = await this.storage.headObject(file.objectKey);
-      } catch {
-        throw new ConflictException(
-          `MinIO object is missing for ${file.destinationPath}`,
-        );
+      } catch (error) {
+        if (objectMissing(error))
+          throw manifestIssue(
+            409,
+            "TEMPLATE_OBJECT_MISSING",
+            "Stored template file is missing",
+            `files.${index}.destinationPath`,
+          );
+        storageUnavailable();
       }
       if (
         Number(head.ContentLength) !== file.size ||
         head.Metadata?.sha256 !== file.sha256
       )
-        throw new ConflictException(
-          `MinIO metadata mismatch for ${file.destinationPath}`,
+        throw manifestIssue(
+          409,
+          "TEMPLATE_OBJECT_MISMATCH",
+          "Stored template file metadata does not match",
+          `files.${index}.destinationPath`,
         );
     }
-    return this.prisma.configurationTemplateVersion.update({
-      where: { id: versionId },
-      data: {
-        status: ConfigurationTemplateVersionStatus.PUBLISHED,
-        publishedAt: new Date(),
-        publishedById: actorId,
+    return this.mutateDraft(
+      workspaceId,
+      versionId,
+      expectedRevision ?? version.revision,
+      async (tx) => {
+        const published = await tx.configurationTemplateVersion
+          .update({
+            where: { id: versionId },
+            data: {
+              status: ConfigurationTemplateVersionStatus.PUBLISHED,
+              publishedAt: new Date(),
+              publishedById: actorId,
+            },
+            include: manifestInclude,
+          })
+          .catch((error) => templateWriteError(error, "publishTemplate"));
+        return templateManifest(published);
       },
-      include: manifestInclude,
-    });
+    );
   }
 
   async archive(workspaceId: string, id: string) {
     await this.assertTemplate(workspaceId, id);
-    return this.prisma.configurationTemplate.update({
-      where: { id },
-      data: { status: ConfigurationTemplateStatus.ARCHIVED },
-    });
+    const archived = await this.prisma.configurationTemplate
+      .update({
+        where: { id },
+        data: { status: ConfigurationTemplateStatus.ARCHIVED },
+      })
+      .catch((error) => templateWriteError(error, "archiveTemplate"));
+    return templateScalar(archived);
   }
 
   private async assertTemplate(workspaceId: string, id: string) {
@@ -411,24 +647,121 @@ export class ConfigurationTemplatesService {
       where: { id, workspaceId },
     });
     if (!template)
-      throw new NotFoundException("Configuration template not found");
+      throw operationError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        "Configuration template not found",
+        "readTemplate",
+      );
     return template;
   }
 
-  private async assertDraft(workspaceId: string, versionId: string) {
+  private async assertDraft(
+    workspaceId: string,
+    versionId: string,
+    expectedRevision?: number,
+  ) {
     const version = await this.prisma.configurationTemplateVersion.findFirst({
       where: {
         id: versionId,
-        status: ConfigurationTemplateVersionStatus.DRAFT,
         template: { workspaceId },
       },
       include: manifestInclude,
     });
     if (!version)
-      throw new NotFoundException("Editable template version not found");
+      throw operationError(
+        404,
+        "TEMPLATE_DRAFT_NOT_FOUND",
+        "Editable template version not found",
+        "editTemplateVersion",
+      );
+    if (version.status !== ConfigurationTemplateVersionStatus.DRAFT)
+      throw operationError(
+        409,
+        "TEMPLATE_VERSION_IMMUTABLE",
+        "Published versions cannot be modified",
+        "editTemplateVersion",
+      );
+    if (expectedRevision !== undefined && version.revision !== expectedRevision)
+      throw operationError(
+        409,
+        "STALE_REVISION",
+        "Template changed; preserve entered values and reread before retrying",
+        "editTemplateVersion",
+      );
     return version;
   }
 
+  private async mutateDraft<T>(
+    workspaceId: string,
+    versionId: string,
+    expectedRevision: number | undefined,
+    mutate: (
+      tx: Prisma.TransactionClient,
+      version: Prisma.ConfigurationTemplateVersionGetPayload<{
+        include: typeof manifestInclude;
+      }>,
+    ) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const row = await tx.configurationTemplateVersion.findFirst({
+            where: { id: versionId, template: { workspaceId } },
+            include: manifestInclude,
+          });
+          if (!row)
+            throw operationError(
+              404,
+              "TEMPLATE_DRAFT_NOT_FOUND",
+              "Editable template version not found",
+              "editTemplateVersion",
+            );
+          if (row.status !== ConfigurationTemplateVersionStatus.DRAFT)
+            throw operationError(
+              409,
+              "TEMPLATE_VERSION_IMMUTABLE",
+              "Published versions cannot be modified",
+              "editTemplateVersion",
+            );
+          if (
+            expectedRevision !== undefined &&
+            row.revision !== expectedRevision
+          )
+            throw operationError(
+              409,
+              "STALE_REVISION",
+              "Template changed; preserve entered values and reread before retrying",
+              "editTemplateVersion",
+            );
+          const claimed = await tx.configurationTemplateVersion.updateMany({
+            where: {
+              id: versionId,
+              revision: row.revision,
+              status: ConfigurationTemplateVersionStatus.DRAFT,
+            },
+            data: { revision: { increment: 1 } },
+          });
+          if (!claimed.count)
+            throw operationError(
+              409,
+              "STALE_REVISION",
+              "Template changed concurrently; reread before retrying",
+              "editTemplateVersion",
+            );
+          const current =
+            await tx.configurationTemplateVersion.findUniqueOrThrow({
+              where: { id: versionId },
+              include: manifestInclude,
+            });
+          return mutate(tx, current);
+        },
+        { timeout: 30000 },
+      );
+    } catch (error) {
+      templateWriteError(error, "editTemplateVersion");
+    }
+  }
   private async queueCleanup(objectKey: string) {
     try {
       await this.storage.deleteObject(objectKey);
@@ -455,12 +788,34 @@ export const manifestInclude = {
   },
 };
 
+function checkedRelativePath(
+  value: string,
+  allowRoot: boolean,
+  location: string,
+) {
+  try {
+    return normalizeProjectRelativePath(value, allowRoot);
+  } catch {
+    throw manifestIssue(
+      400,
+      "PATH_INVALID",
+      "Path must be a safe project-relative path",
+      location,
+    );
+  }
+}
+
 function validateManifest(dto: ReplaceTemplateManifestDto) {
-  const folders = dto.folders.map((folder) => ({
-    path: normalizeProjectRelativePath(folder.path),
+  const folders = dto.folders.map((folder, index) => ({
+    path: checkedRelativePath(folder.path, false, `folders.${index}.path`),
   }));
   if (new Set(folders.map((folder) => folder.path)).size !== folders.length)
-    throw new BadRequestException("Folder paths must be unique");
+    throw manifestIssue(
+      400,
+      "PATH_DUPLICATE",
+      "Folder paths must be unique",
+      "folders",
+    );
   const commandStages = dto.commandStages.map((stage, stagePosition) => ({
     name: stage.name.trim(),
     position: stagePosition,
@@ -470,29 +825,50 @@ function validateManifest(dto: ReplaceTemplateManifestDto) {
         ? 1
         : (stage.maxConcurrency ?? 4),
     commands: stage.commands.map((command, commandPosition) => {
-      const workingDirectory = normalizeProjectRelativePath(
+      const location = `commandStages.${stagePosition}.commands.${commandPosition}`;
+      const workingDirectory = checkedRelativePath(
         command.workingDirectory,
         true,
+        `${location}.workingDirectory`,
       );
       if (
         workingDirectory &&
         !folders.some((folder) => folder.path === workingDirectory)
       )
-        throw new BadRequestException(
+        throw manifestIssue(
+          400,
+          "COMMAND_FOLDER_INVALID",
           `Command working directory must be declared as a folder: ${workingDirectory}`,
+          `${location}.workingDirectory`,
         );
       if (command.type === TemplateCommandType.STRUCTURED) {
         if (!command.executable?.trim() || command.script !== undefined)
-          throw new BadRequestException(
+          throw manifestIssue(
+            400,
+            "COMMAND_MODE_INVALID",
             "Structured commands require executable and cannot contain script",
+            location,
           );
+        try {
+          structuredCommandArguments(command.arguments);
+        } catch (error) {
+          throw manifestIssue(
+            400,
+            "COMMAND_ARGUMENTS_INVALID",
+            (error as Error).message,
+            `${location}.arguments`,
+          );
+        }
       } else if (
         !command.script?.trim() ||
         command.executable !== undefined ||
         command.arguments !== undefined
       ) {
-        throw new BadRequestException(
+        throw manifestIssue(
+          400,
+          "COMMAND_MODE_INVALID",
           "Shell commands require script and cannot contain executable or arguments",
+          location,
         );
       }
       return {
@@ -500,7 +876,10 @@ function validateManifest(dto: ReplaceTemplateManifestDto) {
         position: commandPosition,
         type: command.type,
         executable: command.executable?.trim() || null,
-        arguments: command.arguments ?? Prisma.JsonNull,
+        arguments:
+          command.type === TemplateCommandType.STRUCTURED
+            ? structuredCommandArguments(command.arguments)
+            : Prisma.JsonNull,
         script: command.script?.trim() || null,
         workingDirectory,
         timeoutSeconds: command.timeoutSeconds ?? 900,
@@ -513,38 +892,98 @@ function validateManifest(dto: ReplaceTemplateManifestDto) {
 function validatePublishedManifest(version: {
   folders: Array<{ path: string }>;
   files: Array<{ destinationPath: string }>;
-  commandStages: Array<{ commands: Array<{ workingDirectory: string }> }>;
+  commandStages: Array<{
+    commands: Array<{
+      workingDirectory: string;
+      type: TemplateCommandType;
+      executable: string | null;
+      arguments: Prisma.JsonValue | null;
+      script: string | null;
+    }>;
+  }>;
 }) {
   const folders = new Set(version.folders.map((folder) => folder.path));
   const files = new Set<string>();
-  for (const file of version.files) {
+  for (const [fileIndex, file] of version.files.entries()) {
     if (files.has(file.destinationPath) || folders.has(file.destinationPath))
-      throw new ConflictException(
+      throw manifestIssue(
+        409,
+        "PATH_DUPLICATE",
         `Duplicate template path: ${file.destinationPath}`,
+        `files.${fileIndex}.destinationPath`,
       );
-    validateFileParent(file.destinationPath, [...folders]);
+    validateFileParent(
+      file.destinationPath,
+      [...folders],
+      `files.${fileIndex}.destinationPath`,
+    );
     files.add(file.destinationPath);
   }
   for (const folder of folders) {
     for (const file of files)
       if (folder.startsWith(`${file}/`))
-        throw new ConflictException(
+        throw manifestIssue(
+          409,
+          "PATH_ANCESTOR_CONFLICT",
           `File path is an ancestor of folder: ${file}`,
+          "folders",
         );
   }
-  for (const stage of version.commandStages)
-    for (const command of stage.commands)
-      if (command.workingDirectory && !folders.has(command.workingDirectory))
-        throw new ConflictException(
-          `Command folder does not exist: ${command.workingDirectory}`,
+  for (const [stageIndex, stage] of version.commandStages.entries())
+    for (const [commandIndex, command] of stage.commands.entries()) {
+      const location = `commandStages.${stageIndex}.commands.${commandIndex}`;
+      if (command.type === TemplateCommandType.STRUCTURED) {
+        if (!command.executable?.trim() || command.script != null)
+          throw manifestIssue(
+            409,
+            "COMMAND_MODE_INVALID",
+            "Structured commands require executable and cannot contain script",
+            location,
+          );
+        try {
+          structuredCommandArguments(command.arguments, true);
+        } catch (error) {
+          throw manifestIssue(
+            409,
+            "COMMAND_ARGUMENTS_INVALID",
+            (error as Error).message,
+            `${location}.arguments`,
+          );
+        }
+      } else if (
+        !command.script?.trim() ||
+        command.executable != null ||
+        command.arguments != null
+      ) {
+        throw manifestIssue(
+          409,
+          "COMMAND_MODE_INVALID",
+          "Shell commands require script and cannot contain executable or arguments",
+          location,
         );
+      }
+      if (command.workingDirectory && !folders.has(command.workingDirectory))
+        throw manifestIssue(
+          409,
+          "COMMAND_FOLDER_INVALID",
+          `Command folder does not exist: ${command.workingDirectory}`,
+          `${location}.workingDirectory`,
+        );
+    }
 }
 
-function validateFileParent(destinationPath: string, folders: string[]) {
+function validateFileParent(
+  destinationPath: string,
+  folders: string[],
+  location = "destinationPath",
+) {
   const parent = path.posix.dirname(destinationPath);
   if (parent !== "." && !folders.includes(parent))
-    throw new BadRequestException(
+    throw manifestIssue(
+      400,
+      "FILE_PARENT_INVALID",
       `File parent must be declared as a folder: ${parent}`,
+      location,
     );
 }
 
@@ -560,20 +999,6 @@ function slugify(value: string) {
 
 function safeOriginalName(value: string) {
   return value.replace(/\\/g, "/").split("/").pop()?.slice(0, 255) || "file";
-}
-
-function configuredLimit(name: string, fallback: number) {
-  const configured = Number(process.env[name]);
-  return Number.isSafeInteger(configured) && configured > 0
-    ? Math.min(configured, 1024 * 1024 * 1024)
-    : fallback;
-}
-
-function isUniqueError(error: unknown) {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === "P2002"
-  );
 }
 
 function hashFile(filePath: string) {

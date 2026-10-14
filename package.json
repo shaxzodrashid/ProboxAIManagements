@@ -1,6 +1,6 @@
 {
   "name": "proboxai",
-  "version": "0.1.0",
+  "version": "0.2.0-dev.1",
   "private": true,
   "description": "ProboxAI programmatic coding-session control plane",
   "bin": {
@@ -10,10 +10,12 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
-    "lint": "eslint \"{src,test,prisma}/**/*.ts\" --max-warnings=0",
+    "lint": "eslint \"{src,test,prisma}/**/*.ts\" \"scripts/**/*.mjs\" --max-warnings=0",
     "format": "prettier --check \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit --incremental false",
-    "precommit": "lint-staged && pnpm typecheck && pnpm test",
+    "precommit": "lint-staged --concurrent false && pnpm release:check && pnpm typecheck && pnpm test",
+    "release:check": "node scripts/backend-release.mjs",
+    "release:docs": "node scripts/backend-release.mjs --write",
     "prepare": "husky",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",

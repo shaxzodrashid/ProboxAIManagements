@@ -8,6 +8,16 @@ const authorization = {
 };
 
 function accounts(prisma: any) {
+  prisma.$queryRaw = jest.fn().mockResolvedValue([]);
+  prisma.workspace = { update: jest.fn().mockResolvedValue({}) };
+  const read = prisma.user?.findFirst;
+  prisma.user ??= {};
+  prisma.user.findFirst = jest.fn((args: any) =>
+    args.where.roleAssignments
+      ? Promise.resolve({ id: args.where.id })
+      : read?.(args),
+  );
+  prisma.$transaction ??= jest.fn((fn: any) => fn(prisma));
   return new AccountsService(
     prisma as PrismaService,
     authorization as unknown as AuthorizationService,
@@ -15,6 +25,110 @@ function accounts(prisma: any) {
 }
 
 describe("AccountsService", () => {
+  it("creates independent multiword names and composes compatibility fullName", async () => {
+    const prisma: any = {
+      user: {
+        create: jest.fn().mockImplementation(async ({ data }: any) => ({
+          ...data,
+          roleAssignments: [],
+        })),
+      },
+    };
+    const result = await accounts(prisma).create("workspace-1", "admin-1", {
+      firstName: "Mary Jane",
+      lastName: "de la Cruz",
+      phoneNumber: "+998901234567",
+    });
+    expect(result).toMatchObject({
+      firstName: "Mary Jane",
+      lastName: "de la Cruz",
+      fullName: "Mary Jane de la Cruz",
+      status: "PENDING",
+    });
+  });
+  it("accepts a single name without requiring a last name", async () => {
+    const prisma: any = {
+      user: {
+        create: jest.fn().mockImplementation(async ({ data }: any) => ({
+          ...data,
+          roleAssignments: [],
+        })),
+      },
+    };
+    const result = await accounts(prisma).create("workspace-1", "admin-1", {
+      firstName: "A",
+      phoneNumber: "+998901234567",
+    });
+    expect(result).toMatchObject({
+      firstName: "A",
+      lastName: null,
+      fullName: "A",
+    });
+  });
+  it.each([{}, { fullName: "Legacy", firstName: "Ada" }])(
+    "rejects missing or ambiguous creation names %j",
+    async (names) => {
+      const prisma: any = { user: { create: jest.fn() } };
+      await expect(
+        accounts(prisma).create("workspace-1", "admin-1", {
+          ...names,
+          phoneNumber: "+998901234567",
+        }),
+      ).rejects.toThrow("Supply either");
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    },
+  );
+  it("cannot read or update a self identity in another workspace", async () => {
+    const prisma: any = {
+      user: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn(),
+      },
+    };
+    prisma.$transaction = (callback: any) => callback(prisma);
+    await expect(
+      accounts(prisma).self("wrong-workspace", "self"),
+    ).rejects.toThrow("User not found");
+    await expect(
+      accounts(prisma).updateSelf("wrong-workspace", "self", { bio: "x" }),
+    ).rejects.toThrow("User not found");
+    expect(prisma.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "self", workspaceId: "wrong-workspace", status: "OPEN" },
+      }),
+    );
+    expect(prisma.user.updateMany).not.toHaveBeenCalled();
+  });
+  it("detects a racing name update instead of overwriting the other component", async () => {
+    const prisma: any = {
+      user: {
+        findFirst: jest.fn().mockResolvedValue({
+          firstName: "Ada",
+          lastName: null,
+          fullName: "Ada",
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    prisma.$transaction = (callback: any) => callback(prisma);
+    await expect(
+      accounts(prisma).updateSelf("workspace-1", "self", {
+        lastName: "Lovelace",
+      }),
+    ).rejects.toThrow("Profile changed concurrently");
+    expect(prisma.user.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "self",
+          workspaceId: "workspace-1",
+          status: "OPEN",
+          firstName: "Ada",
+          lastName: null,
+          fullName: "Ada",
+        },
+      }),
+    );
+  });
   it("links a Telegram self-contact without opening the pending identity", async () => {
     const prisma: any = {
       user: {
@@ -68,7 +182,6 @@ describe("AccountsService", () => {
             create: [
               {
                 roleId: "role-manager",
-                workspaceId: "workspace-1",
                 assignedById: "admin-1",
               },
             ],

@@ -10,6 +10,7 @@ import {
   MaxLength,
   Min,
   ValidateNested,
+  ValidateIf,
 } from "class-validator";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { TemplateCommandStageMode, TemplateCommandType } from "@prisma/client";
@@ -37,14 +38,17 @@ export class CreateConfigurationTemplateDto {
 
 export class UpdateConfigurationTemplateDto {
   @ApiPropertyOptional({ example: "Marketing brand book", maxLength: 120 })
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString()
   @Matches(NAME)
   @MaxLength(120)
   name?: string;
 
-  @ApiPropertyOptional({ maxLength: 4000 })
-  @IsOptional()
+  @ApiPropertyOptional({
+    maxLength: 4000,
+    description: "Omit to retain; empty string clears. Null is rejected.",
+  })
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString()
   @MaxLength(4000)
   description?: string;
@@ -73,8 +77,14 @@ export class TemplateCommandInputDto {
   @MaxLength(1024)
   executable?: string;
 
-  @ApiPropertyOptional({ type: String, isArray: true, example: ["install"] })
-  @IsOptional()
+  @ApiPropertyOptional({
+    type: String,
+    isArray: true,
+    example: ["install"],
+    description:
+      "Structured commands only. Omission becomes []; explicit null is rejected. Each string is at most 4096 characters.",
+  })
+  @ValidateIf((_object, value) => value !== undefined)
   @IsArray()
   @IsString({ each: true })
   @MaxLength(4096, { each: true })
@@ -154,13 +164,4 @@ export class MoveTemplateFileDto {
   destinationPath!: string;
 }
 
-export class ConfigurationTemplateResponseDto {
-  @ApiProperty({ format: "uuid" }) id!: string;
-  @ApiProperty({ format: "uuid" }) departmentId!: string;
-  @ApiProperty() name!: string;
-  @ApiProperty() slug!: string;
-  @ApiProperty({ nullable: true }) description!: string | null;
-  @ApiProperty({ enum: ["ACTIVE", "ARCHIVED"] }) status!: string;
-  @ApiProperty({ type: "array", items: { type: "object" } })
-  versions!: unknown[];
-}
+export * from "./template-response.dto";

@@ -15,6 +15,8 @@ const execFileAsync = promisify(execFile);
 
 export interface RunnerOptions {
   sessionId: string;
+  turnId?: string;
+  beforeSpawn?: () => Promise<boolean>;
   cwd: string;
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   prompt: string;
@@ -37,12 +39,31 @@ export class ProboxAiRunner {
     ChildProcessWithoutNullStreams
   >();
 
+  private readonly generations = new Map<string, string | undefined>();
+  private readonly observations = new Map<
+    string,
+    "NOT_STARTED" | "STOP_UNCONFIRMED" | "LOCAL_EXIT_OBSERVED"
+  >();
+
+  stopObservation(sessionId: string, turnId?: string) {
+    return (
+      this.observations.get(`${sessionId}:${turnId ?? ""}`) ??
+      "STOP_UNCONFIRMED"
+    );
+  }
+
   constructor(private readonly paths: WorkspacePathPolicy) {}
 
   async start(
     options: RunnerOptions,
     onEvent: (event: RunnerEvent) => Promise<void>,
   ): Promise<number> {
+    if (this.processes.has(options.sessionId))
+      throw new Error("Session runner is already tracked");
+    this.observations.set(
+      `${options.sessionId}:${options.turnId ?? ""}`,
+      "NOT_STARTED",
+    );
     this.assertSafeCwd(options.cwd);
     const bin = process.env.PROBOXAI_BIN ?? "proboxai";
     const args = [
@@ -64,6 +85,15 @@ export class ProboxAiRunner {
     if (options.threadId) args.push("resume", options.threadId);
     args.push("--", options.prompt);
     const archivePath = await this.archivePath(options.sessionId);
+    if (options.beforeSpawn && !(await options.beforeSpawn())) return -1;
+    const directory = await this.paths.executionDirectory(
+      options.cwd,
+      options.sandbox !== "read-only",
+    );
+    if (!directory.valid || directory.normalizedPath !== options.cwd)
+      throw new Error("Runner working directory is unavailable");
+    if (this.processes.has(options.sessionId))
+      throw new Error("Session runner is already tracked");
     const child = spawn(bin, args, {
       stdio: "pipe",
       shell: false,
@@ -73,6 +103,20 @@ export class ProboxAiRunner {
     });
     child.stdin.end();
     this.processes.set(options.sessionId, child);
+    this.generations.set(options.sessionId, options.turnId);
+    if (child.pid)
+      this.observations.set(
+        `${options.sessionId}:${options.turnId ?? ""}`,
+        "STOP_UNCONFIRMED",
+      );
+    child.once("close", () => {
+      this.observations.set(
+        `${options.sessionId}:${options.turnId ?? ""}`,
+        "LOCAL_EXIT_OBSERVED",
+      );
+      if (this.processes.get(options.sessionId) === child)
+        this.processes.delete(options.sessionId);
+    });
     const consume = this.consumeJsonLines(child, archivePath, onEvent);
     const stderr = this.consumeStderr(child, archivePath);
     const exit = new Promise<number>((resolveExit, reject) => {
@@ -87,11 +131,25 @@ export class ProboxAiRunner {
       child.kill();
       throw error;
     } finally {
-      this.processes.delete(options.sessionId);
+      // A rejection or kill request is not proof of close. Keep an unclosed child tracked.
+      if (
+        !child.pid &&
+        this.observations.get(
+          `${options.sessionId}:${options.turnId ?? ""}`,
+        ) !== "LOCAL_EXIT_OBSERVED"
+      ) {
+        this.processes.delete(options.sessionId);
+        this.observations.set(
+          `${options.sessionId}:${options.turnId ?? ""}`,
+          "NOT_STARTED",
+        );
+      }
     }
   }
 
-  interrupt(sessionId: string): boolean {
+  interrupt(sessionId: string, turnId?: string): boolean {
+    if (turnId !== undefined && this.generations.get(sessionId) !== turnId)
+      return false;
     const process = this.processes.get(sessionId);
     if (!process) return false;
     return process.kill("SIGINT");

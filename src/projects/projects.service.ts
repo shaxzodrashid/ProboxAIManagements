@@ -1,22 +1,46 @@
 import {
+  deletionRequestResponse,
+  deletionAuditResponse,
+} from "./project-deletion-contracts";
+import {
+  DurableFileDeletion,
+  fileEvidence,
+  fileOperationResponse,
+  findFileOperation,
+} from "./durable-file-deletion";
+import { assertCurrentManagement } from "../prisma/current-management";
+import { lockWorkspace } from "../prisma/workspace-lock";
+import {
+  ActiveProjectMutation,
+  lockProjectLifecycle,
+  fencedProjectFilesystem,
+  currentProjectExecutionId,
+} from "./project-lifecycle-lock";
+import {
+  databaseOperationError,
+  operationError,
+} from "../openapi/operation-errors";
+import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
+  Optional,
+  ServiceUnavailableException,
   NotFoundException,
 } from "@nestjs/common";
 import {
+  Prisma,
   ConfigurationTemplateVersionStatus,
   DepartmentStatus,
   ProjectStatus,
-  ProjectFileDeletionConfirmationStatus,
   ProjectFileTrashStatus,
   ProjectDeletionRequestStatus,
   SessionStatus,
 } from "@prisma/client";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import {
@@ -28,7 +52,17 @@ import { DepartmentsService } from "../departments/departments.service";
 import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
 import { ProjectInitializationService } from "./project-initialization.service";
 import { TelegramService } from "../telegram/telegram.service";
+import { SessionsService } from "../sessions/sessions.service";
 import { ProboxAiRunner } from "../sessions/proboxai-runner.service";
+import { configuredUploadLimit } from "../storage/upload-limits";
+import {
+  ProjectCreationSubmissions,
+  CreationExecution,
+  lockCreationTarget,
+  creationTarget,
+  assertCreationNamespace,
+} from "./project-creation-submissions";
+import { SubmitProjectCreationDto } from "./project-creation-submission.dto";
 import {
   hasPermission,
   Permissions,
@@ -41,6 +75,7 @@ type UploadedProjectFile = {
   size: number;
 };
 
+import { projectInitializationSummarySelect } from "./project-initialization-summary";
 const projectMemberUserSelect = {
   id: true,
   fullName: true,
@@ -59,6 +94,7 @@ export class ProjectsService {
     private readonly initializations: ProjectInitializationService,
     private readonly telegram?: TelegramService,
     private readonly runner?: ProboxAiRunner,
+    @Optional() private readonly sessions?: SessionsService,
   ) {}
 
   onModuleInit() {
@@ -71,10 +107,19 @@ export class ProjectsService {
   }
 
   static maxUploadBytes() {
-    const configured = Number(process.env.PROBOXAI_PROJECT_UPLOAD_MAX_BYTES);
-    return Number.isSafeInteger(configured) && configured > 0
-      ? Math.min(configured, 1024 * 1024 * 1024)
-      : 100 * 1024 * 1024;
+    return configuredUploadLimit(
+      "PROBOXAI_PROJECT_UPLOAD_MAX_BYTES",
+      100 * 1024 * 1024,
+    );
+  }
+
+  async uploadConfiguration(actor: AuthenticatedUser, projectId: string) {
+    const project = await this.assertSensitiveAccess(actor, projectId);
+    this.assertProjectReady(project);
+    return {
+      maxUploadBytes: ProjectsService.maxUploadBytes(),
+      requestMode: "single-file" as const,
+    };
   }
 
   async getProjectsHome(workspaceId: string) {
@@ -83,6 +128,7 @@ export class ProjectsService {
       path: department.homePath,
       configured: true,
       departmentId: department.id,
+      revision: department.revision,
     };
   }
 
@@ -93,192 +139,448 @@ export class ProjectsService {
     return { project, directory };
   }
 
-  async setProjectsHome(workspaceId: string, requestedPath: string) {
+  async setProjectsHome(
+    workspaceId: string,
+    requestedPath: string,
+    expectedRevision: number,
+    departmentId: string,
+  ) {
     const department = await this.departments.defaultForWorkspace(workspaceId);
-    const updated = await this.departments.update(workspaceId, department.id, {
-      homePath: requestedPath,
-    });
-    await this.prisma.workspace.update({
-      where: { id: workspaceId },
-      data: { projectsHomePath: updated.homePath },
-    });
+    if (department.id !== departmentId)
+      throw new ConflictException(
+        "Default department changed; reread before retrying",
+      );
+    const updated = await this.departments.update(
+      workspaceId,
+      department.id,
+      { homePath: requestedPath },
+      expectedRevision,
+      true,
+    );
+    // Department.homePath is authoritative. The deprecated Workspace field is no
+    // longer mirrored in a separate write which could fail after the actual update.
     return {
       path: updated.homePath,
       configured: true,
       departmentId: updated.id,
+      revision: updated.revision,
       created: updated.homeCreated,
     };
   }
 
-  async list(actor: AuthenticatedUser) {
-    const projects = await this.prisma.project.findMany({
-      where: {
-        workspaceId: actor.workspaceId,
-        ...(hasPermission(actor, Permissions.PROJECTS_READ_ALL)
-          ? {}
-          : {
-              OR: [
-                { readAccessEnabled: true },
-                { members: { some: { userId: actor.id } } },
-              ],
-            }),
+  async list(
+    actor: AuthenticatedUser,
+    lifecycle: "active" | "archived" = "active",
+  ) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        actor = await this.currentProjectReader(actor, tx);
+        const projects = await tx.project.findMany({
+          where: {
+            workspaceId: actor.workspaceId,
+            archivedAt: lifecycle === "archived" ? { not: null } : null,
+            ...(hasPermission(actor, Permissions.PROJECTS_READ_ALL)
+              ? {}
+              : {
+                  OR: [
+                    { readAccessEnabled: true },
+                    { members: { some: { userId: actor.id } } },
+                  ],
+                }),
+          },
+          include: {
+            creator: { select: { id: true, fullName: true } },
+            department: { select: { id: true, name: true, slug: true } },
+            initializations: {
+              orderBy: { attempt: "desc" },
+              take: 1,
+              select: projectInitializationSummarySelect,
+            },
+            _count: { select: { members: true } },
+            members: { where: { userId: actor.id }, select: { userId: true } },
+          },
+          orderBy: { updatedAt: "desc" },
+        });
+        return projects.map(({ members, ...project }) => ({
+          ...project,
+          isMember: members.length > 0,
+        }));
       },
-      include: {
-        creator: { select: { id: true, fullName: true } },
-        department: { select: { id: true, name: true, slug: true } },
-        initializations: { orderBy: { attempt: "desc" }, take: 1 },
-        _count: { select: { members: true } },
-      },
-      orderBy: { updatedAt: "desc" },
-    });
-    return projects;
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
-  async create(actor: AuthenticatedUser, dto: CreateProjectDto) {
-    const department = dto.departmentId
-      ? await this.departments.get(actor.workspaceId, dto.departmentId)
-      : await this.departments.defaultForWorkspace(actor.workspaceId);
-    if (department.status !== DepartmentStatus.ACTIVE)
-      throw new ConflictException(
-        "Projects cannot be created in an archived department",
-      );
-    const directoryName = validateProjectDirectoryName(dto.name);
-    const existing = await this.prisma.project.findFirst({
-      where: { departmentId: department.id, directoryName },
-      select: { id: true },
-    });
-    if (existing)
-      throw new ConflictException("A project with this name exists");
-
-    const projectDirectory = await this.projectDirectoryForDepartment(
-      department.id,
-      directoryName,
+  async creationOutcome(actor: AuthenticatedUser, requestId: string) {
+    return new ProjectCreationSubmissions(this.prisma, this.pathPolicy).read(
+      actor,
+      requestId,
     );
-    const existingDirectory = await existingDirectoryStatus(projectDirectory);
-    let templateVersion: { id: string } | null = null;
-    if (dto.configurationTemplateId) {
-      templateVersion =
-        await this.prisma.configurationTemplateVersion.findFirst({
-          where: {
-            templateId: dto.configurationTemplateId,
-            status: ConfigurationTemplateVersionStatus.PUBLISHED,
-            template: {
-              workspaceId: actor.workspaceId,
-              departmentId: department.id,
-              status: "ACTIVE",
-            },
-          },
-          select: { id: true },
-          orderBy: { version: "desc" },
-        });
-      if (!templateVersion)
-        throw new ConflictException(
-          "The selected department has no matching published template",
-        );
-    }
-    await this.prepareExistingDirectory(
-      projectDirectory,
-      existingDirectory,
-      dto.existingDirectoryAction,
-      Boolean(templateVersion),
+  }
+  async submitCreation(
+    actor: AuthenticatedUser,
+    dto: SubmitProjectCreationDto,
+  ) {
+    return new ProjectCreationSubmissions(this.prisma, this.pathPolicy).submit(
+      actor,
+      dto,
+      (context) =>
+        this.create(
+          actor,
+          { ...dto, departmentId: context.submission.departmentId },
+          context,
+        ),
     );
-    if (templateVersion) {
-      const project = await this.prisma.project.create({
-        data: {
-          workspaceId: actor.workspaceId,
-          departmentId: department.id,
-          creatorId: actor.id,
-          name: dto.name.trim(),
-          directoryName,
-          description: dto.description?.trim() || null,
-          readAccessEnabled: dto.readAccessEnabled ?? false,
-          status: ProjectStatus.INITIALIZING,
-          appliedTemplateVersionId: templateVersion.id,
-          members: { create: { userId: actor.id } },
-        },
-        include: {
-          creator: { select: { id: true, fullName: true } },
-          department: { select: { id: true, name: true, slug: true } },
-          members: {
-            include: {
-              user: { select: projectMemberUserSelect },
-            },
-          },
-        },
-      });
-      try {
-        const initialization = await this.initializations.enqueue(
-          project.id,
-          templateVersion.id,
-        );
-        return mapProjectMembers({
-          ...project,
-          initializations: [initialization],
-        });
-      } catch (error) {
-        await this.prisma.project.update({
-          where: { id: project.id },
-          data: { status: ProjectStatus.FAILED },
-        });
-        throw error;
-      }
-    }
-    try {
-      if (!existingDirectory) await fs.mkdir(projectDirectory);
-    } catch (error) {
-      throw filesystemError(error, "Unable to create the project directory");
-    }
-
-    // If the database write fails, deliberately keep the empty directory for an
-    // operator to inspect; deleting it could race with a concurrent writer.
-    const project = await this.prisma.project.create({
+  }
+  private async commitCreationOutcome(
+    tx: Prisma.TransactionClient,
+    context: CreationExecution | undefined,
+    projectId: string,
+    initializationId: string | null,
+  ) {
+    if (!context) return;
+    const s = context.submission;
+    const updated = await tx.projectCreationSubmission.updateMany({
+      where: {
+        workspaceId: s.workspaceId,
+        requestId: s.requestId,
+        actorId: s.actorId,
+        executorId: s.executorId,
+        state: "UNRESOLVED",
+        executionFinishedAt: null,
+      },
       data: {
-        workspaceId: actor.workspaceId,
-        departmentId: department.id,
-        creatorId: actor.id,
-        name: dto.name.trim(),
-        directoryName,
-        description: dto.description?.trim() || null,
-        readAccessEnabled: dto.readAccessEnabled ?? false,
-        status: ProjectStatus.READY,
-        members: { create: { userId: actor.id } },
-      },
-      include: {
-        creator: { select: { id: true, fullName: true } },
-        department: { select: { id: true, name: true, slug: true } },
-        members: {
-          include: {
-            user: { select: projectMemberUserSelect },
-          },
-        },
+        state: "COMPLETED",
+        projectId,
+        initializationId,
+        failureCode: null,
       },
     });
-    return mapProjectMembers(project);
+    if (updated.count !== 1)
+      throw new ConflictException(
+        "Creation submission is no longer executable",
+      );
+  }
+  async create(
+    actor: AuthenticatedUser,
+    dto: CreateProjectDto,
+    context?: CreationExecution,
+  ) {
+    if (!context) {
+      if (dto.existingDirectoryAction === "CLEAR")
+        throw operationError(
+          428,
+          "PROJECT_CREATION_ID_REQUIRED",
+          "CLEAR requires POST /projects/creation-submissions with a client-generated requestId; legacy creation cannot safely distinguish a retry",
+          "createProject",
+          "existingDirectoryAction",
+        );
+      let result: any;
+      let failed: unknown;
+      const outcome = await new ProjectCreationSubmissions(
+        this.prisma,
+        this.pathPolicy,
+      ).submit(
+        actor,
+        { ...dto, requestId: randomUUID() },
+        async (execution) => {
+          try {
+            result = await this.create(
+              actor,
+              { ...dto, departmentId: execution.submission.departmentId },
+              execution,
+            );
+            return result;
+          } catch (error) {
+            failed = error;
+            throw error;
+          }
+        },
+      );
+      if (failed) throw failed;
+      if (outcome.state !== "COMPLETED" || !result)
+        throw new ServiceUnavailableException(
+          "Project creation outcome is unresolved",
+        );
+      return result;
+    }
+    let callbackEntered = false;
+    try {
+      const project = await this.prisma
+        .$transaction(
+          async (tx) => {
+            callbackEntered = true;
+            try {
+              await lockWorkspace(tx, actor.workspaceId);
+              await assertCurrentManagement(
+                tx,
+                actor.workspaceId,
+                actor.id,
+                Permissions.PROJECTS_CREATE,
+              );
+              const department = await tx.department.findFirst({
+                where: {
+                  workspaceId: actor.workspaceId,
+                  ...(dto.departmentId
+                    ? { id: dto.departmentId }
+                    : { isDefault: true, status: DepartmentStatus.ACTIVE }),
+                },
+              });
+              if (!department)
+                throw new ConflictException(
+                  "Selected or active default department not found",
+                );
+              if (department.status !== DepartmentStatus.ACTIVE)
+                throw new ConflictException(
+                  "Projects cannot be created in an archived department",
+                );
+              const directoryName = validateProjectDirectoryName(dto.name);
+              const target = path.join(
+                this.pathPolicy.validateDepartmentHome(department.homePath),
+                directoryName,
+              );
+              await lockCreationTarget(tx, target, context?.submission);
+              if (
+                context &&
+                creationTarget(target) !==
+                  creationTarget(context.submission.targetPath)
+              )
+                throw new ConflictException(
+                  "Selected project setup changed; inspect the submission before creating again",
+                );
+              if (context) {
+                const s = await tx.projectCreationSubmission.findUnique({
+                  where: {
+                    workspaceId_requestId: {
+                      workspaceId: context.submission.workspaceId,
+                      requestId: context.submission.requestId,
+                    },
+                  },
+                });
+                if (
+                  !s ||
+                  s.executorId !== context.submission.executorId ||
+                  s.state !== "UNRESOLVED" ||
+                  s.executionFinishedAt
+                )
+                  throw new ConflictException(
+                    "Creation submission is no longer executable",
+                  );
+              }
+              const existing = await tx.project.findFirst({
+                where: { departmentId: department.id, directoryName },
+                select: { id: true },
+              });
+              if (existing)
+                throw new ConflictException("A project with this name exists");
+              await assertCreationNamespace(
+                tx,
+                target,
+                dto.existingDirectoryAction,
+              );
+
+              const projectDirectory = await this.projectDirectoryForDepartment(
+                department.id,
+                directoryName,
+              );
+              const existingDirectory =
+                await existingDirectoryStatus(projectDirectory);
+              let templateVersion: { id: string } | null = null;
+              if (dto.configurationTemplateId) {
+                templateVersion =
+                  await tx.configurationTemplateVersion.findFirst({
+                    where: {
+                      templateId: dto.configurationTemplateId,
+                      ...(context?.submission.templateVersionId
+                        ? { id: context.submission.templateVersionId }
+                        : {}),
+                      status: ConfigurationTemplateVersionStatus.PUBLISHED,
+                      template: {
+                        workspaceId: actor.workspaceId,
+                        departmentId: department.id,
+                        status: "ACTIVE",
+                      },
+                    },
+                    select: { id: true },
+                    orderBy: { version: "desc" },
+                  });
+                if (!templateVersion)
+                  throw new ConflictException(
+                    "The selected department has no matching published template",
+                  );
+              }
+              await tx.$queryRaw`SELECT 1`; // Recheck transaction liveness before any CLEAR/write.
+              await this.prepareExistingDirectory(
+                projectDirectory,
+                existingDirectory,
+                dto.existingDirectoryAction,
+                Boolean(templateVersion),
+                async () => {
+                  await tx.$queryRaw`SELECT 1`;
+                },
+              );
+              if (templateVersion) {
+                const project = await tx.project.create({
+                  data: {
+                    workspaceId: actor.workspaceId,
+                    departmentId: department.id,
+                    creatorId: actor.id,
+                    name: dto.name.trim(),
+                    directoryName,
+                    description: dto.description?.trim() || null,
+                    readAccessEnabled: dto.readAccessEnabled ?? false,
+                    status: ProjectStatus.INITIALIZING,
+                    appliedTemplateVersionId: templateVersion.id,
+                    members: { create: { userId: actor.id } },
+                  },
+                  include: {
+                    creator: { select: { id: true, fullName: true } },
+                    department: {
+                      select: { id: true, name: true, slug: true },
+                    },
+                    members: {
+                      include: {
+                        user: { select: projectMemberUserSelect },
+                      },
+                    },
+                  },
+                });
+                const initialization = await tx.projectInitialization.create({
+                  select: projectInitializationSummarySelect,
+                  data: {
+                    projectId: project.id,
+                    templateVersionId: templateVersion.id,
+                    attempt: 1,
+                  },
+                });
+                await this.commitCreationOutcome(
+                  tx,
+                  context,
+                  project.id,
+                  initialization.id,
+                );
+                return { ...project, initializations: [initialization] };
+              }
+              try {
+                await tx.$queryRaw`SELECT 1`;
+                if (!existingDirectory) await fs.mkdir(projectDirectory);
+              } catch (error) {
+                throw filesystemError(
+                  error,
+                  "Unable to create the project directory",
+                );
+              }
+
+              // If the database write fails, deliberately keep the empty directory for an
+              // operator to inspect; deleting it could race with a concurrent writer.
+              const project = await tx.project.create({
+                data: {
+                  workspaceId: actor.workspaceId,
+                  departmentId: department.id,
+                  creatorId: actor.id,
+                  name: dto.name.trim(),
+                  directoryName,
+                  description: dto.description?.trim() || null,
+                  readAccessEnabled: dto.readAccessEnabled ?? false,
+                  status: ProjectStatus.READY,
+                  members: { create: { userId: actor.id } },
+                },
+                include: {
+                  creator: { select: { id: true, fullName: true } },
+                  department: { select: { id: true, name: true, slug: true } },
+                  members: {
+                    include: {
+                      user: { select: projectMemberUserSelect },
+                    },
+                  },
+                },
+              });
+              await this.commitCreationOutcome(tx, context, project.id, null);
+              return project;
+            } finally {
+              context?.callbackSettled();
+            }
+          },
+          { timeout: 60000 },
+        )
+        .catch((error) => databaseOperationError(error, "createProject"));
+      return mapProjectMembers(project);
+    } finally {
+      if (!callbackEntered) context?.callbackSettled();
+    }
   }
 
   async get(actor: AuthenticatedUser, projectId: string) {
-    const access = await this.assertReadAccess(actor, projectId);
-    const project = await this.prisma.project.findUniqueOrThrow({
-      where: { id: projectId },
-      include: {
-        creator: { select: { id: true, fullName: true } },
-        department: { select: { id: true, name: true, slug: true } },
-        initializations: { orderBy: { attempt: "desc" }, take: 1 },
-        members: {
+    return this.prisma.$transaction(
+      async (tx) => {
+        actor = await this.currentProjectReader(actor, tx);
+        const project = await tx.project.findFirst({
+          where: { id: projectId, workspaceId: actor.workspaceId },
           include: {
-            user: { select: projectMemberUserSelect },
+            creator: { select: { id: true, fullName: true } },
+            department: { select: { id: true, name: true, slug: true } },
+            initializations: {
+              orderBy: { attempt: "desc" },
+              take: 1,
+              select: projectInitializationSummarySelect,
+            },
+            members: {
+              include: {
+                user: { select: projectMemberUserSelect },
+              },
+              orderBy: { createdAt: "asc" },
+            },
           },
-          orderBy: { createdAt: "asc" },
+        });
+        if (!project) throw new NotFoundException("Project not found");
+        const isMember = project.members.some(
+          (member) => member.userId === actor.id,
+        );
+        const sensitive =
+          isMember || hasPermission(actor, Permissions.PROJECTS_READ_ALL);
+        if (!sensitive && !project.readAccessEnabled)
+          throw new ForbiddenException(
+            "You do not have access to this project",
+          );
+        if (!sensitive) {
+          const { members: _members, ...publicProject } = project;
+          return { ...publicProject, isMember };
+        }
+        return { ...mapProjectMembers(project), isMember };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  private async currentProjectReader(
+    actor: AuthenticatedUser,
+    tx: Prisma.TransactionClient,
+  ) {
+    const current = await tx.user.findFirst({
+      where: { id: actor.id, workspaceId: actor.workspaceId, status: "OPEN" },
+      select: {
+        roleAssignments: {
+          select: {
+            role: {
+              select: { permissions: { select: { permissionKey: true } } },
+            },
+          },
         },
       },
     });
-    if (!access.sensitive) {
-      const { members: _members, ...publicProject } = project;
-      return publicProject;
-    }
-    return mapProjectMembers(project);
+    const permissions =
+      current?.roleAssignments.flatMap((assignment) =>
+        assignment.role.permissions.map(
+          (permission) => permission.permissionKey,
+        ),
+      ) ?? [];
+    if (!current || !permissions.includes(Permissions.PROJECTS_READ))
+      throw new ForbiddenException(
+        "Project read access is no longer available",
+      );
+    return { ...actor, permissions };
   }
 
+  @ActiveProjectMutation()
   async update(
     actor: AuthenticatedUser,
     projectId: string,
@@ -298,40 +600,104 @@ export class ProjectsService {
     });
   }
 
+  @ActiveProjectMutation()
   async addMember(actor: AuthenticatedUser, projectId: string, userId: string) {
-    const project = await this.assertSensitiveAccess(actor, projectId);
-    const user = await this.prisma.user.findFirst({
-      where: { id: userId, workspaceId: project.workspaceId },
-      select: { id: true },
+    return this.prisma.$transaction(async (tx) => {
+      const project = await this.currentMembershipWriter(tx, actor, projectId);
+      const user = await tx.user.findFirst({
+        where: {
+          id: userId,
+          workspaceId: project.workspaceId,
+          OR: [
+            { status: "OPEN" },
+            { projectMemberships: { some: { projectId } } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!user)
+        throw new NotFoundException(
+          "Eligible user not found in this workspace",
+        );
+      const membership = await tx.projectMember.upsert({
+        where: { projectId_userId: { projectId, userId } },
+        update: {},
+        create: { projectId, userId },
+        include: {
+          user: { select: projectMemberUserSelect },
+        },
+      });
+      return mapProjectMembership(membership);
     });
-    if (!user) throw new NotFoundException("User not found in this workspace");
-    const membership = await this.prisma.projectMember.upsert({
-      where: { projectId_userId: { projectId, userId } },
-      update: {},
-      create: { projectId, userId },
-      include: {
-        user: { select: projectMemberUserSelect },
-      },
-    });
-    return mapProjectMembership(membership);
   }
 
+  @ActiveProjectMutation()
   async removeMember(
     actor: AuthenticatedUser,
     projectId: string,
     userId: string,
   ) {
-    await this.assertSensitiveAccess(actor, projectId);
-    const member = await this.prisma.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId } },
-      select: { projectId: true },
-    });
-    if (!member) throw new NotFoundException("Project member not found");
-    return this.prisma.projectMember.delete({
-      where: { projectId_userId: { projectId, userId } },
+    return this.prisma.$transaction(async (tx) => {
+      await this.currentMembershipWriter(tx, actor, projectId);
+      const member = await tx.projectMember.findUnique({
+        where: { projectId_userId: { projectId, userId } },
+        select: { projectId: true },
+      });
+      if (!member) throw new NotFoundException("Project member not found");
+      return tx.projectMember.delete({
+        where: { projectId_userId: { projectId, userId } },
+      });
     });
   }
 
+  private async currentMembershipWriter(
+    tx: Prisma.TransactionClient,
+    actor: AuthenticatedUser,
+    projectId: string,
+  ) {
+    await lockWorkspace(tx, actor.workspaceId);
+    await assertCurrentManagement(
+      tx,
+      actor.workspaceId,
+      actor.id,
+      Permissions.PROJECT_MEMBERS_MANAGE,
+    );
+    const manager = await tx.user.findFirst({
+      where: {
+        id: actor.id,
+        workspaceId: actor.workspaceId,
+        status: "OPEN",
+        roleAssignments: {
+          some: {
+            role: {
+              permissions: {
+                some: { permissionKey: Permissions.PROJECTS_MANAGE_ALL },
+              },
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    const project = await tx.project.findFirst({
+      where: { id: projectId, workspaceId: actor.workspaceId },
+      include: {
+        members: { where: { userId: actor.id }, select: { userId: true } },
+      },
+    });
+    if (!project) throw new NotFoundException("Project not found");
+    if (!manager && !project.members.length)
+      throw new ForbiddenException(
+        "Project membership management scope is unavailable",
+      );
+    if (project.archivedAt || project.status === "DELETING")
+      throw new ConflictException(
+        "Project lifecycle blocks membership changes",
+      );
+    return project;
+  }
+
+  @ActiveProjectMutation()
   async createFolder(
     actor: AuthenticatedUser,
     projectId: string,
@@ -397,6 +763,7 @@ export class ProjectsService {
     return { path: toApiPath(relativePath ?? ""), files };
   }
 
+  @ActiveProjectMutation()
   async uploadFile(
     actor: AuthenticatedUser,
     projectId: string,
@@ -405,6 +772,15 @@ export class ProjectsService {
   ) {
     const project = await this.assertSensitiveAccess(actor, projectId);
     this.assertProjectReady(project);
+    if (
+      !Number.isSafeInteger(file.size) ||
+      file.size < 0 ||
+      file.size !== file.buffer.length ||
+      file.size > ProjectsService.maxUploadBytes()
+    )
+      throw new BadRequestException(
+        "Project file exceeds the configured limit or has an invalid size",
+      );
     const directory = await this.resolveProjectPath(
       project,
       relativePath ?? "",
@@ -433,6 +809,7 @@ export class ProjectsService {
     };
   }
 
+  @ActiveProjectMutation()
   async moveFile(
     actor: AuthenticatedUser,
     projectId: string,
@@ -505,6 +882,7 @@ export class ProjectsService {
     });
   }
 
+  @ActiveProjectMutation()
   async addProtectedFileType(
     actor: AuthenticatedUser,
     projectId: string,
@@ -519,6 +897,7 @@ export class ProjectsService {
     });
   }
 
+  @ActiveProjectMutation()
   async updateProtectedFileType(
     actor: AuthenticatedUser,
     projectId: string,
@@ -536,6 +915,7 @@ export class ProjectsService {
     });
   }
 
+  @ActiveProjectMutation()
   async removeProtectedFileType(
     actor: AuthenticatedUser,
     projectId: string,
@@ -550,40 +930,59 @@ export class ProjectsService {
     return { removed: true };
   }
 
+  private deletionJournal() {
+    return new DurableFileDeletion(this.prisma);
+  }
+  private async deletionPaths(
+    project: { departmentId: string; directoryName: string },
+    relativePath: string,
+  ) {
+    const source = await this.resolveProjectPath(project, relativePath, false);
+    const directory = await this.projectTrashDirectory(project);
+    const root = path.dirname(directory);
+    return {
+      source: async () => {
+        await assertNoSymlinks(root, source);
+        return source;
+      },
+      trash: async () => {
+        await assertNoSymlinks(root, directory);
+        return directory;
+      },
+    };
+  }
+  @ActiveProjectMutation()
   async deleteFile(
     actor: AuthenticatedUser,
     projectId: string,
     relativePath: string,
+    operationId: string,
   ) {
     const project = await this.assertSensitiveAccess(actor, projectId);
     this.assertProjectReady(project);
     const normalized = normalizeRelativePath(relativePath, false);
-    const target = await this.resolveProjectPath(project, normalized, false);
-    const stat = await safeLstat(target, "File or folder not found");
-    if (stat.isSymbolicLink())
-      throw new BadRequestException("Symbolic links cannot be deleted");
-    const protectedTypes = await this.protectedExtensions(projectId);
-    const fingerprint = await projectPathFingerprint(target, protectedTypes);
-    if (fingerprint.protected) {
-      const confirmation =
-        await this.prisma.projectFileDeletionConfirmation.create({
-          data: {
-            projectId,
-            targetPath: normalized,
-            fingerprint: fingerprint.value,
-            requestedById: actor.id,
-            expiresAt: new Date(Date.now() + 5 * 60_000),
-          },
-        });
-      return {
-        confirmationRequired: true,
-        confirmationId: confirmation.id,
-        expiresAt: confirmation.expiresAt,
-      };
-    }
-    return this.moveToTrash(project, actor.id, normalized, stat.isDirectory());
+    const journal = this.deletionJournal();
+    const prior = await journal.prior(
+      projectId,
+      operationId,
+      normalized,
+      actor.id,
+    );
+    if (prior) return journal.result(prior);
+    const paths = await this.deletionPaths(project, normalized);
+    const prepared = await journal.prepare(
+      projectId,
+      actor.id,
+      normalized,
+      operationId,
+      paths,
+      await this.protectedExtensions(projectId),
+    );
+    if (!prepared.created || prepared.op.state === "AWAITING_CONFIRMATION")
+      return journal.result(prepared.op);
+    return journal.execute(prepared.op, paths);
   }
-
+  @ActiveProjectMutation()
   async confirmFileDeletion(
     actor: AuthenticatedUser,
     projectId: string,
@@ -591,54 +990,82 @@ export class ProjectsService {
   ) {
     const project = await this.assertSensitiveAccess(actor, projectId);
     this.assertProjectReady(project);
+    const op = await this.prisma.projectFileOperation.findFirst({
+      where: { projectId, confirmationId },
+    });
+    if (!op)
+      throw new ConflictException(
+        "Legacy confirmation has no durable identity; request a new deletion",
+      );
+    const journal = this.deletionJournal();
+    if (op.state !== "AWAITING_CONFIRMATION") return journal.result(op);
     const confirmation =
       await this.prisma.projectFileDeletionConfirmation.findFirst({
         where: { id: confirmationId, projectId },
       });
     if (
       !confirmation ||
-      confirmation.status !== ProjectFileDeletionConfirmationStatus.PENDING ||
+      confirmation.status !== "PENDING" ||
       confirmation.expiresAt <= new Date()
-    )
+    ) {
+      await journal.rejectConfirmation(op, "FILE_CONFIRMATION_EXPIRED");
       throw new ConflictException(
         "File deletion confirmation is no longer valid",
       );
-    const target = await this.resolveProjectPath(
-      project,
-      confirmation.targetPath,
-      false,
-    );
-    const stat = await safeLstat(target, "File or folder not found");
-    const fingerprint = await projectPathFingerprint(
-      target,
-      await this.protectedExtensions(projectId),
-    );
+    }
+    const paths = await this.deletionPaths(project, confirmation.targetPath);
+    const evidence = await fileEvidence(await paths.source());
+    const protectedTypes = await this.protectedExtensions(projectId);
     if (
-      !fingerprint.protected ||
-      fingerprint.value !== confirmation.fingerprint
+      ![...evidence.extensions].some((extension) =>
+        protectedTypes.has(extension),
+      ) ||
+      evidence.identity !== op.sourceIdentity ||
+      evidence.hash !== op.contentHash
     ) {
-      await this.prisma.projectFileDeletionConfirmation.update({
-        where: { id: confirmation.id },
-        data: { status: ProjectFileDeletionConfirmationStatus.EXPIRED },
-      });
+      await journal.rejectConfirmation(op, "FILE_CHANGED");
       throw new ConflictException(
         "File changed; create a new deletion confirmation",
       );
     }
-    const result = await this.moveToTrash(
-      project,
-      actor.id,
-      confirmation.targetPath,
-      stat.isDirectory(),
+    const claimed = await journal.claimConfirmation(op, actor.id);
+    if (!claimed.created) return journal.result(claimed.op);
+    return journal.execute(claimed.op, paths);
+  }
+  async listFileOperations(actor: AuthenticatedUser, projectId: string) {
+    await this.assertSensitiveAccess(actor, projectId);
+    return (
+      await this.prisma.projectFileOperation.findMany({
+        where: { projectId },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      })
+    ).map(fileOperationResponse);
+  }
+  async fileOperation(
+    actor: AuthenticatedUser,
+    projectId: string,
+    operationId: string,
+  ) {
+    await this.assertSensitiveAccess(actor, projectId);
+    const op = await findFileOperation(this.prisma, projectId, operationId);
+    if (!op) throw new NotFoundException("File operation not found");
+    return fileOperationResponse(op);
+  }
+  @ActiveProjectMutation()
+  async reconcileFileOperation(
+    actor: AuthenticatedUser,
+    projectId: string,
+    operationId: string,
+  ) {
+    const project = await this.assertSensitiveAccess(actor, projectId);
+    this.assertProjectReady(project);
+    const op = await findFileOperation(this.prisma, projectId, operationId);
+    if (!op) throw new NotFoundException("File operation not found");
+    return this.deletionJournal().reconcile(
+      op,
+      await this.deletionPaths(project, op.originalPath),
     );
-    await this.prisma.projectFileDeletionConfirmation.update({
-      where: { id: confirmation.id },
-      data: {
-        status: ProjectFileDeletionConfirmationStatus.CONFIRMED,
-        confirmedAt: new Date(),
-      },
-    });
-    return result;
   }
 
   async listTrash(actor: AuthenticatedUser, projectId: string) {
@@ -647,17 +1074,21 @@ export class ProjectsService {
       where: { projectId, status: ProjectFileTrashStatus.ACTIVE },
       orderBy: { createdAt: "desc" },
     });
-    return items.map(
-      ({
-        trashPath: _trashPath,
-        leaseOwner: _leaseOwner,
-        leaseExpiresAt: _leaseExpiresAt,
-        lastError: _lastError,
-        ...item
-      }) => item,
-    );
+    return items.map((item) => ({
+      id: item.id,
+      projectId: item.projectId,
+      originalPath: item.originalPath,
+      isDirectory: item.isDirectory,
+      deletedById: item.deletedById,
+      status: item.status,
+      expiresAt: item.expiresAt,
+      createdAt: item.createdAt,
+      restoredAt: item.restoredAt,
+      purgedAt: item.purgedAt,
+    }));
   }
 
+  @ActiveProjectMutation()
   async restoreTrash(
     actor: AuthenticatedUser,
     projectId: string,
@@ -699,6 +1130,98 @@ export class ProjectsService {
     return { restored: true, path: item.originalPath };
   }
 
+  /** Metadata only: never attempts cleanup, issues tokens or signals a runner. */
+  async deletionHistory(
+    actor: AuthenticatedUser,
+    projectId: string,
+    requestId?: string,
+  ) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const current = await tx.user.findFirst({
+          where: {
+            id: actor.id,
+            workspaceId: actor.workspaceId,
+            status: "OPEN",
+          },
+          select: { id: true },
+        });
+        if (!current)
+          throw new NotFoundException("Project deletion state not found");
+        const project = await tx.project.findFirst({
+          where: { id: projectId, workspaceId: actor.workspaceId },
+          include: { members: { select: { userId: true } } },
+        });
+        const auditWhere = {
+          projectId,
+          workspaceId: actor.workspaceId,
+          ...(!project
+            ? { OR: [{ ownerId: actor.id }, { requestedById: actor.id }] }
+            : {}),
+          ...(requestId ? { requestId } : {}),
+        };
+        if (
+          project &&
+          project.creatorId !== actor.id &&
+          !project.members.some((m) => m.userId === actor.id)
+        )
+          throw new ForbiddenException(
+            "Only the project owner or a project member may read deletion state",
+          );
+        const audits = await tx.projectDeletionAudit.findMany({
+          where: auditWhere,
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: requestId ? 1 : 100,
+        });
+        if (!project && !audits.length)
+          throw new NotFoundException("Project deletion state not found");
+        const requests = project
+          ? await tx.projectDeletionRequest.findMany({
+              where: { projectId, ...(requestId ? { id: requestId } : {}) },
+              orderBy: [{ requestedAt: "desc" }, { id: "desc" }],
+              take: requestId ? 1 : 100,
+            })
+          : [];
+        if (requestId && !requests.length && !audits.length)
+          throw new NotFoundException("Project deletion state not found");
+        // Reuse the existing tracked-session definition, without exposing its cwd.
+        const sessions =
+          project &&
+          requests.some((r) => r.status === "AWAITING_ACTIVE_SESSIONS")
+            ? await this.activeProjectSessions(project, tx)
+            : [];
+        const responses = requests.map((r) => {
+          const response = deletionRequestResponse(
+            r,
+            r.status === "AWAITING_ACTIVE_SESSIONS" ? sessions : [],
+          );
+          if (
+            r.status === "DELETING" &&
+            audits.some(
+              (a) => a.requestId === r.id && a.status === "PURGE_FAILED",
+            )
+          )
+            response.nextAction = "REVIEW_FAILURE";
+          return response;
+        });
+        if (requestId)
+          return {
+            projectRemoved: !project,
+            request: responses[0] ?? null,
+            audit: audits[0] ? deletionAuditResponse(audits[0]) : null,
+          };
+        return {
+          projectRemoved: !project,
+          requests: responses,
+          audits: audits.map(deletionAuditResponse),
+          limit: 100,
+        };
+      },
+      { isolationLevel: "RepeatableRead" },
+    );
+  }
+
+  @ActiveProjectMutation()
   async requestProjectDeletion(actor: AuthenticatedUser, projectId: string) {
     const project = await this.projectForWorkspace(
       actor.workspaceId,
@@ -710,6 +1233,7 @@ export class ProjectsService {
       throw new ForbiddenException(
         "Only the project owner or a project member may request deletion",
       );
+    await this.assertContextFree(project);
     const existing = await this.prisma.projectDeletionRequest.findFirst({
       where: {
         projectId,
@@ -753,15 +1277,19 @@ export class ProjectsService {
         `A member requested deletion of project “${project.name}”. Open ProboxAI and approve or cancel request ${request.id}.`,
       );
     }
-    return request;
+    return deletionRequestResponse(request);
   }
 
+  @ActiveProjectMutation()
   async approveProjectDeletion(
     actor: AuthenticatedUser,
     projectId: string,
     requestId: string,
   ) {
     const request = await this.assertDeletionOwner(actor, projectId, requestId);
+    await this.assertContextFree(
+      await this.projectForWorkspace(actor.workspaceId, projectId),
+    );
     if (
       ![
         "PENDING_OWNER_APPROVAL",
@@ -795,11 +1323,12 @@ export class ProjectsService {
             approvedAt: new Date(),
           },
         })
-        .then((updated) => ({ ...updated, activeSessions }));
+        .then((updated) => deletionRequestResponse(updated, activeSessions));
     }
     return this.issueProjectDeletionToken(project, request);
   }
 
+  @ActiveProjectMutation()
   async resolveProjectDeletionSessions(
     actor: AuthenticatedUser,
     projectId: string,
@@ -807,6 +1336,9 @@ export class ProjectsService {
     action: "WAIT" | "INTERRUPT",
   ) {
     const request = await this.assertDeletionOwner(actor, projectId, requestId);
+    await this.assertContextFree(
+      await this.projectForWorkspace(actor.workspaceId, projectId),
+    );
     if (
       request.status !== ProjectDeletionRequestStatus.AWAITING_ACTIVE_SESSIONS
     )
@@ -817,15 +1349,98 @@ export class ProjectsService {
     );
     const active = await this.activeProjectSessions(project);
     if (action === "INTERRUPT") {
-      for (const session of active) this.runner?.interrupt(session.id);
+      if (!this.sessions)
+        throw new ServiceUnavailableException(
+          "Durable session interruption is unavailable",
+        );
+      for (const session of active) {
+        const turn = await this.prisma.proboxAiTurn.findFirst({
+          where: {
+            sessionId: session.id,
+            status: { in: ["QUEUED", "RUNNING"] },
+          },
+          orderBy: { startedAt: "desc" },
+        });
+        if (!turn) continue;
+        await this.sessions.interruptScoped(session.id, turn.id, async (tx) => {
+          const currentActor = await tx.user.findFirst({
+            where: {
+              id: actor.id,
+              workspaceId: actor.workspaceId,
+              status: "OPEN",
+              roleAssignments: {
+                some: {
+                  role: {
+                    permissions: {
+                      some: { permissionKey: Permissions.PROJECTS_DELETE },
+                    },
+                  },
+                },
+              },
+            },
+            select: { id: true },
+          });
+          if (!currentActor)
+            throw new ForbiddenException(
+              "Project deletion access is no longer available",
+            );
+          const current = await tx.project.findFirst({
+            where: {
+              id: projectId,
+              workspaceId: actor.workspaceId,
+              creatorId: actor.id,
+            },
+          });
+          const pending = await tx.projectDeletionRequest.findFirst({
+            where: {
+              id: requestId,
+              projectId,
+              ownerId: actor.id,
+              status: "AWAITING_ACTIVE_SESSIONS",
+            },
+          });
+          const department = current
+            ? await tx.department.findFirst({
+                where: {
+                  id: current.departmentId,
+                  workspaceId: actor.workspaceId,
+                },
+                select: { homePath: true },
+              })
+            : null;
+          const target = await tx.proboxAiSession.findUnique({
+            where: { id: session.id },
+            select: { workspaceId: true, cwd: true },
+          });
+          if (
+            !current ||
+            !pending ||
+            !department ||
+            !target ||
+            target.workspaceId !== actor.workspaceId ||
+            !isWithin(
+              path.join(
+                this.pathPolicy.validateDepartmentHome(department.homePath),
+                current.directoryName,
+              ),
+              target.cwd,
+            )
+          )
+            throw new NotFoundException("Project deletion session not found");
+        });
+      }
     }
     await this.prisma.projectDeletionRequest.update({
       where: { id: request.id },
       data: { activeSessionAction: action },
     });
-    return { action, activeSessions: active };
+    return {
+      action,
+      activeSessions: active.map((s) => ({ id: s.id, status: s.status })),
+    };
   }
 
+  @ActiveProjectMutation()
   async cancelProjectDeletion(
     actor: AuthenticatedUser,
     projectId: string,
@@ -848,15 +1463,18 @@ export class ProjectsService {
       throw new ConflictException(
         "Project deletion can no longer be cancelled",
       );
-    return this.prisma.projectDeletionRequest.update({
-      where: { id: request.id },
-      data: {
-        status: ProjectDeletionRequestStatus.CANCELLED,
-        cancelledAt: new Date(),
-      },
-    });
+    return this.prisma.projectDeletionRequest
+      .update({
+        where: { id: request.id },
+        data: {
+          status: ProjectDeletionRequestStatus.CANCELLED,
+          cancelledAt: new Date(),
+        },
+      })
+      .then(deletionRequestResponse);
   }
 
+  @ActiveProjectMutation()
   async confirmProjectDeletion(
     actor: AuthenticatedUser,
     projectId: string,
@@ -864,6 +1482,9 @@ export class ProjectsService {
     token: string,
   ) {
     const request = await this.assertDeletionOwner(actor, projectId, requestId);
+    await this.assertContextFree(
+      await this.projectForWorkspace(actor.workspaceId, projectId),
+    );
     if (
       request.status !== ProjectDeletionRequestStatus.AWAITING_TOKEN ||
       !request.tokenHash ||
@@ -892,6 +1513,8 @@ export class ProjectsService {
     if (active.length)
       throw new ConflictException("Project still has active sessions");
     const audit = await this.prisma.$transaction(async (tx) => {
+      await lockWorkspace(tx, actor.workspaceId);
+      await this.assertContextFree(project, tx);
       await tx.projectDeletionRequest.update({
         where: { id: request.id },
         data: { status: ProjectDeletionRequestStatus.DELETING },
@@ -902,6 +1525,7 @@ export class ProjectsService {
       });
       return tx.projectDeletionAudit.create({
         data: {
+          workspaceId: project.workspaceId,
           projectId: project.id,
           projectName: project.name,
           directoryName: project.directoryName,
@@ -911,6 +1535,7 @@ export class ProjectsService {
           requestId: request.id,
           status: "PURGE_PENDING",
           snapshot: {
+            contextFreeVerified: true,
             readAccessEnabled: project.readAccessEnabled,
             requestedAt: request.requestedAt.toISOString(),
           },
@@ -945,7 +1570,14 @@ export class ProjectsService {
       });
       throw filesystemError(error, "Unable to delete project safely");
     }
-    return { deletionAuditId: audit.id, status: "PURGE_PENDING" };
+    const finalAudit = await this.prisma.projectDeletionAudit.findUniqueOrThrow(
+      { where: { id: audit.id } },
+    );
+    return {
+      deletionAuditId: audit.id,
+      status: finalAudit.status,
+      projectRemoved: true,
+    };
   }
 
   async cleanupExpiredTrash() {
@@ -953,6 +1585,7 @@ export class ProjectsService {
       where: {
         status: { in: ["ACTIVE", "PURGE_FAILED"] },
         expiresAt: { lte: new Date() },
+        project: { archivedAt: null },
       },
       include: {
         project: { select: { departmentId: true, directoryName: true } },
@@ -960,95 +1593,81 @@ export class ProjectsService {
       take: 50,
     });
     for (const item of due) {
-      const claimed = await this.prisma.projectFileTrashItem.updateMany({
-        where: {
-          id: item.id,
-          status: { in: ["ACTIVE", "PURGE_FAILED"] },
-          OR: [
-            { leaseExpiresAt: null },
-            { leaseExpiresAt: { lt: new Date() } },
-          ],
+      await this.prisma.$transaction(
+        async (tx) => {
+          await lockProjectLifecycle(tx, item.projectId);
+          const project = await tx.project.findUnique({
+            where: { id: item.projectId },
+            select: { archivedAt: true },
+          });
+          if (!project || project.archivedAt) return;
+          await fencedProjectFilesystem(
+            this.prisma,
+            item.projectId,
+            async () => {
+              const claimed = await this.prisma.projectFileTrashItem.updateMany(
+                {
+                  where: {
+                    id: item.id,
+                    status: { in: ["ACTIVE", "PURGE_FAILED"] },
+                    OR: [
+                      { leaseExpiresAt: null },
+                      { leaseExpiresAt: { lt: new Date() } },
+                    ],
+                  },
+                  data: {
+                    leaseOwner: process.pid.toString(),
+                    leaseExpiresAt: new Date(Date.now() + 5 * 60_000),
+                  },
+                },
+              );
+              if (!claimed.count) return;
+              try {
+                await fs.rm(
+                  path.join(
+                    await this.projectTrashDirectory(item.project),
+                    safeTrashKey(item.trashPath),
+                  ),
+                  { recursive: true, force: true },
+                );
+                await this.prisma.projectFileTrashItem.update({
+                  where: { id: item.id },
+                  data: {
+                    status: ProjectFileTrashStatus.PURGED,
+                    purgedAt: new Date(),
+                    leaseOwner: null,
+                    leaseExpiresAt: null,
+                  },
+                });
+              } catch (error) {
+                await this.prisma.projectFileTrashItem.update({
+                  where: { id: item.id },
+                  data: {
+                    status: ProjectFileTrashStatus.PURGE_FAILED,
+                    lastError: String(error),
+                    leaseOwner: null,
+                    leaseExpiresAt: null,
+                  },
+                });
+              }
+            },
+          );
         },
-        data: {
-          leaseOwner: process.pid.toString(),
-          leaseExpiresAt: new Date(Date.now() + 5 * 60_000),
-        },
-      });
-      if (!claimed.count) continue;
-      try {
-        await fs.rm(
-          path.join(
-            await this.projectTrashDirectory(item.project),
-            safeTrashKey(item.trashPath),
-          ),
-          { recursive: true, force: true },
-        );
-        await this.prisma.projectFileTrashItem.update({
-          where: { id: item.id },
-          data: {
-            status: ProjectFileTrashStatus.PURGED,
-            purgedAt: new Date(),
-            leaseOwner: null,
-            leaseExpiresAt: null,
-          },
-        });
-      } catch (error) {
-        await this.prisma.projectFileTrashItem.update({
-          where: { id: item.id },
-          data: {
-            status: ProjectFileTrashStatus.PURGE_FAILED,
-            lastError: String(error),
-            leaseOwner: null,
-            leaseExpiresAt: null,
-          },
-        });
-      }
+        { timeout: 120000, maxWait: 10000 },
+      );
     }
     const audits = await this.prisma.projectDeletionAudit.findMany({
       where: {
         status: { in: ["PURGE_PENDING", "PURGE_FAILED"] },
         quarantinePath: { not: null },
+        snapshot: { path: ["contextFreeVerified"], equals: true },
       },
       take: 20,
     });
-    for (const audit of audits)
+    for (const audit of audits) {
+      if (await this.prisma.project.count({ where: { id: audit.projectId } }))
+        continue;
       await this.purgeProjectAudit(audit.id, audit.quarantinePath!);
-  }
-
-  private async moveToTrash(
-    project: { id: string; departmentId: string; directoryName: string },
-    actorId: string,
-    relativePath: string,
-    isDirectory: boolean,
-  ) {
-    const source = await this.resolveProjectPath(project, relativePath, false);
-    const trashDirectory = await this.projectTrashDirectory(project);
-    const id = randomBytes(16).toString("hex");
-    const destination = path.join(trashDirectory, id);
-    try {
-      await fs.mkdir(trashDirectory, { recursive: true });
-      await fs.rename(source, destination);
-      const item = await this.prisma.projectFileTrashItem.create({
-        data: {
-          projectId: project.id,
-          originalPath: relativePath,
-          trashPath: id,
-          isDirectory,
-          deletedById: actorId,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
-        },
-      });
-      return {
-        trashed: true,
-        trashId: item.id,
-        path: relativePath,
-        expiresAt: item.expiresAt,
-      };
-    } catch (error) {
-      if ((await exists(destination)) && !(await exists(source))) {
-        await fs.rename(destination, source).catch(() => undefined);
-      }
-      throw filesystemError(error, "Unable to move project item to trash");
     }
   }
 
@@ -1097,16 +1716,118 @@ export class ProjectsService {
     return request;
   }
 
-  private async activeProjectSessions(project: {
-    workspaceId: string;
-    departmentId: string;
-    directoryName: string;
-  }) {
-    const directory = await this.projectDirectoryForDepartment(
-      project.departmentId,
+  private async assertContextFree(
+    project: {
+      id: string;
+      workspaceId: string;
+      departmentId: string;
+      directoryName: string;
+      archivedAt: Date | null;
+      description?: string | null;
+      appliedTemplateVersionId?: string | null;
+    },
+    database: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const blocked = () =>
+      new ConflictException(
+        "Project has context or its context cannot be proven empty; archive it instead",
+      );
+    if (
+      project.archivedAt ||
+      project.description?.trim() ||
+      project.appliedTemplateVersionId
+    )
+      throw blocked();
+    const counts = await Promise.all([
+      database.projectLifecycleExecution.count({
+        where: {
+          projectId: project.id,
+          finishedAt: null,
+          ...(currentProjectExecutionId()
+            ? { id: { not: currentProjectExecutionId() } }
+            : {}),
+        },
+      }),
+      database.taskBoardEntry.count({
+        where: { status: { board: { projectId: project.id } } },
+      }),
+      database.taskBoardAudit.count({
+        where: { board: { projectId: project.id } },
+      }),
+      database.projectInitialization.count({
+        where: { projectId: project.id },
+      }),
+      database.proboxAiSession.count({
+        where: {
+          workspaceId: project.workspaceId,
+          selectedProjectId: project.id,
+        },
+      }),
+      database.projectFileOperation.count({
+        where: { projectId: project.id },
+      }),
+      database.projectFileTrashItem.count({
+        where: { projectId: project.id },
+      }),
+    ]);
+    if (counts.some(Boolean)) throw blocked();
+    const department = await database.department.findFirst({
+      where: { id: project.departmentId, workspaceId: project.workspaceId },
+      select: { homePath: true },
+    });
+    if (
+      !department ||
+      !project.directoryName ||
+      /[\\/\0:]/.test(project.directoryName) ||
+      [".", ".."].includes(project.directoryName)
+    )
+      throw blocked();
+    const directory = path.join(
+      this.pathPolicy.validateDepartmentHome(department.homePath),
       project.directoryName,
     );
-    const candidates = await this.prisma.proboxAiSession.findMany({
+    // Legacy cwd is evidence only for blocking, never an inferred task link.
+    const sessions = await database.proboxAiSession.findMany({
+      where: { workspaceId: project.workspaceId },
+      select: { cwd: true },
+    });
+    if (sessions.some((session) => isWithin(directory, session.cwd)))
+      throw blocked();
+    try {
+      await this.pathPolicy.assertExistingAncestorsSafe(directory);
+      const stat = await fs.lstat(directory);
+      if (
+        !stat.isDirectory() ||
+        stat.isSymbolicLink() ||
+        (await fs.readdir(directory)).length
+      )
+        throw blocked();
+    } catch {
+      throw blocked();
+    }
+  }
+
+  private async activeProjectSessions(
+    project: {
+      workspaceId: string;
+      departmentId: string;
+      directoryName: string;
+    },
+    database: Pick<
+      Prisma.TransactionClient,
+      "department" | "proboxAiSession"
+    > = this.prisma,
+  ) {
+    const department = await database.department.findFirst({
+      where: { id: project.departmentId, workspaceId: project.workspaceId },
+      select: { homePath: true },
+    });
+    if (!department) throw new NotFoundException("Department not found");
+    const directory = path.join(
+      this.pathPolicy.validateDepartmentHome(department.homePath),
+      project.directoryName,
+    );
+    const candidates = await database.proboxAiSession.findMany({
       where: {
         workspaceId: project.workspaceId,
         status: {
@@ -1116,7 +1837,6 @@ export class ProjectsService {
             SessionStatus.PAUSED,
           ],
         },
-        cwd: { startsWith: directory },
       },
       select: { id: true, cwd: true, status: true },
     });
@@ -1150,7 +1870,7 @@ export class ProjectsService {
       owner.telegramChatId,
       `Final warning: deleting project “${project.name}” permanently removes it, every file, and its recoverable trash. Session history remains. Enter this one-time ProboxAI token within 10 minutes: ${token}`,
     );
-    return { ...updated, tokenSent: true };
+    return deletionRequestResponse(updated, [], true);
   }
 
   private async purgeProjectAudit(auditId: string, quarantinePath: string) {
@@ -1274,6 +1994,7 @@ export class ProjectsService {
     existingDirectory: boolean,
     action: ExistingProjectDirectoryAction | undefined,
     hasTemplate: boolean,
+    beforeWrite?: () => Promise<void>,
   ) {
     if (!existingDirectory) return;
     if (!action)
@@ -1287,7 +2008,8 @@ export class ProjectsService {
       throw new ConflictException(
         "Keeping an existing directory is not supported when creating from a configuration template. Choose CLEAR to apply the template.",
       );
-    if (action === "CLEAR") await clearDirectoryContents(projectDirectory);
+    if (action === "CLEAR")
+      await clearDirectoryContents(projectDirectory, beforeWrite);
   }
 }
 
@@ -1318,49 +2040,8 @@ function normalizeExtension(value: string) {
   return extension;
 }
 
-async function projectPathFingerprint(
-  target: string,
-  protectedExtensions: Set<string>,
-) {
-  const entries: string[] = [];
-  let protectedMatch = false;
-  async function visit(current: string, relative: string) {
-    const stat = await safeLstat(current, "File or folder not found");
-    if (stat.isSymbolicLink())
-      throw new BadRequestException("Symbolic links cannot be deleted");
-    const extension = fileExtension(current);
-    if (stat.isFile() && protectedExtensions.has(extension))
-      protectedMatch = true;
-    entries.push(
-      `${relative}:${stat.isDirectory() ? "d" : "f"}:${stat.size}:${stat.mtimeMs}`,
-    );
-    if (!stat.isDirectory()) return;
-    const children = await fs.readdir(current, { withFileTypes: true });
-    for (const child of children.sort((left, right) =>
-      left.name.localeCompare(right.name),
-    )) {
-      if (child.name === ".proboxai-trash") continue;
-      await visit(
-        path.join(current, child.name),
-        path.posix.join(relative, child.name),
-      );
-    }
-  }
-  await visit(target, "");
-  return {
-    protected: protectedMatch,
-    value: createHash("sha256").update(entries.join("\n")).digest("hex"),
-  };
-}
-
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
-}
-
-function fileExtension(filePath: string) {
-  const base = path.basename(filePath).toLowerCase();
-  if (base.startsWith(".") && base.indexOf(".", 1) === -1) return base;
-  return path.extname(base).toLowerCase();
 }
 
 function safeTrashKey(value: string) {
@@ -1382,7 +2063,9 @@ function normalizeRelativePath(value: string, allowRoot: boolean) {
         !segment ||
         segment === "." ||
         segment === ".." ||
-        segment.includes("\0"),
+        segment.includes("\0") ||
+        (process.platform === "win32" &&
+          (/[ .]$/.test(segment) || segment.includes(":"))),
     )
   )
     throw new BadRequestException("Path contains an unsafe segment");
@@ -1454,20 +2137,25 @@ async function existingDirectoryStatus(directory: string) {
   }
 }
 
-async function clearDirectoryContents(directory: string) {
+async function clearDirectoryContents(
+  directory: string,
+  beforeWrite?: () => Promise<void>,
+) {
   const stat = await fs.lstat(directory);
   if (stat.isSymbolicLink() || !stat.isDirectory())
     throw new ConflictException(
       "A non-directory or symbolic link already exists at the project path",
     );
   const entries = await fs.readdir(directory);
-  for (const entry of entries)
+  for (const entry of entries) {
+    await beforeWrite?.();
     await fs.rm(path.join(directory, entry), {
       recursive: true,
       force: true,
       maxRetries: 3,
       retryDelay: 100,
     });
+  }
 }
 
 async function safeLstat(filePath: string, missingMessage: string) {

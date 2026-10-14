@@ -1,8 +1,5 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-} from "@nestjs/common";
+import { randomUUID } from "node:crypto";
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -53,6 +50,7 @@ describe("ProjectsService filesystem permissions", () => {
       },
       project: {
         findFirst: jest.fn().mockResolvedValue(project),
+        findUnique: jest.fn().mockResolvedValue(project),
       },
       projectProtectedFileType: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -73,6 +71,54 @@ describe("ProjectsService filesystem permissions", () => {
         ),
       },
     };
+    const operations = new Map<string, any>();
+    let trash: any;
+    prisma.$queryRaw = jest.fn().mockResolvedValue([]);
+    prisma.$transaction = jest.fn((fn: any) => fn(prisma));
+    prisma.projectLifecycleExecution = {
+      create: jest.fn().mockResolvedValue({ id: "fence" }),
+      update: jest.fn().mockResolvedValue({}),
+    };
+    prisma.projectFileOperation = {
+      findUnique: jest.fn(
+        async ({ where }: any) => operations.get(where.projectId_id.id) ?? null,
+      ),
+      findUniqueOrThrow: jest.fn(async ({ where }: any) =>
+        operations.get(where.projectId_id.id),
+      ),
+      findMany: jest.fn(async () =>
+        [...operations.values()].filter((op) =>
+          ["PREPARED", "NEEDS_REPAIR", "AWAITING_CONFIRMATION"].includes(
+            op.state,
+          ),
+        ),
+      ),
+      create: jest.fn(async ({ data }: any) => {
+        operations.set(data.id, data);
+        return data;
+      }),
+      updateMany: jest.fn(async ({ where, data }: any) => {
+        const op = operations.get(where.id);
+        Object.assign(op, data);
+        return { count: 1 };
+      }),
+      update: jest.fn(async ({ where, data }: any) => {
+        const op = operations.get(where.projectId_id.id);
+        Object.assign(op, data);
+        return op;
+      }),
+    };
+    prisma.projectFileTrashItem.create.mockImplementation(
+      async ({ data }: any) => {
+        trash = { id: "trash-1", ...data };
+        return trash;
+      },
+    );
+    prisma.projectFileTrashItem.findUniqueOrThrow = jest.fn(async () => trash);
+    prisma.projectFileTrashItem.update = jest.fn(async ({ data }: any) => {
+      Object.assign(trash, data);
+      return trash;
+    });
     service = new ProjectsService(
       prisma,
       {} as any,
@@ -140,7 +186,7 @@ describe("ProjectsService filesystem permissions", () => {
       "draft",
     );
     await expect(
-      service.deleteFile(member, project.id, "draft.txt"),
+      service.deleteFile(member, project.id, "draft.txt", randomUUID()),
     ).resolves.toMatchObject({
       trashed: true,
       trashId: "trash-1",
@@ -168,7 +214,7 @@ describe("ProjectsService filesystem permissions", () => {
       "secret",
     );
     await expect(
-      service.deleteFile(member, project.id, ".env"),
+      service.deleteFile(member, project.id, ".env", randomUUID()),
     ).resolves.toMatchObject({
       confirmationRequired: true,
       confirmationId: "confirmation-1",
@@ -199,22 +245,52 @@ describe("ProjectsService existing project directory confirmation", () => {
   });
 
   function createService() {
-    return new ProjectsService(
-      {
-        project: {
-          findFirst: jest.fn().mockResolvedValue(null),
-          create: jest.fn().mockResolvedValue({ id: "project-1" }),
-        },
-        department: {
-          findUnique: jest.fn().mockResolvedValue({ homePath: root }),
-        },
-      } as any,
-      {
-        defaultForWorkspace: jest.fn().mockResolvedValue({
+    const submissions = new Map<string, any>();
+    const db: any = {
+      projectCreationSubmission: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn(
+          async ({ where }) =>
+            submissions.get(where.workspaceId_requestId.requestId) ?? null,
+        ),
+        create: jest.fn(async ({ data }) => {
+          const s = {
+            ...data,
+            state: "UNRESOLVED",
+            projectId: null,
+            initializationId: null,
+            executionFinishedAt: null,
+            failureCode: null,
+            createdAt: new Date(),
+          };
+          submissions.set(data.requestId, s);
+          return s;
+        }),
+        updateMany: jest.fn(async ({ where, data }) => {
+          Object.assign(submissions.get(where.requestId), data);
+          return { count: 1 };
+        }),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      project: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockResolvedValue({ id: "project-1" }),
+      },
+      department: {
+        findUnique: jest.fn().mockResolvedValue({ homePath: root }),
+        findFirst: jest.fn().mockResolvedValue({
           id: "department-1",
           status: "ACTIVE",
+          homePath: root,
         }),
-      } as any,
+      },
+    };
+    db.user = { findFirst: jest.fn().mockResolvedValue({ id: "member-1" }) };
+    db.$transaction = jest.fn((fn) => fn(db));
+    return new ProjectsService(
+      db,
+      {} as any,
       new WorkspacePathPolicy(),
       {} as any,
     );
@@ -257,11 +333,16 @@ describe("ProjectsService existing project directory confirmation", () => {
     );
 
     await expect(
-      createService().create(actor, {
+      createService().submitCreation(actor, {
         name: "Existing",
         existingDirectoryAction: "CLEAR",
+        requestId: randomUUID(),
       }),
-    ).resolves.toEqual({ id: "project-1" });
+    ).resolves.toMatchObject({
+      state: "COMPLETED",
+      projectId: "project-1",
+      willReplay: false,
+    });
     await expect(fs.readdir(path.join(root, "Existing"))).resolves.toEqual([]);
   });
 
@@ -273,7 +354,7 @@ describe("ProjectsService existing project directory confirmation", () => {
         name: "Existing",
         existingDirectoryAction: "CLEAR",
       }),
-    ).rejects.toBeInstanceOf(ConflictException);
+    ).rejects.toMatchObject({ status: 428 });
     await expect(
       fs.readFile(path.join(root, "Existing"), "utf8"),
     ).resolves.toBe("not a directory");

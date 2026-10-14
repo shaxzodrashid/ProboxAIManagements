@@ -9,6 +9,8 @@ import { ConfigurationTemplatesService } from "../src/configuration-templates/co
 describe("ConfigurationTemplatesService manifests", () => {
   const version = {
     id: "version-1",
+    revision: 0,
+    status: "DRAFT",
     templateId: "template-1",
     version: 1,
     folders: [],
@@ -17,7 +19,7 @@ describe("ConfigurationTemplatesService manifests", () => {
   };
 
   function harness() {
-    const tx = {
+    const tx: any = {
       configurationTemplateCommandStage: {
         deleteMany: jest.fn(),
         create: jest.fn(),
@@ -27,8 +29,9 @@ describe("ConfigurationTemplatesService manifests", () => {
         createMany: jest.fn(),
       },
     };
-    const prisma = {
+    const prisma: any = {
       configurationTemplateVersion: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findFirst: jest.fn().mockResolvedValue(version),
         findUniqueOrThrow: jest.fn().mockResolvedValue(version),
       },
@@ -36,6 +39,7 @@ describe("ConfigurationTemplatesService manifests", () => {
         callback(tx),
       ),
     };
+    tx.configurationTemplateVersion = prisma.configurationTemplateVersion;
     return {
       service: new ConfigurationTemplatesService(prisma as any, {} as any),
       tx,
@@ -108,8 +112,9 @@ describe("ConfigurationTemplatesService manifests", () => {
         },
       ),
     };
-    const prisma = {
+    const prisma: any = {
       configurationTemplateVersion: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findFirst: jest.fn().mockResolvedValue({
           ...version,
           folders: [{ path: "docs" }],
@@ -124,6 +129,9 @@ describe("ConfigurationTemplatesService manifests", () => {
         }),
       },
     };
+    prisma.$transaction = jest.fn((fn) => fn(prisma));
+    prisma.configurationTemplateVersion.findUniqueOrThrow =
+      prisma.configurationTemplateVersion.findFirst;
     const service = new ConfigurationTemplatesService(
       prisma as any,
       storage as any,
@@ -158,8 +166,9 @@ describe("ConfigurationTemplatesService manifests", () => {
         },
       ),
     };
-    const prisma = {
+    const prisma: any = {
       configurationTemplateVersion: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findFirst: jest.fn().mockResolvedValue({
           ...version,
           folders: [{ path: "docs" }],
@@ -171,6 +180,9 @@ describe("ConfigurationTemplatesService manifests", () => {
         create: jest.fn(async ({ data }: { data: unknown }) => data),
       },
     };
+    prisma.$transaction = jest.fn((fn) => fn(prisma));
+    prisma.configurationTemplateVersion.findUniqueOrThrow =
+      prisma.configurationTemplateVersion.findFirst;
     try {
       const service = new ConfigurationTemplatesService(
         prisma as any,

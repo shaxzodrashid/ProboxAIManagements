@@ -72,6 +72,38 @@ describe("ProboxAiRunner managed-session environment", () => {
 describe("ProboxAiRunner start", () => {
   const archiveDirectories: string[] = [];
   const previousArchiveDirectory = process.env.PROBOXAI_ARCHIVE_DIR;
+  it("refuses invalid directory at the final spawn boundary without starting a child", async () => {
+    spawnMock.mockClear();
+    const paths = {
+      assertAllowedPath: jest.fn(),
+      executionDirectory: jest.fn().mockResolvedValue({
+        valid: false,
+        normalizedPath: null,
+        reason: "NOT_FOUND",
+      }),
+    };
+    const runner = new ProboxAiRunner(paths as never);
+    const beforeSpawn = jest.fn().mockResolvedValue(true);
+    await expect(
+      runner.start(
+        {
+          sessionId: "invalid-directory",
+          turnId: "turn",
+          cwd: "/opt/apps/missing",
+          sandbox: "read-only",
+          prompt: "No live invocation",
+          providerId: "openai",
+          beforeSpawn,
+        },
+        jest.fn(),
+      ),
+    ).rejects.toThrow("Runner working directory is unavailable");
+    expect(beforeSpawn).toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(runner.stopObservation("invalid-directory", "turn")).toBe(
+      "NOT_STARTED",
+    );
+  });
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -109,7 +141,14 @@ describe("ProboxAiRunner start", () => {
         stdout: new PassThrough(),
       });
       spawnMock.mockReturnValue(child as never);
-      const paths = { assertAllowedPath: jest.fn() };
+      const paths = {
+        assertAllowedPath: jest.fn(),
+        executionDirectory: jest.fn(async (cwd: string) => ({
+          valid: true,
+          normalizedPath: cwd,
+          reason: null,
+        })),
+      };
       const runner = new ProboxAiRunner(paths as never);
       const closeListenerReady = new Promise<void>((resolve) => {
         const onNewListener = (event: string | symbol) => {
@@ -164,4 +203,49 @@ describe("ProboxAiRunner start", () => {
       );
     },
   );
+  it("does not treat rejection or a kill signal as observed close", async () => {
+    const child = Object.assign(new EventEmitter(), {
+      pid: 123,
+      stdin: new PassThrough(),
+      stderr: new PassThrough(),
+      stdout: new PassThrough(),
+      kill: jest.fn().mockReturnValue(true),
+    });
+    spawnMock.mockReturnValue(child as never);
+    const runner = new ProboxAiRunner({
+      assertAllowedPath: jest.fn(),
+      executionDirectory: jest.fn(async (cwd: string) => ({
+        valid: true,
+        normalizedPath: cwd,
+        reason: null,
+      })),
+    } as never);
+    const start = runner.start(
+      {
+        sessionId: "observed",
+        turnId: "old",
+        cwd: "/opt/project",
+        sandbox: "read-only",
+        providerId: "openai",
+        prompt: "Controlled",
+      },
+      jest.fn(),
+    );
+    await new Promise<void>((resolve) =>
+      child.once("newListener", () => resolve()),
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdout.end();
+    child.stderr.end();
+    child.emit("error", new Error("Synthetic runner failure"));
+    await expect(start).rejects.toThrow("Synthetic runner failure");
+    expect(runner.stopObservation("observed", "old")).toBe("STOP_UNCONFIRMED");
+    expect(runner.interrupt("observed", "new")).toBe(false);
+    expect(runner.interrupt("observed", "old")).toBe(true);
+    child.emit("close", 1);
+    expect(runner.stopObservation("observed", "old")).toBe(
+      "LOCAL_EXIT_OBSERVED",
+    );
+    expect(runner.interrupt("observed", "old")).toBe(false);
+  });
 });

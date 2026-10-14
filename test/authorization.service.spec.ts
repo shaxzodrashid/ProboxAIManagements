@@ -2,6 +2,33 @@ import { BadRequestException } from "@nestjs/common";
 import { AuthorizationService } from "../src/authorization/authorization.service";
 import { PrismaService } from "../src/prisma/prisma.service";
 
+function transactionHarness(prisma: any) {
+  prisma.$queryRaw = jest.fn().mockResolvedValue([]);
+  prisma.workspace = {
+    findUniqueOrThrow: jest
+      .fn()
+      .mockResolvedValue({ authorizationRevision: 0 }),
+    update: jest.fn().mockResolvedValue({ authorizationRevision: 1 }),
+  };
+  const userRead = prisma.user?.findFirst;
+  prisma.user ??= {};
+  prisma.user.findFirst = jest.fn(async (args: any) => {
+    if (args.where.roleAssignments) return { id: args.where.id };
+    const result = await userRead?.(args);
+    return result && { ...result, workspace: { authorizationRevision: 0 } };
+  });
+  for (const method of ["findFirst", "create", "update"]) {
+    const original = prisma.role?.[method];
+    if (original)
+      prisma.role[method] = jest.fn(async (args: any) => {
+        const result = await original(args);
+        return result && { ...result, workspace: { authorizationRevision: 0 } };
+      });
+  }
+  prisma.$transaction = jest.fn((fn: any) => fn(prisma));
+  return prisma;
+}
+
 describe("AuthorizationService", () => {
   it("creates a custom role from catalog-backed permissions", async () => {
     const prisma: any = {
@@ -28,7 +55,9 @@ describe("AuthorizationService", () => {
         }),
       },
     };
-    const service = new AuthorizationService(prisma as PrismaService);
+    const service = new AuthorizationService(
+      transactionHarness(prisma) as PrismaService,
+    );
 
     await expect(
       service.createRole("workspace-1", {
@@ -64,7 +93,9 @@ describe("AuthorizationService", () => {
       permission: { count: jest.fn().mockResolvedValue(0) },
       role: { create: jest.fn() },
     };
-    const service = new AuthorizationService(prisma as PrismaService);
+    const service = new AuthorizationService(
+      transactionHarness(prisma) as PrismaService,
+    );
 
     await expect(
       service.createRole("workspace-1", {
@@ -97,24 +128,27 @@ describe("AuthorizationService", () => {
       },
       $transaction: jest.fn().mockResolvedValue([]),
     };
-    const service = new AuthorizationService(prisma as PrismaService);
+    const service = new AuthorizationService(
+      transactionHarness(prisma) as PrismaService,
+    );
 
     await expect(
-      service.setUserRoles("workspace-1", "admin-1", "user-2", [
-        "role-1",
-        "role-2",
-      ]),
+      service.setUserRoles(
+        "workspace-1",
+        "admin-1",
+        "user-2",
+        ["role-1", "role-2"],
+        0,
+      ),
     ).resolves.toEqual({
+      revision: 1,
       id: "user-2",
       roles: [
         { id: "role-1", key: "REVIEWER", name: "Reviewer" },
         { id: "role-2", key: "REPORTER", name: "Reporter" },
       ],
     });
-    expect(prisma.$transaction).toHaveBeenCalledWith([
-      "delete-roles",
-      "create-roles",
-    ]);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function));
     expect(prisma.userRoleAssignment.createMany).toHaveBeenCalledWith({
       data: [
         {
@@ -188,14 +222,20 @@ describe("AuthorizationService", () => {
       },
       $transaction: jest.fn().mockResolvedValue([]),
     };
-    const service = new AuthorizationService(prisma as PrismaService);
+    const service = new AuthorizationService(
+      transactionHarness(prisma) as PrismaService,
+    );
 
     await expect(
-      service.setUserRoles("workspace-1", "admin-1", "admin-1", [
-        "role-admin",
-        "role-manager",
-      ]),
+      service.setUserRoles(
+        "workspace-1",
+        "admin-1",
+        "admin-1",
+        ["role-admin", "role-manager"],
+        0,
+      ),
     ).resolves.toEqual({
+      revision: 1,
       id: "admin-1",
       roles: [
         { id: "role-admin", key: "ADMIN", name: "Administrator" },
@@ -228,12 +268,18 @@ describe("AuthorizationService", () => {
         ]),
       },
     };
-    const service = new AuthorizationService(prisma as PrismaService);
+    const service = new AuthorizationService(
+      transactionHarness(prisma) as PrismaService,
+    );
 
     await expect(
-      service.setUserRoles("workspace-1", "admin-1", "admin-1", [
-        "role-elevated",
-      ]),
+      service.setUserRoles(
+        "workspace-1",
+        "admin-1",
+        "admin-1",
+        ["role-elevated"],
+        0,
+      ),
     ).rejects.toThrow("cannot grant yourself permissions");
   });
 
@@ -261,12 +307,18 @@ describe("AuthorizationService", () => {
         ]),
       },
     };
-    const service = new AuthorizationService(prisma as PrismaService);
+    const service = new AuthorizationService(
+      transactionHarness(prisma) as PrismaService,
+    );
 
     await expect(
-      service.setUserRoles("workspace-1", "admin-1", "admin-1", [
-        "role-manager",
-      ]),
+      service.setUserRoles(
+        "workspace-1",
+        "admin-1",
+        "admin-1",
+        ["role-manager"],
+        0,
+      ),
     ).rejects.toThrow("cannot remove your own authorization management");
   });
 
@@ -291,11 +343,17 @@ describe("AuthorizationService", () => {
         ]),
       },
     };
-    const service = new AuthorizationService(prisma as PrismaService);
+    const service = new AuthorizationService(
+      transactionHarness(prisma) as PrismaService,
+    );
     await expect(
-      service.setRolePermissions("workspace-1", "admin-1", "role-admin", [
-        "projects.read",
-      ]),
+      service.setRolePermissions(
+        "workspace-1",
+        "admin-1",
+        "role-admin",
+        ["projects.read"],
+        0,
+      ),
     ).rejects.toThrow("cannot grant yourself permissions");
   });
 });

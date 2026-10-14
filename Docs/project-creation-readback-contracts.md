@@ -1,0 +1,52 @@
+# PROJECT03 original project creation readback
+
+Local implementation, 12 October 2026. This extends initial-enqueue recovery to the missing original-response case. Previously a project-create error carried no project ID or client submission identity; authorized project list readers could inspect candidates, but a create-only caller had no correlated lookup. The prior recover-enqueue lost-ack test concerned an already-known project ID and did not establish original-create recovery.
+
+## New opt-in creation contract
+
+`POST /api/v1/projects/creation-submissions` takes the existing CreateProjectDto inputs plus required client-generated UUIDv4 requestId: name, optional description/readAccessEnabled/departmentId/configurationTemplateId/existingDirectoryAction. Retain the key before sending. Requires current projects.create and OPEN/current workspace; it does not require projects.read or initialization management. It returns 202 and a deliberate allowlist:
+
+```text
+{requestId, state: COMPLETED|UNRESOLVED,
+ projectId: UUID|null, initializationId: UUID|null,
+ departmentId: UUID, templateVersionId: UUID|null,
+ failureCode: null|PROJECT_DIRECTORY_EXISTS|CREATE_REJECTED|
+              CREATION_OUTCOME_UNKNOWN,
+ executionFinished: boolean, willReplay:false, createdAt}
+```
+
+COMPLETED means the project, optional QUEUED setup job and correlated submission result committed together; it does not mean template setup completed or grant project/file/initialization read access. IDs are historical committed identities, including after project removal. Repeating the key cannot recreate a removed project. UNRESOLVED covers in-flight, failed, crashed or unconfirmed creation; never present it as success, proof of rollback or an invitation to replay CLEAR. executionFinished only proves this local callback and its issued awaits settled; it is not external-writer/subprocess containment evidence.
+
+The route currently awaits its creation attempt before returning; clients must not rely on a fast response. Durable lookup is available while the attempt or its callback remains unresolved. Same-key concurrent/repeated callers can receive an UNRESOLVED observation while the first request is still executing; a later lookup converges to the committed result if one exists.
+
+`GET /api/v1/projects/creation-submissions/:requestId` returns the same result with 200/no-store. It rechecks current projects.create and returns only the original caller's own submission in their current workspace. No projects.read grant or directory listing is added. Other owners, foreign workspaces and unknown identities are 404; malformed UUID is 400; absent/revoked grant or closed account is 401/403. A 404 after a lost request is not proof that an earlier request cannot still commit. Reconcile the same key rather than generating a new one automatically.
+
+The request key is scoped to workspace and original actor. Name/description trimming and existing optional defaults are canonicalized into a private input hash; omitted versus explicitly chosen department/template retain their input meaning. Once reservation is accepted, changed inputs under the same key return 409 PROJECT_CREATION_ID_REUSED; another caller's key returns 404. Same-key replay only reads the record. It never reruns accepted filesystem work, including after a known error or after the original project is deleted. Unknown reservation acknowledgment returns sanitized 503 PROJECT_CREATION_OUTCOME_UNKNOWN with requestId and readback guidance. If a committed reservation exists but execution never began, it stays UNRESOLVED rather than being automatically resumed. A request that never committed a reservation cannot have begun filesystem work; submission retries serialize against the original reservation transaction before deciding whether a record exists.
+
+## Pinning and execution fencing
+
+Before filesystem work, a transaction checks current creation authority, resolves the ACTIVE selected/default department and the exact current published template version, and persists their IDs, private target path, input hash and opaque executor identity. Execution uses those pins, never a newly switched default or newer template publication. It rechecks authority/department/template readiness and rejects changed target home configuration before provisioning. The original project/first-job transaction also updates the submission to COMPLETED; an independent postcommit guess cannot manufacture or erase success.
+
+Project creation admissions use workspace locking and a shared PostgreSQL advisory namespace lock. All cooperating legacy/keyed creation paths consult unfinished creation records before filesystem work. Overlapping target/ancestor reservations stay blocked with 409 PROJECT_CREATION_UNRESOLVED until the actual callback and outer transaction outcome settle and finish proof is persisted. A transaction timeout does not cancel issued fs.rm/mkdir calls. Every CLEAR entry checks transaction liveness before issuing removal; already-issued operations may still complete late. Reconciliation never starts another executor or compensates by moving/clearing the live path.
+
+No timeout, restart, missing file, elapsed age or human assertion releases a crashed/unproven fence. There is no force-release endpoint in this batch. Proof-write failure preserves the fence. A finished unresolved attempt remains unresolved; a new identity must be a new deliberate decision after inspecting the setup/filesystem, not an automatic retry. The old identity never executes again. Native atomic publication, external shell/Codex writers and descendant processes remain outside this operation-specific exclusion; FILE03/SESSION05 policy is unchanged.
+
+Registered project paths are checked at reservation and execution too. Windows case/trailing-name aliases cannot bypass the managed-directory guard, and CLEAR cannot remove an ancestor containing another registered project. These checks avoid destructive registered-path collisions; they do not define a universal department home-sharing/nesting policy or prove freedom from arbitrary external path replacement. Admission serialization may make unrelated creations wait while another creation holds its transaction; timeouts require readback, never automatic filesystem replay.
+
+## Legacy compatibility and safety boundary
+
+Legacy `POST /api/v1/projects` and internal create callers preserve empty/KEEP success response shapes and existing permissions, but now receive an internal durable fence before work. Their generated internal identity is not a substitute for a client-retained key when the original response disappears. The web client must adopt creation-submissions to get reliable original-response correlation; older/historical requests cannot be retroactively assigned an identity.
+
+Legacy CLEAR is intentionally rejected with 428 PROJECT_CREATION_ID_REQUIRED before reservation/filesystem changes. It must use creation-submissions with requestId. Otherwise a finished failed legacy call plus a transport retry could receive a fresh internal identity and clear newly created replacement data. Preserving that behavior would violate destructive non-replay safety. OpenAPI and the action DTO direct callers to the keyed route. A conflict asking for KEEP/CLEAR requires a new deliberate keyed submission for changed inputs; do not reuse a key with changed action.
+
+This closes the original-create correlation dependency for adopting clients, alongside the separate known-project initial-enqueue repair. It does not claim every unresolved filesystem outcome is automatically repairable, upgrade generic initialization retry semantics or reconstruct lost historical creation keys. Current project-only list/detail discovery remains separately permission-gated.
+
+## Migration and verification
+
+20261012010000_project_creation_submissions adds an empty table with workspace/request key, constrained UNRESOLVED/COMPLETED state and committed project-ID invariant. It preserves historical identity after project/user removal by keeping those IDs as scalars; workspace removal cascades the records. No historical backfill, global account data change or new permission key. Private target paths, hashes and executor tokens never appear in the DTO. Records have no automatic pruning in this increment.
+
+Apply the schema before the new binary and coordinate all project-creation writers: old binaries/direct scripts bypass durable fences. Only isolated localhost:55439/profile_test received the migration. No production migration, live template command, external provider/storage operation, push or deployment occurred. Parent owns Space checklist status.
+
+Regression tests exercise original HTTP response failure after actual commit; database commit acknowledgment loss; reservation acknowledgment loss with no work; same-key concurrent submits; changed inputs; create-only own lookup and cross-user/workspace/current-grant denial; failed CLEAR with replacement preservation; real database timeout combined with injected early acknowledgment failure while filesystem promises remain blocked; both keyed and legacy pending-writer directions; exact department/template pins; legacy CLEAR rejection; no project recreation and Windows managed-directory case aliases. The worker remains disabled. Focused 40 tests / 2 suites and the final cumulative 469 tests / 42 suites passed. TypeScript, ESLint, Prettier, Nest build and git diff checks passed. All 20 migrations are up to date in the isolated database, and Prisma reports no schema difference. Independent review's two safety findings (legacy fencing and managed aliases) were corrected and rechecked; the subsequent legacy CLEAR ambiguity was eliminated by the explicit client compatibility rule. Final independent review found no outstanding actionable findings.
+
+Batch files: prisma/schema.prisma; prisma/migrations/20261012010000_project_creation_submissions/migration.sql; src/projects/project-creation-submission.dto.ts, project-creation-submissions.ts, projects.service.ts, projects.controller.ts, projects.dto.ts; test/project-enqueue-recovery.http.spec.ts, projects.service.spec.ts, mutation-concurrency.persistence.spec.ts; this contract, the enqueue-recovery scope clarification and README. The existing mutation-race assertions attach their rejection handlers eagerly without weakening their expectations. All cumulative prior work remains unstaged and preserved.

@@ -8,6 +8,66 @@ const execFileAsync = promisify(execFile);
 
 @Injectable()
 export class WorkspacePathPolicy {
+  /** Observation only; never provisions directories or guarantees later filesystem identity. */
+  async executionDirectory(
+    requested: string,
+    writable: boolean,
+    scope?: string,
+  ) {
+    const fail = (reason: string) => ({
+      valid: false,
+      normalizedPath: null,
+      reason,
+    });
+    if (!requested || requested.includes("\0") || !path.isAbsolute(requested))
+      return fail("ABSOLUTE_PATH_REQUIRED");
+    const normalized = path.resolve(requested);
+    if (scope && !isWithin(scope, normalized)) return fail("OUTSIDE_PROJECT");
+    let roots: string[];
+    try {
+      roots = this.allowedRoots();
+    } catch {
+      return fail("POLICY_UNAVAILABLE");
+    }
+    if (!roots.some((root) => isWithin(root, normalized)))
+      return fail("OUTSIDE_ALLOWED_ROOT");
+    try {
+      const parsed = path.parse(normalized);
+      let current = parsed.root;
+      for (const segment of normalized
+        .slice(parsed.root.length)
+        .split(path.sep)) {
+        if (!segment) continue;
+        current = path.join(current, segment);
+        const stat = await fs.lstat(current);
+        if (stat.isSymbolicLink()) return fail("SYMLINK_NOT_ALLOWED");
+        if (!stat.isDirectory()) return fail("NOT_DIRECTORY");
+        await fs.access(current, constants.X_OK);
+      }
+      const real = await fs.realpath(normalized);
+      if (
+        !roots.some((root) => isWithin(root, real)) ||
+        (scope && !isWithin(scope, real))
+      )
+        return fail("REAL_PATH_OUTSIDE_SCOPE");
+      await fs.access(
+        real,
+        constants.R_OK | constants.X_OK | (writable ? constants.W_OK : 0),
+      );
+      return { valid: true, normalizedPath: real, reason: null };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      return fail(
+        code === "ENOENT"
+          ? "NOT_FOUND"
+          : code === "ENOTDIR"
+            ? "NOT_DIRECTORY"
+            : ["EACCES", "EPERM"].includes(code ?? "")
+              ? "ACCESS_DENIED"
+              : "DIRECTORY_UNAVAILABLE",
+      );
+    }
+  }
   allowedRoots() {
     const plural = process.env.PROBOXAI_ALLOWED_WORKSPACE_ROOTS;
     const configured = plural

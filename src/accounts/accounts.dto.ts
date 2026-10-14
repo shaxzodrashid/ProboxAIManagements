@@ -10,18 +10,54 @@ import {
   Matches,
   MaxLength,
   MinLength,
+  ValidateIf,
+  Validate,
 } from "class-validator";
 import { UserStatus } from "@prisma/client";
 import { Transform } from "class-transformer";
 import { ApiProperty } from "@nestjs/swagger";
+import { BirthDateValidator } from "./profile-birthday";
 export class CreateUserDto {
-  @ApiProperty({ example: "Ada Lovelace", maxLength: 120 })
+  @ApiProperty({
+    required: false,
+    deprecated: true,
+    example: "Ada Lovelace",
+    maxLength: 120,
+    description:
+      "Legacy creation input. Supply either fullName or nonempty structured names, never both.",
+  })
   @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString()
   @IsNotEmpty()
   @MinLength(2)
   @MaxLength(120)
-  fullName!: string;
+  fullName?: string;
+
+  @ApiProperty({
+    required: false,
+    maxLength: 120,
+    description:
+      "Independent name component; multiword names supported. At least one name component is required for structured creation.",
+  })
+  @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  firstName?: string;
+
+  @ApiProperty({
+    required: false,
+    maxLength: 120,
+    description: "Independent name component. No mandatory last name.",
+  })
+  @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  lastName?: string;
 
   @ApiProperty({ example: "+998901234567", pattern: "^\\+[1-9]\\d{7,14}$" })
   @IsString()
@@ -59,9 +95,89 @@ export class UserRoleSummaryDto {
   @ApiProperty({ example: "Manager" }) name!: string;
 }
 
+export class UpdateSelfProfileDto {
+  @ApiProperty({
+    type: String,
+    format: "date",
+    nullable: true,
+    required: false,
+    description:
+      "Self-only calendar date YYYY-MM-DD. Omit to retain; null clears. No age restriction.",
+  })
+  @IsOptional()
+  @Validate(BirthDateValidator)
+  birthDate?: string | null;
+  @ApiProperty({
+    type: String,
+    required: false,
+    nullable: true,
+    maxLength: 120,
+    description:
+      "Omit to retain; null clears. Nonempty after trimming. A name update must leave at least one nonempty component.",
+  })
+  @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  firstName?: string | null;
+
+  @ApiProperty({
+    type: String,
+    required: false,
+    nullable: true,
+    maxLength: 120,
+    description:
+      "Omit to retain; null clears. Nonempty after trimming. Last name is never mandatory.",
+  })
+  @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  lastName?: string | null;
+
+  @ApiProperty({
+    type: String,
+    required: false,
+    nullable: true,
+    maxLength: 1000,
+    description:
+      "Plain text. Omit to retain; null clears; empty string is retained.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  bio?: string | null;
+}
+
+export class SelfProfileResponseDto {
+  @ApiProperty({ type: String, format: "date", nullable: true }) birthDate!:
+    string | null;
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({ format: "uuid" }) workspaceId!: string;
+  @ApiProperty({
+    description:
+      "Composed firstName then lastName, or untouched legacy fullName until structured names are supplied.",
+  })
+  displayName!: string;
+  @ApiProperty({ type: String, nullable: true, maxLength: 120 }) firstName!:
+    string | null;
+  @ApiProperty({ type: String, nullable: true, maxLength: 120 }) lastName!:
+    string | null;
+  @ApiProperty({ type: String, nullable: true }) username!: string | null;
+  @ApiProperty() phoneNumber!: string;
+  @ApiProperty({ type: String, nullable: true, maxLength: 1000 }) bio!:
+    string | null;
+}
+
 export class UserResponseDto {
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ example: "Ada Lovelace" }) fullName!: string;
+  @ApiProperty({ type: String, nullable: true, maxLength: 120 }) firstName!:
+    string | null;
+  @ApiProperty({ type: String, nullable: true, maxLength: 120 }) lastName!:
+    string | null;
   @ApiProperty({ example: "ada.lovelace", nullable: true })
   username!: string | null;
   @ApiProperty({ example: "+998901234567" }) phoneNumber!: string;
