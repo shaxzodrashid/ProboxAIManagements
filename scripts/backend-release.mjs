@@ -20,10 +20,22 @@ assert(
   /^[a-f0-9]{40}$/.test(catalog.baseline.commit),
   "Baseline needs a real immutable commit",
 );
-execFileSync("git", ["cat-file", "-e", `${catalog.baseline.commit}^{commit}`], {
-  cwd: root,
-  stdio: "pipe",
-});
+if (process.argv.includes("--artifact")) {
+  assert(
+    !process.argv.includes("--published"),
+    "Artifact checks do not prove local/remote tag publication",
+  );
+  assert(
+    /^[a-f0-9]{40}$/.test(read(".deployment-commit").trim()),
+    "Artifact requires its verified producer's commit manifest",
+  );
+} else {
+  execFileSync(
+    "git",
+    ["cat-file", "-e", `${catalog.baseline.commit}^{commit}`],
+    { cwd: root, stdio: "pipe" },
+  );
+}
 const releases = new Map();
 for (const release of catalog.releases) {
   assert(semver.test(release.version), "Invalid catalog version");

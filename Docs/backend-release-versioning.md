@@ -19,6 +19,13 @@ After all checks and commit, create an annotated `vVERSION` tag at that commit.
 Run `pnpm release:check -- --published` to verify provenance, then push dev and its
 new tag without overwriting any existing tag. Future tags remain immutable.
 
+`--published` checks local tag objects and the current HEAD; remote publication
+requires a successful authorized push and separate remote-ref verification. An
+immutable deployment archive has no `.git`: `--artifact` checks the same metadata
+and generated evidence plus its producer's 40-character `.deployment-commit`
+manifest. It cannot be combined with `--published` and does not prove remote
+publication or production deployment.
+
 Concrete example: permitted project member discovery is **Available since
 0.2.0-dev.1**, resolving through `refs/tags/v0.2.0-dev.1` to the implementation
 commit. Group metadata has the same version and foundation scope; it does not mean

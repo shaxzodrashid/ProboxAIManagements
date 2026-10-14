@@ -1,5 +1,22 @@
 # Backend changelog
 
+## 0.2.0-dev.2 — deployment tooling checkpoint
+
+- Linux/systemd CLI for help/status/logs, backend-only stop/resume and main-only
+  restart/deploy through isolated build/test, read-only migration readiness,
+  bounded health/version verification and known-good runtime rollback.
+- Protect dirty/divergent source, serialize lifecycle operations, scrub build
+  credentials and retain private diagnostics/failed candidates. No automatic
+  migrations, seeds, service-unit edits or destructive schema commands.
+- Bash syntax, ShellCheck and mocked/sandboxed lifecycle/configuration regressions
+  are part of the actual precommit hook. Production service integration and
+  operator-controlled one-time release-directory setup remain unverified.
+- Archive release consistency validation supports manifests produced from verified
+  Git commits without requiring a .git directory inside immutable release artifacts.
+
+No production deployment or database migration was performed. Progress belongs to
+dev; stable production release selection is separate. See [CLI contract](Docs/deployment-cli.md).
+
 ## 0.2.0-dev.1 — development checkpoint
 
 First tracked backend gap checkpoint for dev; commit and tag only after verification.

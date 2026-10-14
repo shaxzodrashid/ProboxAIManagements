@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.2.0-dev.1**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.2.0-dev.2**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -15,6 +15,7 @@ Available since refers to the first tracked Git release containing this bounded 
 | Credential rejection versus authentication availability            | 0.2.0-dev.1     | supported  | [Contract](../Docs/authentication-availability-contracts.md)   |
 | Active-human group metadata and creator-only retry/readback        | 0.2.0-dev.1     | foundation | [Contract](../Docs/chat-group-metadata-contracts.md)           |
 | Department/template response, validation and concurrency contracts | 0.2.0-dev.1     | supported  | [Contract](../Docs/template-department-contract-fixes.md)      |
+| Systemd deployment CLI and sandbox lifecycle verification          | 0.2.0-dev.2     | foundation | [Contract](../Docs/deployment-cli.md)                          |
 | Deletion identity/readback and recoverable local boundaries        | 0.2.0-dev.1     | foundation | [Contract](../Docs/file-deletion-journal-contracts.md)         |
 | Bounded initialization event recovery                              | 0.2.0-dev.1     | supported  | [Contract](../Docs/initialization-event-readback-contracts.md) |
 | Profile audiences, directed contacts and private aliases           | 0.2.0-dev.1     | supported  | [Contract](../Docs/profile-picker-contracts.md)                |
@@ -36,4 +37,5 @@ Available since refers to the first tracked Git release containing this bounded 
 
 ## Release references
 
+- **0.2.0-dev.2**: `refs/tags/v0.2.0-dev.2`, dev, not-deployed.
 - **0.2.0-dev.1**: `refs/tags/v0.2.0-dev.1`, dev, not-deployed.

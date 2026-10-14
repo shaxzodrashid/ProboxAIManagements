@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.2.0-dev.2",
+      "gitRef": "refs/tags/v0.2.0-dev.2",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.2.0-dev.1",
       "gitRef": "refs/tags/v0.2.0-dev.1",
       "channel": "dev",
@@ -13,6 +19,13 @@
     }
   ],
   "features": [
+    {
+      "id": "deployment-systemd-cli",
+      "title": "Systemd deployment CLI and sandbox lifecycle verification",
+      "since": "0.2.0-dev.2",
+      "state": "foundation",
+      "contract": "Docs/deployment-cli.md"
+    },
     {
       "id": "account-self-identity",
       "title": "Self-scoped identity and independent names",

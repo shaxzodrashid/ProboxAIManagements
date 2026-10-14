@@ -494,3 +494,5 @@ Group metadata foundations: [active human creation, creator-only readback and du
 Project member discovery: [permitted active-workspace candidates, filters and bounded pages](Docs/project-member-picker-contracts.md).
 
 Backend releases: [versioning and commit provenance](Docs/backend-release-versioning.md), [Available since by feature](Docs/backend-feature-availability.md) and [changelog](CHANGELOG.md). Dev prereleases are progress snapshots, not deployments; API compatibility remains /api/v1.
+
+Production CLI artifact: [systemd setup, stop/resume/update, health verification and rollback policy](Docs/deployment-cli.md). The script was sandbox-tested; no production deployment or automatic migration is implied.
