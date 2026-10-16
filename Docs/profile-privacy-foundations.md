@@ -38,3 +38,12 @@ Owner writes use serializable transactions and replace policy and both recipient
 ## Validation
 
 Pure evaluator/calendar tests and HTTP tests use real services, authentication guard and isolated PostgreSQL. A test-only projection fixture exercises HTTP redaction without shipping an unapproved public route. Coverage includes zero-permission owners, anonymous/cross-workspace viewers, owner/caller inversion, current membership changes, Contact removal, independent birthday audiences, field injection, recipient rejection, and real transaction rollback through an isolated database trigger.
+
+## Guarded main Profile Save
+
+New editors should use the additive coherent edit/readback/commit protocol in
+[atomic Profile Save](atomic-profile-save-contracts.md). It includes optional
+shared availability in the same transaction and detects stale drafts across
+legacy writers. The older PUT /users/me/profile retains its original response
+and unguarded-client behavior for compatibility; its writes advance the aggregate
+generation. Its previous unknown-outcome limitations still apply to that older API.

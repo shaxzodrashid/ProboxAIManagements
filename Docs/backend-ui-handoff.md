@@ -43,11 +43,24 @@ symbol delivery remain unfinished.
 - Auth failure401, inaccessible/missing profile404, successful unset200 and
   temporary failure503 must not all look like an empty or offline status.
   Recheck on account changes; no push stream or automatic expiry is provided.
-- **Integration boundary:** this standalone status transaction is not part of
-  the existing combined profile-fields/audiences Save. The proposed focused
-  editor's Done-to-main-Save flow must not claim one atomic save across both
-  endpoints. Coordinated main-profile/status Save remains integration work;
-  this document does not silently change the approved editor interaction.
+- **Main Profile integration:** backend support is now implemented locally in
+  [atomic Save contract](atomic-profile-save-contracts.md). Read one baseline with
+  GET /users/me/profile/edit. Focused editor Done stages the draft; main Save changes
+  sends PUT /users/me/profile/changes with its aggregate expectedRevision, one
+  requestId, profile changes, audiences and optional availability. Pre-submit Cancel
+  discards unsent changes. Do not send standalone status PUT on Done.
+- A successful main Save returns a minimal historical receipt, not current profile
+  content. Reread edit state afterward. Preserve the draft on409; reconcile against
+  fresh state explicitly. After lost acknowledgment/503 retain the exact command and
+  use GET /users/me/profile/operations/:requestId or retry unchanged. Abort after
+  dispatch does not prove rollback. Contacts Add/Remove remain separate operations.
+- Keep saving, saved, conflict, checking-result and unavailable states distinct,
+  with accessible feedback. A historical receipt must not restore old status into
+  a newer screen. Disable duplicate submission for UX; server receipts enforce
+  idempotency. Aggregate revisions are opaque and may jump by more than one.
+- **Frontend/Figma boundary:** no screen wiring, Figma update or runtime
+  accessibility verification is completed by this backend batch. A separately
+  labelled Save status entry point can still use the compatible standalone API.
 - **Still undecided:** custom text validation/limit, icon/emoji representation,
   symbol validation and expiry behavior. Do not hardcode new limits, defaults or
   an expiry timer. Avatar upload/crop/delivery is separately unfinished.

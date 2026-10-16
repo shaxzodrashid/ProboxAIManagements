@@ -101,3 +101,12 @@ errors and OpenAPI. Upgrade fixtures retain whole User, ProfileAudiencePolicy an
 RolePermission digests and prove zero inferred statuses/history. Fresh migration,
 schema parity, full regression gates and independent review accompany the local
 checkpoint. No production migration, credential, push or deployment is performed.
+
+## Main Profile Save integration
+
+The standalone API above remains compatible. New main Profile editors use
+[atomic Profile Save](atomic-profile-save-contracts.md) to commit status alongside
+profile fields and audiences. Focused Done stages locally; standalone PUT is only
+for an explicitly separate Save status action. Root receipts acknowledge the whole
+Save and are distinct from status history. Database triggers advance the aggregate
+profile generation on standalone status writes, invalidating old main-form drafts.

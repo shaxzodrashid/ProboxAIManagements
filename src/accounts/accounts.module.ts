@@ -14,9 +14,12 @@ import {
   PublicManualStatusController,
 } from "./manual-status.controller";
 import { ManualStatusService } from "./manual-status.service";
+import { ProfileSaveController } from "./profile-save.controller";
+import { ProfileSaveService } from "./profile-save.service";
 @Module({
   imports: [AuthModule, AuthorizationModule, TelegramBotModule],
   controllers: [
+    ProfileSaveController,
     ManualStatusController,
     PublicManualStatusController,
     AccountsController,
@@ -25,6 +28,7 @@ import { ManualStatusService } from "./manual-status.service";
     PublicProfileController,
   ],
   providers: [
+    ProfileSaveService,
     AccountsService,
     ProfilePrivacyService,
     ProfilePickerService,

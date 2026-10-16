@@ -243,6 +243,8 @@ model TelegramSession {
 }
 
 model User {
+  profileRevision           Int                               @default(0)
+  profileSaves              ProfileSaveReceipt[]
   manualProfileStatus       ManualProfileStatus?
   taskCreations             TaskCreationReceipt[]
   chatGroupsCreated         ChatGroup[]                       @relation("chatGroupCreator")
@@ -292,6 +294,22 @@ model User {
   roleAssignmentsMade       UserRoleAssignment[]              @relation("roleAssignmentCreator")
 
   @@unique([id, workspaceId])
+}
+
+// Private acknowledgments only: never a snapshot of historical profile content.
+model ProfileSaveReceipt {
+  ownerId          String
+  owner            User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  requestId        String
+  workspaceId      String
+  actorId          String
+  inputHash        String
+  expectedRevision Int
+  revision         Int
+  statusRequestId  String?  @unique
+  createdAt        DateTime @default(now())
+
+  @@id([ownerId, requestId])
 }
 
 enum ManualAvailability {

@@ -36,7 +36,7 @@ export class ManualStatusService {
         );
       });
   }
-  private async owner(tx: Prisma.TransactionClient, actor: AuthenticatedUser) {
+  async owner(tx: Prisma.TransactionClient, actor: AuthenticatedUser) {
     // Human access-token subjects only. No agent identity, caller selector or role bypass.
     if (actor.type !== undefined && actor.type !== "access")
       throw fail(
@@ -130,63 +130,71 @@ export class ManualStatusService {
     return this.transaction(async (tx) => {
       await lockWorkspace(tx, actor.workspaceId);
       await this.owner(tx, actor);
-      const requestId = dto.requestId.toLowerCase();
-      const prior = await tx.manualProfileStatusMutation.findUnique({
-        where: { ownerId_requestId: { ownerId: actor.id, requestId } },
+      return this.applyInTransaction(tx, actor, expectedRevision, dto);
+    }, true);
+  }
+  async applyInTransaction(
+    tx: Prisma.TransactionClient,
+    actor: AuthenticatedUser,
+    expectedRevision: number,
+    dto: SetManualStatusDto,
+  ) {
+    const requestId = dto.requestId.toLowerCase();
+    const prior = await tx.manualProfileStatusMutation.findUnique({
+      where: { ownerId_requestId: { ownerId: actor.id, requestId } },
+    });
+    if (prior) {
+      if (
+        prior.expectedRevision !== expectedRevision ||
+        prior.availability !== dto.availability
+      )
+        throw fail(
+          409,
+          "MANUAL_STATUS_REQUEST_CONFLICT",
+          "Request identity was already used for a different status change",
+        );
+      return this.outcome(prior);
+    }
+    const current = await tx.manualProfileStatus.findUnique({
+      where: { ownerId: actor.id },
+    });
+    if ((current?.revision ?? 0) !== expectedRevision)
+      throw fail(
+        409,
+        "MANUAL_STATUS_REVISION_CONFLICT",
+        "Manual status changed; reread before saving",
+      );
+    if (current) {
+      const updated = await tx.manualProfileStatus.updateMany({
+        where: { ownerId: actor.id, revision: expectedRevision },
+        data: { availability: dto.availability, revision: { increment: 1 } },
       });
-      if (prior) {
-        if (
-          prior.expectedRevision !== expectedRevision ||
-          prior.availability !== dto.availability
-        )
-          throw fail(
-            409,
-            "MANUAL_STATUS_REQUEST_CONFLICT",
-            "Request identity was already used for a different status change",
-          );
-        return this.outcome(prior);
-      }
-      const current = await tx.manualProfileStatus.findUnique({
-        where: { ownerId: actor.id },
-      });
-      if ((current?.revision ?? 0) !== expectedRevision)
+      if (!updated.count)
         throw fail(
           409,
           "MANUAL_STATUS_REVISION_CONFLICT",
           "Manual status changed; reread before saving",
         );
-      if (current) {
-        const updated = await tx.manualProfileStatus.updateMany({
-          where: { ownerId: actor.id, revision: expectedRevision },
-          data: { availability: dto.availability, revision: { increment: 1 } },
-        });
-        if (!updated.count)
-          throw fail(
-            409,
-            "MANUAL_STATUS_REVISION_CONFLICT",
-            "Manual status changed; reread before saving",
-          );
-      } else
-        await tx.manualProfileStatus.create({
-          data: {
-            ownerId: actor.id,
-            availability: dto.availability,
-            revision: 1,
-          },
-        });
-      const receipt = await tx.manualProfileStatusMutation.create({
+    } else
+      await tx.manualProfileStatus.create({
         data: {
           ownerId: actor.id,
-          workspaceId: actor.workspaceId,
-          actorId: actor.id,
-          requestId,
-          expectedRevision,
-          revision: expectedRevision + 1,
-          before: current?.availability ?? null,
           availability: dto.availability,
+          revision: 1,
         },
       });
-      return this.outcome(receipt);
-    }, true);
+    const receipt = await tx.manualProfileStatusMutation.create({
+      data: {
+        ownerId: actor.id,
+        workspaceId: actor.workspaceId,
+        actorId: actor.id,
+        requestId,
+        expectedRevision,
+        revision: expectedRevision + 1,
+        before: current?.availability ?? null,
+        availability: dto.availability,
+      },
+    });
+    return this.outcome(receipt);
   }
 }

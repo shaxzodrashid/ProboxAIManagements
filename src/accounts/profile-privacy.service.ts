@@ -1,3 +1,4 @@
+import { lockWorkspace } from "../prisma/workspace-lock";
 import { USERNAME_PATTERN } from "../auth/auth.dto";
 import { publicIdentity, publicIdentitySelect } from "./public-identity";
 import {
@@ -83,6 +84,18 @@ export class ProfilePrivacyService {
       );
     });
   }
+  responses(
+    rows: Prisma.ProfileAudiencePolicyGetPayload<{
+      include: typeof recipients;
+    }>[],
+  ) {
+    return fields.map((field) =>
+      this.response(
+        field,
+        rows.find((row) => row.field === field),
+      ),
+    );
+  }
   private response(
     field: ProfileAudienceField,
     row?: {
@@ -114,12 +127,12 @@ export class ProfilePrivacyService {
     dto: ReplaceProfileAudienceDto,
   ) {
     this.validateAudience(field, dto);
-    return this.transaction(
-      (tx) => this.replaceInTransaction(tx, workspaceId, ownerId, field, dto),
-      true,
-    );
+    return this.transaction(async (tx) => {
+      await lockWorkspace(tx, workspaceId);
+      return this.replaceInTransaction(tx, workspaceId, ownerId, field, dto);
+    }, true);
   }
-  private validateAudience(
+  validateAudience(
     field: ProfileAudienceField,
     dto: ReplaceProfileAudienceDto,
   ) {
@@ -140,7 +153,7 @@ export class ProfilePrivacyService {
     )
       throw new BadRequestException("Recipient sets require CUSTOM");
   }
-  private async replaceInTransaction(
+  async replaceInTransaction(
     tx: Prisma.TransactionClient,
     workspaceId: string,
     ownerId: string,
@@ -216,6 +229,7 @@ export class ProfilePrivacyService {
         throw new BadRequestException("Recipient sets require CUSTOM");
     }
     return this.transaction(async (tx) => {
+      await lockWorkspace(tx, workspaceId);
       const profile = await this.accounts.updateSelfInTransaction(
         tx,
         workspaceId,

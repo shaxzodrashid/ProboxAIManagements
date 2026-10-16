@@ -1,5 +1,18 @@
 # Backend changelog
 
+## 0.3.0-dev.9 — atomic Profile Save
+
+- Add coherent edit read and guarded whole-Save commit/readback for profile fields,
+  supplied privacy and optional shared manual availability in one transaction.
+- Cover legacy and internal writers with an aggregate generation; preserve
+  standalone status revision/errors and truthful human mutation history.
+- Add minimal private root receipts for exact retries and unknown-outcome recovery.
+
+Additive migration20261016020000 preserves existing content, policies and status
+history. Frontend/Figma wiring and agent activation remain unfinished. See
+[contract](Docs/atomic-profile-save-contracts.md) and [UI handoff](Docs/backend-ui-handoff.md).
+No push, deployment or production migration.
+
 ## 0.3.0-dev.8 — shared manual availability and UI handoff
 
 - Add self read/set/clear and public read for one shared Available/Away/Busy value.

@@ -163,7 +163,7 @@ if (url) {
         });
         expect(
           await db.user.findUniqueOrThrow({ where: { id: owner } }),
-        ).toEqual(before);
+        ).toEqual({ ...before, profileRevision: before.profileRevision + 1 });
         expect(
           await db.manualProfileStatusMutation.findUniqueOrThrow({
             where: { ownerId_requestId: { ownerId: owner, requestId: key } },

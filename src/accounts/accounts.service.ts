@@ -161,9 +161,10 @@ export class AccountsService {
   }
 
   async updateSelf(workspaceId: string, id: string, dto: UpdateSelfProfileDto) {
-    return this.prisma.$transaction((tx) =>
-      this.updateSelfInTransaction(tx, workspaceId, id, dto),
-    );
+    return this.prisma.$transaction(async (tx) => {
+      await lockWorkspace(tx, workspaceId);
+      return this.updateSelfInTransaction(tx, workspaceId, id, dto);
+    });
   }
   async updateSelfInTransaction(
     tx: Prisma.TransactionClient,
@@ -307,7 +308,7 @@ const userResponseSelect = {
   createdAt: true,
 } satisfies Prisma.UserSelect;
 
-const selfProfileSelect = {
+export const selfProfileSelect = {
   birthDate: true,
   id: true,
   workspaceId: true,
@@ -323,7 +324,7 @@ function composeName(firstName?: string | null, lastName?: string | null) {
   return [firstName, lastName].filter(Boolean).join(" ");
 }
 
-function toSelfProfile(
+export function toSelfProfile(
   user: Prisma.UserGetPayload<{ select: typeof selfProfileSelect }>,
 ) {
   return {

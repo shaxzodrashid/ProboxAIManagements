@@ -16,6 +16,7 @@ describe("self profile HTTP contract", () => {
   const prisma: any = { user: {} };
   const authorization = { resolveRoleIds: jest.fn().mockResolvedValue([]) };
   beforeAll(async () => {
+    prisma.$queryRaw = jest.fn().mockResolvedValue([]);
     prisma.$transaction = (callback: any) => callback(prisma);
     prisma.user.findFirst = jest.fn(async ({ where, select }: any) => {
       if (

@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.0-dev.9",
+      "gitRef": "refs/tags/v0.3.0-dev.9",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.0-dev.8",
       "gitRef": "refs/tags/v0.3.0-dev.8",
       "channel": "dev",
@@ -314,6 +320,13 @@
       "since": "0.3.0-dev.5",
       "state": "supported",
       "contract": "Docs/task-creation-recovery-contracts.md"
+    },
+    {
+      "id": "atomic-profile-save",
+      "title": "Atomic human Profile Save with stale-draft protection and whole-operation receipts",
+      "since": "0.3.0-dev.9",
+      "state": "supported",
+      "contract": "Docs/atomic-profile-save-contracts.md"
     }
   ]
 }
