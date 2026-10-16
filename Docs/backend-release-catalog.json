@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.0-dev.3",
+      "gitRef": "refs/tags/v0.3.0-dev.3",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.0-dev.2",
       "gitRef": "refs/tags/v0.3.0-dev.2",
       "channel": "dev",
@@ -236,6 +242,13 @@
       "since": "0.2.0-dev.1",
       "state": "foundation",
       "contract": "Docs/chat-group-metadata-contracts.md"
+    },
+    {
+      "id": "human-task-assignee-identities",
+      "title": "Public identity on fresh human task reads",
+      "since": "0.3.0-dev.3",
+      "state": "supported",
+      "contract": "Docs/task-assignee-identity-contracts.md"
     }
   ]
 }

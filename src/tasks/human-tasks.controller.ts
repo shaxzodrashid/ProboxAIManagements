@@ -59,7 +59,7 @@ export class HumanTasksController {
   @ApiOperation({
     summary: "Query bounded human tasks with scoped summaries",
     description:
-      "Current OPEN project membership is sufficient. Filters and counts share one snapshot; no execution content or identity lookup. Default50/max100, highest priority/newest creation first. Exact deadline sorting puts timed values first by pinned instant, then date-only by calendar date, unset last. Direction applies within each bucket. Existing deadlineDate calendar comparator and array list remain compatible. Generation changes return409 on continuation; refresh.",
+      "Current OPEN project membership is sufficient. Filters, counts and current public assignee identities share one page snapshot; no execution content or private profile lookup. Default50/max100, highest priority/newest creation first. Exact deadline sorting puts timed values first by pinned instant, then date-only by calendar date, unset last. Direction applies within each bucket. Existing deadlineDate calendar comparator and array list remain compatible. Generation changes return409 on continuation; refresh. Public names/lifecycle are current per-page display metadata and do not advance task query generation.",
   })
   @ApiOkResponse({ type: HumanTaskQueryResponseDto })
   @ApiConflictResponse({

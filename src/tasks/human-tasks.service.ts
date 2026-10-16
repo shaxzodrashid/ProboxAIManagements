@@ -3,7 +3,10 @@ import { Prisma } from "@prisma/client";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { authenticationDependency } from "../auth/authentication-failures";
 import { PrismaService } from "../prisma/prisma.service";
-import { humanTaskSelection, humanTaskReadSnapshot } from "./human-task-state";
+import {
+  humanTaskReadSelection,
+  humanTaskReadSnapshot,
+} from "./human-task-state";
 import { queryHumanTasks } from "./human-task-query";
 import { HumanTaskQueryDto } from "./human-task-query.dto";
 
@@ -45,7 +48,7 @@ export class HumanTasksService {
           },
           select: {
             task: {
-              select: humanTaskSelection,
+              select: humanTaskReadSelection,
             },
           },
           orderBy: [

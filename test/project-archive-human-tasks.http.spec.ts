@@ -289,6 +289,7 @@ if (url) {
           "revision",
           "priority",
           "assigneeIds",
+          "assigneeIdentities",
           "checklist",
           "deadline",
           "projectArchivedAt",

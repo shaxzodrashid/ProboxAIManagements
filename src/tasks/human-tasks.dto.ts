@@ -20,6 +20,7 @@ import {
 } from "./task-boards.dto";
 import { DeadlineInputDto, DeadlineValueDto } from "./task-deadlines.dto";
 import { TaskPriority } from "@prisma/client";
+import { PublicIdentityResponseDto } from "../accounts/profile-picker.dto";
 
 export class HumanTaskResponseDto {
   @ApiProperty({
@@ -56,6 +57,14 @@ export class HumanTaskResponseDto {
 }
 
 export class HumanTaskReadResponseDto extends HumanTaskResponseDto {
+  @ApiProperty({
+    type: PublicIdentityResponseDto,
+    isArray: true,
+    maxItems: 100,
+    description:
+      "Current public identities for task assigneeIds, ordered by id; checklist assigneeId reuses the same identities. Inactive or foreign-workspace identities are omitted while retained assignment IDs remain. No alias, private profile, avatar, lifecycle or action eligibility is exposed. Names may change between query pages without changing task ordering/counts. Frozen mutation/audit snapshots exclude this field.",
+  })
+  assigneeIdentities!: PublicIdentityResponseDto[];
   @ApiProperty({
     type: BoardStatusResponseDto,
     description:

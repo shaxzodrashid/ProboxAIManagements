@@ -248,7 +248,13 @@ if (databaseUrl) {
       });
       await db.user.updateMany({
         where: { id: { in: [owner, employee, peer] } },
-        data: { status: "OPEN" },
+        data: {
+          status: "OPEN",
+          firstName: null,
+          lastName: null,
+          username: null,
+          fullName: "Human staff",
+        },
       });
       projectId = (
         await db.project.create({
@@ -315,6 +321,227 @@ if (databaseUrl) {
         await db.workspace.deleteMany({ where: { id: { in: [w, foreignW] } } });
       }
       await db.$disconnect();
+    });
+    it("returns exact public assignee identities for detail, list and query with shared checklist lookup", async () => {
+      await db.user.update({
+        where: { id: employee },
+        data: {
+          firstName: "Nodira",
+          lastName: "",
+          username: "nodira_staff",
+          fullName: "LEGACY MUST NOT REPLACE STRUCTURED NAME",
+          bio: "PRIVATE BIO",
+        },
+      });
+      await db.user.update({
+        where: { id: peer },
+        data: {
+          firstName: null,
+          lastName: null,
+          fullName: "Legacy Name With Several Words",
+        },
+      });
+      await db.profileContact.upsert({
+        where: {
+          ownerId_contactAccountId: {
+            ownerId: viewer,
+            contactAccountId: employee,
+          },
+        },
+        create: {
+          ownerId: viewer,
+          contactAccountId: employee,
+          alias: "PRIVATE CONTACT ALIAS",
+        },
+        update: { alias: "PRIVATE CONTACT ALIAS" },
+      });
+      const saved = await assign();
+      expect(saved.status).toBe(200);
+      expect(saved.body.after).not.toHaveProperty("assigneeIdentities");
+      const itemId = await item();
+      const expected = [
+        {
+          id: employee,
+          displayName: "Nodira",
+          firstName: "Nodira",
+          lastName: "",
+          username: "nodira_staff",
+        },
+        {
+          id: peer,
+          displayName: "Legacy Name With Several Words",
+          firstName: null,
+          lastName: null,
+          username: null,
+        },
+      ].sort((a, b) => a.id.localeCompare(b.id));
+      const detail = (await read().expect(200)).body;
+      expect(detail.assigneeIdentities).toEqual(expected);
+      expect(detail.assigneeIds).toEqual(expected.map((u) => u.id));
+      expect(detail.checklist[0]).toMatchObject({
+        id: itemId,
+        assigneeId: employee,
+      });
+      expect(Object.keys(detail.checklist[0]).sort()).toEqual([
+        "assigneeId",
+        "completed",
+        "completedAt",
+        "completedById",
+        "deadline",
+        "id",
+        "position",
+        "title",
+      ]);
+      expect(
+        (
+          await http()
+            .get(`/projects/${projectId}/tasks`)
+            .set("Authorization", "Bearer " + viewer)
+            .expect(200)
+        ).body[0].assigneeIdentities,
+      ).toEqual(expected);
+      expect(
+        (await queryTasks().expect(200)).body.items[0].assigneeIdentities,
+      ).toEqual(expected);
+      expect(JSON.stringify(detail)).not.toContain("PRIVATE");
+      expect(JSON.stringify(detail)).not.toContain("roleAssignments");
+      expect((await read()).headers["cache-control"]).toBe("no-store");
+      expect(
+        (
+          await mutation("patch", "/details", owner, {
+            assigneeIdentities: expected,
+          })
+        ).status,
+      ).toBe(400);
+    });
+    it.each(["PENDING", "BANNED", "DELETED"] as const)(
+      "omits %s assignee identities while preserving retained task/checklist IDs",
+      async (status) => {
+        await assign();
+        const itemId = await item();
+        await db.user.update({
+          where: { id: employee },
+          data: { status, fullName: "INACTIVE SECRET" },
+        });
+        const detail = (await read().expect(200)).body;
+        expect(detail.assigneeIds).toContain(employee);
+        expect(detail.checklist[0]).toMatchObject({
+          id: itemId,
+          assigneeId: employee,
+        });
+        expect(detail.assigneeIdentities.map((u: any) => u.id)).toEqual([peer]);
+        expect(JSON.stringify(detail)).not.toContain("INACTIVE SECRET");
+        expect(
+          (await queryTasks().expect(200)).body.items[0].assigneeIdentities,
+        ).toEqual(detail.assigneeIdentities);
+      },
+    );
+    it("omits foreign-workspace assignee identity from legacy inconsistent rows", async () => {
+      const before = (await read().expect(200)).body;
+      await db.taskAssignee.create({ data: { taskId, userId: foreign } });
+      const detail = (await read().expect(200)).body;
+      expect(detail.assigneeIds).toEqual(
+        [...before.assigneeIds, foreign].sort(),
+      );
+      expect(detail.assigneeIdentities).toEqual(before.assigneeIdentities);
+      expect(
+        (await queryTasks().expect(200)).body.items[0].assigneeIdentities,
+      ).toEqual(before.assigneeIdentities);
+    });
+    it("retains public identity for an OPEN former project member without implying action eligibility", async () => {
+      await assign([employee]);
+      await item();
+      await db.projectMember.delete({
+        where: { projectId_userId: { projectId, userId: employee } },
+      });
+      const detail = (await read().expect(200)).body;
+      expect(detail.assigneeIdentities).toEqual([
+        {
+          id: employee,
+          displayName: "Human staff",
+          firstName: null,
+          lastName: null,
+          username: null,
+        },
+      ]);
+      expect((await read(employee)).status).toBe(404);
+      expect(
+        (
+          await mutation(
+            "put",
+            `/checklist/${detail.checklist[0].id}/completion`,
+            employee,
+            { completed: true },
+          )
+        ).status,
+      ).toBe(404);
+    });
+    it("refreshes assignee names without rewriting frozen assignment responses or audits", async () => {
+      const requestId = randomUUID(),
+        rev = await revision(),
+        data = { requestId, assigneeIds: [employee] };
+      const saved = await mutation("put", "/assignees", owner, data, rev);
+      expect(saved.status).toBe(200);
+      const before = (await read().expect(200)).body;
+      await db.user.update({
+        where: { id: employee },
+        data: { firstName: "New Public Name", lastName: null },
+      });
+      const current = (await read().expect(200)).body;
+      expect(current.assigneeIdentities[0].displayName).toBe("New Public Name");
+      expect(current.revision).toBe(before.revision);
+      expect(current.updatedAt).toBe(before.updatedAt);
+      expect(
+        (await mutation("put", "/assignees", owner, data, rev)).body,
+      ).toEqual(saved.body);
+      const audit = await db.taskHumanAudit.findUniqueOrThrow({
+        where: { taskId_requestId: { taskId, requestId } },
+      });
+      expect(audit.before).toEqual(saved.body.before);
+      expect(audit.after).toEqual(saved.body.after);
+      expect(saved.body.before).not.toHaveProperty("assigneeIdentities");
+      expect(saved.body.after).not.toHaveProperty("assigneeIdentities");
+    });
+    it("hydrates current assignee identities on query continuation without changing task generation", async () => {
+      await assign([employee]);
+      await queryRow(0);
+      const first = await queryTasks({ limit: 1 }).expect(200);
+      expect(first.body.hasMore).toBe(true);
+      await db.user.update({
+        where: { id: employee },
+        data: { firstName: "Current Page Name", lastName: null },
+      });
+      const next = await queryTasks({
+        limit: 1,
+        cursor: first.body.nextCursor,
+      }).expect(200);
+      expect(next.body.items[0].assigneeIdentities[0].displayName).toBe(
+        "Current Page Name",
+      );
+      expect(next.body.asOf).toBe(first.body.asOf);
+      expect(next.body.total).toBe(first.body.total);
+      expect(next.body.items[0].id).not.toBe(first.body.items[0].id);
+    });
+    it("declares public assignee identities only on fresh read DTOs", () => {
+      const s: any = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      ).components!.schemas!;
+      expect(
+        s.HumanTaskReadResponseDto.properties.assigneeIdentities.items.$ref,
+      ).toBe("#/components/schemas/PublicIdentityResponseDto");
+      expect(s.HumanTaskReadResponseDto.required).toContain(
+        "assigneeIdentities",
+      );
+      expect(
+        s.HumanTaskReadResponseDto.properties.assigneeIdentities.maxItems,
+      ).toBe(100);
+      expect(s.HumanTaskResponseDto.properties).not.toHaveProperty(
+        "assigneeIdentities",
+      );
+      expect(
+        Object.keys(s.PublicIdentityResponseDto.properties).sort(),
+      ).toEqual(["displayName", "firstName", "id", "lastName", "username"]);
     });
     const editWorkflowStatus = (statusId: string, input: object) =>
       http()
@@ -457,6 +684,7 @@ if (databaseUrl) {
       });
       const denied = await read().expect(404);
       expect(denied.body).not.toHaveProperty("workflowStatus");
+      expect(denied.body).not.toHaveProperty("assigneeIdentities");
       expect((await queryTasks()).status).toBe(404);
       await http()
         .get(`/projects/${projectId}/tasks`)
@@ -1894,7 +2122,7 @@ if (databaseUrl) {
       expect(saved.status).toBe(200);
       expect(saved.headers["cache-control"]).toBe("no-store");
       expect(saved.body.action).toBe("CHECKLIST_REORDER");
-      const { workflowStatus, ...frozenBefore } = before;
+      const { workflowStatus, assigneeIdentities, ...frozenBefore } = before;
       expect(saved.body.before).toEqual(frozenBefore);
       expect(saved.body.after).not.toHaveProperty("workflowStatus");
       expect(saved.body.after.checklist.map((i: any) => i.id)).toEqual([
@@ -1910,6 +2138,7 @@ if (databaseUrl) {
       expect((await read()).body).toEqual({
         ...saved.body.after,
         workflowStatus,
+        assigneeIdentities,
       });
       expect(await db.task.findUnique({ where: { id: taskId } })).toEqual(
         scalar,

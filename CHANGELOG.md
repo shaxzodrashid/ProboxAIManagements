@@ -1,5 +1,19 @@
 # Backend changelog
 
+## 0.3.0-dev.3 — public task assignee identities
+
+- Include current allowlisted public names on fresh member-only human task
+  detail, list and query items, shared by task and checklist assignee IDs.
+- Reuse structured names and verbatim legacy display fallback, without private
+  aliases, profile fields or invented avatar delivery. Retained inactive or
+  foreign-workspace IDs have no hydrated identity.
+- Preserve frozen mutation/audit responses, assignment eligibility and task query
+  generation. Public identity is current per-page display metadata.
+
+This closes the public-name read subset of TASK04/TASK05 only. No migration,
+new grant or profile/status policy is introduced. See the
+[assignee identity contract](Docs/task-assignee-identity-contracts.md).
+
 ## 0.3.0-dev.2 — human task workflow display
 
 - Add current `workflowStatus` to member-only human task detail, compatibility list

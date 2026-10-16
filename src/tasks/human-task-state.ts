@@ -1,6 +1,10 @@
 import { Prisma, TaskHumanAudit } from "@prisma/client";
 import { storedTaskDeadline } from "./task-deadline-value";
 import { workflowStatusSnapshot } from "./task-workflow-status";
+import {
+  publicIdentity,
+  publicIdentitySelect,
+} from "../accounts/public-identity";
 export const humanTaskSelection = {
   id: true,
   workspaceId: true,
@@ -49,6 +53,22 @@ export const humanTaskSelection = {
 export type HumanTask = Prisma.TaskGetPayload<{
   select: typeof humanTaskSelection;
 }>;
+/** Live public identity is selected only for fresh reads, never mutation history. */
+export const humanTaskReadSelection = {
+  ...humanTaskSelection,
+  assignees: {
+    ...humanTaskSelection.assignees,
+    select: {
+      userId: true,
+      user: {
+        select: { ...publicIdentitySelect, status: true, workspaceId: true },
+      },
+    },
+  },
+} satisfies Prisma.TaskSelect;
+type HumanTaskRead = Prisma.TaskGetPayload<{
+  select: typeof humanTaskReadSelection;
+}>;
 export function humanTaskSnapshot(task: HumanTask) {
   return {
     id: task.id,
@@ -73,10 +93,16 @@ export function humanTaskSnapshot(task: HumanTask) {
 export const humanJson = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value));
 /** Fresh display metadata is deliberately excluded from frozen mutation/audit outcomes. */
-export function humanTaskReadSnapshot(task: HumanTask) {
+export function humanTaskReadSnapshot(task: HumanTaskRead) {
   return {
     ...humanTaskSnapshot(task),
     workflowStatus: workflowStatusSnapshot(task.boardEntry!.status),
+    assigneeIdentities: task.assignees
+      .filter(
+        ({ user }) =>
+          user.status === "OPEN" && user.workspaceId === task.workspaceId,
+      )
+      .map(({ user }) => publicIdentity(user)),
   };
 }
 export function humanOutcome(row: TaskHumanAudit) {

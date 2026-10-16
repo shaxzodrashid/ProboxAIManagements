@@ -5,7 +5,10 @@ import { AuthenticatedUser } from "../auth/auth.types";
 import { authenticationDependency } from "../auth/authentication-failures";
 import { operationError } from "../openapi/operation-errors";
 import { PrismaService } from "../prisma/prisma.service";
-import { humanTaskSelection, humanTaskReadSnapshot } from "./human-task-state";
+import {
+  humanTaskReadSelection,
+  humanTaskReadSnapshot,
+} from "./human-task-state";
 import { HumanTaskQueryDto, QueryPriorities } from "./human-task-query.dto";
 const fail = (status: number, message: string) =>
   operationError(
@@ -200,7 +203,7 @@ export async function queryHumanTasks(
             id: { in: page.map((r) => r.id) },
             workspaceId: actor.workspaceId,
           },
-          select: humanTaskSelection,
+          select: humanTaskReadSelection,
         });
         const byId = new Map(rows.map((row) => [row.id, row]));
         const items = page.map((row) =>
