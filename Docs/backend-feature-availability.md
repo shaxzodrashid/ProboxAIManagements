@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.3.0-dev.9**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.3.0-dev.10**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -46,6 +46,7 @@ Available since refers to the first tracked Git release containing this bounded 
 
 ## Release references
 
+- **0.3.0-dev.10**: `refs/tags/v0.3.0-dev.10`, dev, not-deployed.
 - **0.3.0-dev.9**: `refs/tags/v0.3.0-dev.9`, dev, not-deployed.
 - **0.3.0-dev.8**: `refs/tags/v0.3.0-dev.8`, dev, not-deployed.
 - **0.3.0-dev.7**: `refs/tags/v0.3.0-dev.7`, dev, not-deployed.

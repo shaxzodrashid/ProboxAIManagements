@@ -5,6 +5,12 @@ required behavior and integration boundaries; it does not redesign screens or
 claim that frontend wiring, Figma updates, runtime accessibility or deployment
 is complete. No shared Page or Figma file is edited by this handoff.
 
+**API documentation handoff:** [the local inventory](api/README.md) covers 160
+registered operations with schemas, permissions and retry contracts. The existing
+private Postman workspace was verified, but automatic approval review rejected its
+first collection replacement; no update succeeded. Use the local artifacts and
+pending plan for review, and do not treat cloud documentation or deployment as done.
+
 **Readiness:** implemented backend means local application routes exist and have
 test evidence; inactive foundation means domain rules are tested but unavailable
 to the UI; planned requirement means confirmed behavior still needs backend work.

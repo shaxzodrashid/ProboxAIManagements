@@ -1,5 +1,19 @@
 # Backend changelog
 
+## 0.3.0-dev.10 — verified API documentation handoff
+
+- Export all 160 registered local operations and their source-derived DTO/security
+  contracts without starting application services or running workflows.
+- Prepare deduplicated documentation for the existing private Postman workspace:
+  preserve 81 saved scenarios, add 80 missing operations, keep environment values
+  and credentials untouched. Validate refs, placeholders and request templates.
+- Record remaining product/security/storage decisions and backend/UI boundaries.
+
+External synchronization is blocked by automatic approval review: the first
+collection replacement was rejected and no write succeeded. The exact local
+artifacts and pending plan are in [the API handoff](Docs/api/README.md).
+No push, public publishing, deployment or production migration.
+
 ## 0.3.0-dev.9 — atomic Profile Save
 
 - Add coherent edit read and guarded whole-Save commit/readback for profile fields,
