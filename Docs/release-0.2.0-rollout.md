@@ -1,11 +1,24 @@
 # 0.2.x rollout from app2 baseline
 
-Current target: **0.2.1**. The initial0.2.0 preparation stopped before migrations or
+Current target: **0.2.2**. The initial0.2.0 preparation stopped before migrations or
 runtime changes because an unpinned Corepack invocation selected pnpm12.11.2 and
 could not load its uncached launcher after a download prompt. The patch pins the
 tested pnpm10.13.1 and supplies noninteractive Corepack settings. Preserve the
 failed candidate/log and immutable v0.2.0 tag; use the new verified patch release.
-Both versions have the same 20-migration delta from the production baseline.
+The0.2.1 attempt passed package installation, generation, release/deployment checks,
+typecheck and lint, then stopped in the self-profile HTTP test suite on Node22.
+The0.2.2 patch gives that fixture an explicitly listening server and drains all
+concurrent reads before assertions so a transport failure cannot leak pending
+requests into the following mock. It retains the strict workspace/lifecycle404
+checks and changes no production authentication code. All three versions have the
+same 20-migration delta from the production baseline.
+
+App2 diagnostic verification changed only the failed0.2.1 candidate's test listener
+after preserving its original fixture. All36 self-profile checks then passed on
+the same Node22 host, including eight concurrent reads and the workspace/lifecycle
+404 cases. That candidate is diagnostic only. The canonical0.2.2 fixture also waits
+for every request to settle before assertions; a fresh verified archive is required
+for deployment. The same36 checks passed locally on Node24.
 
 This release promotes the existing bounded contracts and installs the tested
 multi-environment-file CLI compatibility change. It does not claim that every
@@ -67,7 +80,7 @@ The migration intentionally creates this CHECK as NOT VALID; a successful migrat
 command alone does not establish historical constraint validity.
 
 Start the new candidate through the guarded CLI and require local dependency
-readiness plus Swagger `info.version=0.2.1`, exact selected source and the actual
+readiness plus Swagger `info.version=0.2.2`, exact selected source and the actual
 process working directory. Independently verify public readiness through the
 configured public hostname. Do not announce deployment based only on Git version,
 build output, database readiness or a symlink.

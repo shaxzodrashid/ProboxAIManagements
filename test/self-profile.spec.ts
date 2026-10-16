@@ -65,7 +65,9 @@ describe("self profile HTTP contract", () => {
         forbidNonWhitelisted: true,
       }),
     );
-    await app.init();
+    // The suite owns this server. Supertest must not close it after the first
+    // response while other requests in the concurrent read batch are in flight.
+    await app.listen(0, "127.0.0.1");
   });
   beforeEach(() => {
     row = {
@@ -144,13 +146,23 @@ describe("self profile HTTP contract", () => {
     row.telegramUserId = 123n;
     row.telegramChatId = 123n;
     row.verifiedAt = new Date();
-    const responses = await Promise.all(
+    const results = await Promise.allSettled(
       Array.from({ length: 8 }, () =>
         call()
           .get("/users/me/telegram-link")
           .set("Authorization", "Bearer token")
           .expect(200),
       ),
+    );
+    // Drain every request even on transport failure so a pending read cannot
+    // consume the next test's one-shot authentication/recheck mock.
+    expect(
+      results.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : [],
+      ),
+    ).toEqual([]);
+    const responses = results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
     );
     expect(responses.map((r) => r.body)).toEqual(
       Array.from({ length: 8 }, () => ({ linkState: "LINKED" })),

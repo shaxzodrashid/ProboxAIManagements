@@ -1,5 +1,20 @@
 # Backend changelog
 
+## 0.2.2 — concurrent profile test-server lifetime
+
+- Give the self-profile HTTP suite an explicitly listening loopback server for its
+  entire lifetime. Supertest no longer owns a temporary listener that it can close
+  after the first response while the eight-request batch is still in flight.
+- Await every concurrent read with allSettled before asserting success, preventing
+  pending reads after a transport failure from consuming a later test's one-shot
+  authentication mock. Preserve all response, side-effect and strict404 assertions.
+- Address app2's Node22 preparation failure in the concurrent status read and its
+  following workspace-change check. Preparation stopped before migrations or a
+  runtime switch; the 0.1.0 backend remained active.
+
+This patch changes test infrastructure and release metadata, with no API or schema
+change. The original 20-migration rollout and immutable earlier tags are preserved.
+
 ## 0.2.1 — deterministic deployment package manager
 
 - Pin `pnpm@10.13.1`, the version used by local release verification, in
