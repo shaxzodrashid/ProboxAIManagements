@@ -185,7 +185,7 @@ case "$command_name" in
     printf '%s\n' "$revision" >"$candidate/.deployment-commit"
     printf '%s\n' "$release_version" >"$candidate/.deployment-openapi-version"
     # Do not inherit credentials/provider variables into dependency scripts/tests.
-    env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test DATABASE_URL='postgresql://build_only@127.0.0.1:1/build_only' bash -e -c '
+    env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_DEFAULT_TO_LATEST=0 COREPACK_ENABLE_AUTO_PIN=0 DATABASE_URL='postgresql://build_only@127.0.0.1:1/build_only' bash -e -c '
       cd -- "$1"
       pnpm install --frozen-lockfile --prod=false
       pnpm prisma:generate

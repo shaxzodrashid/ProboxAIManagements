@@ -1,4 +1,11 @@
-# 0.2.0 rollout from app2 baseline
+# 0.2.x rollout from app2 baseline
+
+Current target: **0.2.1**. The initial0.2.0 preparation stopped before migrations or
+runtime changes because an unpinned Corepack invocation selected pnpm12.11.2 and
+could not load its uncached launcher after a download prompt. The patch pins the
+tested pnpm10.13.1 and supplies noninteractive Corepack settings. Preserve the
+failed candidate/log and immutable v0.2.0 tag; use the new verified patch release.
+Both versions have the same 20-migration delta from the production baseline.
 
 This release promotes the existing bounded contracts and installs the tested
 multi-environment-file CLI compatibility change. It does not claim that every
@@ -60,7 +67,7 @@ The migration intentionally creates this CHECK as NOT VALID; a successful migrat
 command alone does not establish historical constraint validity.
 
 Start the new candidate through the guarded CLI and require local dependency
-readiness plus Swagger `info.version=0.2.0`, exact selected source and the actual
+readiness plus Swagger `info.version=0.2.1`, exact selected source and the actual
 process working directory. Independently verify public readiness through the
 configured public hostname. Do not announce deployment based only on Git version,
 build output, database readiness or a symlink.

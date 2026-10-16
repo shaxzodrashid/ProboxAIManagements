@@ -104,6 +104,15 @@ tar, pnpm and a Node runtime supporting the backend and `--env-file`. Update pre
 and development verification also require ShellCheck. The entire lifecycle command holds one exclusive lock.
 Production source/remote selection is operator configuration, not a new integration.
 
+Package manager selection is pinned in `package.json` (`pnpm@10.13.1`). Preparation
+passes `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`, `COREPACK_DEFAULT_TO_LATEST=0` and
+`COREPACK_ENABLE_AUTO_PIN=0` through its otherwise scrubbed environment. It does not
+inherit provider/database credentials for builds or edit package manager metadata.
+Before the first update, cache the pinned version as the service user with
+`corepack install --global pnpm@10.13.1` and confirm `pnpm --version` from the
+candidate or a directory outside an unpinned checkout. Do not clear caches, disable
+integrity verification or install an unrelated latest pnpm to recover preparation.
+
 ## Preparation, failure and rollback
 
 Git archive extracts a specific remote-main commit to a new immutable candidate.

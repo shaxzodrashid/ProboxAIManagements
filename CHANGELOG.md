@@ -1,5 +1,19 @@
 # Backend changelog
 
+## 0.2.1 — deterministic deployment package manager
+
+- Pin `pnpm@10.13.1`, the version used by local release verification, in
+  package.json so an immutable candidate cannot select an unrelated global version.
+- Pass noninteractive Corepack download settings through the scrubbed preparation
+  environment, disable latest-version lookup and automatic package metadata edits,
+  and assert those settings in the deployment sandbox.
+- Address app2's failed 0.2.0 preparation: Corepack selected pnpm12.11.2, prompted
+  for download and then could not find its cached launcher. The failure happened
+  before production migrations or a runtime switch; the 0.1.0 baseline stayed active.
+
+This patch adds no schema migration. The original 20-migration rollout still applies.
+The immutable `v0.2.0` tag is preserved.
+
 ## 0.2.0 — stable release
 
 - Promote the bounded backend contracts from `0.2.0-dev.1` and deployment tooling

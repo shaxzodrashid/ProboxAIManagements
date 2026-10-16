@@ -173,6 +173,7 @@ esac`,
       "pnpm",
       `[[ "$scenario" != build-fail ]] || { [[ "$1" != build ]] || exit 1; }
 [[ "\${PROFILE_TEST_DATABASE_URL:-}" = '' ]] || exit 91
+[[ "\${COREPACK_ENABLE_DOWNLOAD_PROMPT:-}" = 0 && "\${COREPACK_DEFAULT_TO_LATEST:-}" = 0 && "\${COREPACK_ENABLE_AUTO_PIN:-}" = 0 ]] || exit 95
 [[ "\${DEPLOY_TEST_LAYER_1:-}" = '' && "\${DEPLOY_TEST_LAYER_2:-}" = '' && "\${DEPLOY_TEST_LAYER_3:-}" = '' && "\${DEPLOY_TEST_LAYER_4:-}" = '' ]] || exit 94
 [[ "\${DATABASE_URL:-}" = 'postgresql://build_only@127.0.0.1:1/build_only' ]] || exit 92
 if [[ "$1" = build ]]; then mkdir -p dist node_modules/prisma/build; echo '// fixture' > dist/main.js; touch node_modules/prisma/build/index.js; fi`,
