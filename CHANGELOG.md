@@ -1,5 +1,19 @@
 # Backend changelog
 
+## 0.3.0-dev.4 — task identity in project session queries
+
+- Add current task identity/title and explicit board project ID only to the
+  existing project-filtered assigned-session index. Reuse current project
+  membership, session-read, assigned-manager and workspace checks.
+- Preserve global/task-only summaries, session keyset ordering/cursors and saved
+  execution context. Select only page task IDs/titles in the same snapshot;
+  expose no project label, description, criteria or new capability guarantee.
+
+This closes MAIN01's bounded project-session task-identity subset. Broader Home
+feeds, project-label/capability composition and complete counts remain open.
+No migration, new permission or agent/profile policy is introduced. See the
+[task identity contract](Docs/project-session-task-identity-contracts.md).
+
 ## 0.3.0-dev.3 — public task assignee identities
 
 - Include current allowlisted public names on fresh member-only human task

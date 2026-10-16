@@ -70,7 +70,26 @@ export class SessionListQueryDto {
   @MaxLength(2048)
   cursor?: string;
 }
+export class SessionListTaskContextDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({
+    description: "Current task title from this page's authorized snapshot.",
+  })
+  title!: string;
+  @ApiProperty({
+    format: "uuid",
+    description:
+      "Explicit task-board project; never the saved execution project.",
+  })
+  projectId!: string;
+}
 export class SessionListItemDto {
+  @ApiPropertyOptional({
+    type: SessionListTaskContextDto,
+    description:
+      "Present only with a projectId filter, after current project membership and assigned-session checks. Current per-page metadata, not frozen by asOf. No project label, execution content or action capability is implied.",
+  })
+  task?: SessionListTaskContextDto;
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ format: "uuid" }) taskId!: string;
   @ApiProperty({

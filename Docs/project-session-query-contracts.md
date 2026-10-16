@@ -1,5 +1,11 @@
 # MAIN01 explicit project-task session query — October 16
 
+The later [task identity increment](project-session-task-identity-contracts.md)
+adds `task: {id,title,projectId}` only on project-filtered items. The unchanged
+six-field item description below records the earlier checkpoint and still
+applies to global and task-only queries. Project labels and broader capability
+summaries remain outside both increments.
+
 This local increment adds a project filter to the already bounded assigned-session
 index. The existing one-board-per-project `TaskBoardEntry` relationship and current
 member human-task read rule provide the source contract. It creates no new task

@@ -158,8 +158,31 @@ export async function listSessions(
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take: limit + 1,
         });
-        const items = rows.slice(0, limit).map((row) => ({
+        const page = rows.slice(0, limit);
+        // Only explicit project queries have already established the human-task
+        // membership authority needed for task display. Hydrate one page in one
+        // batch inside this same snapshot; global summaries keep their old shape.
+        const tasks =
+          projectId && page.length
+            ? await tx.task.findMany({
+                where: {
+                  id: { in: [...new Set(page.map((row) => row.taskId))] },
+                  workspaceId: actor.workspaceId,
+                },
+                select: { id: true, title: true },
+              })
+            : [];
+        const taskContexts = new Map(
+          tasks.map((task) => [
+            task.id,
+            { id: task.id, title: task.title, projectId: projectId! },
+          ]),
+        );
+        if (projectId && page.some((row) => !taskContexts.has(row.taskId)))
+          throw new Error("Authorized task context unavailable");
+        const items = page.map((row) => ({
           ...row,
+          ...(projectId ? { task: taskContexts.get(row.taskId)! } : {}),
           stopConfirmation: [
             "NOT_OBSERVED",
             "NOT_STARTED",

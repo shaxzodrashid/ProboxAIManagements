@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.0-dev.4",
+      "gitRef": "refs/tags/v0.3.0-dev.4",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.0-dev.3",
       "gitRef": "refs/tags/v0.3.0-dev.3",
       "channel": "dev",
@@ -249,6 +255,13 @@
       "since": "0.3.0-dev.3",
       "state": "supported",
       "contract": "Docs/task-assignee-identity-contracts.md"
+    },
+    {
+      "id": "project-session-task-identity",
+      "title": "Task identity in project session queries",
+      "since": "0.3.0-dev.4",
+      "state": "supported",
+      "contract": "Docs/project-session-task-identity-contracts.md"
     }
   ]
 }
