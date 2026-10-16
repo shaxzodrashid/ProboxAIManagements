@@ -36,6 +36,9 @@ export async function listSessions(
   actor: AuthenticatedUser,
   query: SessionListQueryDto,
 ) {
+  const projectId = query.projectId?.toLowerCase();
+  // Retain existing unfiltered cursor identities; bind project-filtered cursors
+  // to their explicit task-board scope without treating the hash as authority.
   const scope = createHash("sha256")
     .update(
       JSON.stringify([
@@ -43,6 +46,7 @@ export async function listSessions(
         actor.workspaceId,
         query.taskId ?? null,
         [...(query.statuses ?? [])].sort(),
+        ...(projectId ? [["task-board-project", projectId]] : []),
       ]),
     )
     .digest("hex");
@@ -112,7 +116,27 @@ export async function listSessions(
           throw new BadRequestException("Invalid session list cursor");
         const where: Prisma.ProboxAiSessionWhereInput = {
           workspaceId: actor.workspaceId,
-          task: { workspaceId: actor.workspaceId, managerId: actor.id },
+          task: {
+            workspaceId: actor.workspaceId,
+            managerId: actor.id,
+            ...(projectId
+              ? {
+                  boardEntry: {
+                    is: {
+                      status: {
+                        board: {
+                          projectId,
+                          project: {
+                            workspaceId: actor.workspaceId,
+                            members: { some: { userId: actor.id } },
+                          },
+                        },
+                      },
+                    },
+                  },
+                }
+              : {}),
+          },
           ...(query.taskId ? { taskId: query.taskId } : {}),
           ...(query.statuses ? { status: { in: query.statuses } } : {}),
           createdAt: { lte: new Date(asOf) },

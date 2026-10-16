@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.2.3-dev.1**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.3.0-dev.1**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -25,6 +25,7 @@ Available since refers to the first tracked Git release containing this bounded 
 | Durable project creation outcome and retry readback                | 0.2.0-dev.1     | supported  | [Contract](../Docs/project-creation-readback-contracts.md)     |
 | Setup enqueue failure reconciliation                               | 0.2.0-dev.1     | supported  | [Contract](../Docs/project-enqueue-recovery-contracts.md)      |
 | Permitted active-workspace project member discovery                | 0.2.0-dev.1     | supported  | [Contract](../Docs/project-member-picker-contracts.md)         |
+| Member-scoped session index for explicit project-board tasks       | 0.3.0-dev.1     | supported  | [Contract](../Docs/project-session-query-contracts.md)         |
 | Stored self Telegram link readback                                 | 0.2.0-dev.1     | supported  | [Contract](../Docs/self-telegram-link-contracts.md)            |
 | Bounded assigned session index                                     | 0.2.0-dev.1     | supported  | [Contract](../Docs/session-index-contracts.md)                 |
 | Canonical assistant text reconstruction                            | 0.2.0-dev.1     | supported  | [Contract](../Docs/session-assistant-text-contracts.md)        |
@@ -37,6 +38,7 @@ Available since refers to the first tracked Git release containing this bounded 
 
 ## Release references
 
+- **0.3.0-dev.1**: `refs/tags/v0.3.0-dev.1`, dev, not-deployed.
 - **0.2.3-dev.1**: `refs/tags/v0.2.3-dev.1`, dev, not-deployed.
 - **0.2.2**: `refs/tags/v0.2.2`, production, deployment-unverified.
 - **0.2.1**: `refs/tags/v0.2.1`, production, deployment-unverified.

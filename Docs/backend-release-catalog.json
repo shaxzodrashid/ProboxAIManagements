@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.0-dev.1",
+      "gitRef": "refs/tags/v0.3.0-dev.1",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.2.3-dev.1",
       "gitRef": "refs/tags/v0.2.3-dev.1",
       "channel": "dev",
@@ -43,6 +49,13 @@
     }
   ],
   "features": [
+    {
+      "id": "project-task-session-filter",
+      "title": "Member-scoped session index for explicit project-board tasks",
+      "since": "0.3.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-session-query-contracts.md"
+    },
     {
       "id": "deployment-systemd-cli",
       "title": "Systemd deployment CLI and sandbox lifecycle verification",

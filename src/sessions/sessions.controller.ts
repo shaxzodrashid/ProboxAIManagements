@@ -75,7 +75,7 @@ export class SessionsController {
   @ApiOperation({
     summary: "List sessions for your assigned tasks",
     description:
-      "Current OPEN/workspace/sessions.read and assigned-manager scope only; no read-all/admin bypass. Explicit statuses and optional task filter, bounded keyset paging by createdAt/id descending. Minimal persisted summaries, not process liveness or complete active counts. Each page reevaluates status/assignment; asOf is a creation cutoff, not a retained snapshot. No project association is inferred.",
+      "Current OPEN/workspace/sessions.read and assigned-manager scope only; no read-all/admin bypass. Explicit statuses and optional task/project filters, bounded keyset paging by createdAt/id descending. projectId requires current project membership and the task's explicit board association, independent of saved execution context. Minimal persisted summaries, not process liveness or complete active counts. Each page reevaluates status/assignment/membership; asOf is a creation cutoff, not a retained snapshot.",
   })
   @ApiOkResponse({ type: SessionListResponseDto })
   @ApiAuthenticationErrors()

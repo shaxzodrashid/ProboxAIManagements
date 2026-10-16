@@ -1,5 +1,21 @@
 # Backend changelog
 
+## 0.3.0-dev.1 — explicit project-task session query
+
+- Add an optional `projectId` filter to the existing assigned-session index,
+  using the task's explicit board/project association and current project
+  membership alongside existing assignment, workspace and session-read checks.
+- Intersect task/status filters, bind project-scoped cursors to canonical identity,
+  preserve unfiltered cursor compatibility and the existing minimal response.
+  Saved execution project/cwd never substitutes for the board association.
+- Verify membership/assignment/workspace revocation, archives, broad-grant denial,
+  execution-context separation, validation and OpenAPI through isolated HTTP tests.
+  No migration, new grant, runner action or production change is introduced.
+
+This closes the bounded MAIN01 project-task query subset; broader Home feeds,
+counts and action/capability composition remain incomplete. See
+[project session query contract](Docs/project-session-query-contracts.md).
+
 ## 0.2.3-dev.1 — profile Contact revocation correction
 
 - Remove caller-owned directed Contact grants and private aliases with

@@ -42,6 +42,14 @@ export class SessionListQueryDto {
   @IsOptional()
   @IsUUID("4")
   taskId?: string;
+  @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "Filter by the task's explicit project-board association and current project membership. Intersects taskId/statuses; unknown/inaccessible projects yield an empty list. Never infers membership from a session's saved execution project or cwd.",
+  })
+  @IsOptional()
+  @IsUUID("4")
+  projectId?: string;
   @ApiPropertyOptional({ minimum: 1, maximum: 100, default: 100 })
   @Transform(({ value }) =>
     typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)
