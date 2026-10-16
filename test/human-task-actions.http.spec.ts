@@ -316,6 +316,226 @@ if (databaseUrl) {
       }
       await db.$disconnect();
     });
+    const editWorkflowStatus = (statusId: string, input: object) =>
+      http()
+        .patch(`/projects/${projectId}/task-board/statuses/${statusId}`)
+        .set("Authorization", "Bearer " + owner)
+        .set("If-Match", `"${board.revision}"`)
+        .send({ requestId: randomUUID(), ...input });
+    const boardEdit = () =>
+      http()
+        .get(`/projects/${projectId}/task-board/edit`)
+        .set("Authorization", "Bearer " + owner);
+    it("resolves workflow display metadata consistently for member-only detail, list and query without board grants", async () => {
+      const expected = (await boardEdit().expect(200)).body.statuses[0];
+      expect(Object.keys(expected).sort()).toEqual([
+        "color",
+        "id",
+        "name",
+        "palette",
+        "position",
+      ]);
+      expect((await read().expect(200)).body.workflowStatus).toEqual(expected);
+      expect(
+        (
+          await http()
+            .get(`/projects/${projectId}/tasks`)
+            .set("Authorization", "Bearer " + viewer)
+            .expect(200)
+        ).body[0].workflowStatus,
+      ).toEqual(expected);
+      expect(
+        (await queryTasks().expect(200)).body.items[0].workflowStatus,
+      ).toEqual(expected);
+      await http()
+        .get(`/projects/${projectId}/task-board`)
+        .set("Authorization", "Bearer " + viewer)
+        .expect(403);
+      await http()
+        .get(`/projects/${projectId}/task-board/edit`)
+        .set("Authorization", "Bearer " + viewer)
+        .expect(403);
+      expect((await read()).headers["cache-control"]).toBe("no-store");
+      expect(
+        (
+          await mutation("patch", "/details", owner, {
+            workflowStatus: expected,
+          })
+        ).status,
+      ).toBe(400);
+    });
+    it.each(["NEUTRAL", "TEAL", "PURPLE", "GREEN"])(
+      "refreshes resolved workflow name/%s palette without changing task revision or runner state",
+      async (color) => {
+        const before = await db.task.findUniqueOrThrow({
+          where: { id: taskId },
+        });
+        const humanRevision = await revision();
+        await editWorkflowStatus(board.statuses[0].id, {
+          name: "Custom " + color,
+          color,
+        }).expect(200);
+        const expected = (await boardEdit().expect(200)).body.statuses[0];
+        expect(expected).toMatchObject({ color, name: "Custom " + color });
+        expect((await read().expect(200)).body.workflowStatus).toEqual(
+          expected,
+        );
+        expect(
+          (await queryTasks().expect(200)).body.items[0].workflowStatus,
+        ).toEqual(expected);
+        expect(await revision()).toBe(humanRevision);
+        expect(
+          await db.task.findUniqueOrThrow({ where: { id: taskId } }),
+        ).toEqual(before);
+      },
+    );
+    it("refreshes moved task display while preserving frozen mutation and audit outcomes after a later rename", async () => {
+      const previousRevision = await revision();
+      const requestId = randomUUID();
+      const data = { requestId, statusId: board.statuses[1].id };
+      const moved = await mutation(
+        "put",
+        "/workflow-status",
+        owner,
+        data,
+        previousRevision,
+      );
+      expect(moved.status).toBe(200);
+      expect(moved.body.after.statusId).toBe(board.statuses[1].id);
+      expect(moved.body.after).not.toHaveProperty("workflowStatus");
+      await editWorkflowStatus(board.statuses[1].id, {
+        name: "New current label",
+        color: "PURPLE",
+      }).expect(200);
+      const expected = (await boardEdit().expect(200)).body.statuses[1];
+      expect((await read().expect(200)).body.workflowStatus).toEqual(expected);
+      const replayed = await mutation(
+        "put",
+        "/workflow-status",
+        owner,
+        data,
+        previousRevision,
+      );
+      expect(replayed.status).toBe(200);
+      expect(replayed.body).toEqual(moved.body);
+      const audit = await db.taskHumanAudit.findUniqueOrThrow({
+        where: { taskId_requestId: { taskId, requestId } },
+      });
+      expect(audit.after).toEqual(moved.body.after);
+      expect(
+        (await db.task.findUniqueOrThrow({ where: { id: taskId } })).status,
+      ).toBe("RUNNING");
+    });
+    it("invalidates query continuation after workflow display metadata changes", async () => {
+      await queryRow(0);
+      const first = await queryTasks({ limit: 1 });
+      expect(first.status).toBe(200);
+      expect(first.body.hasMore).toBe(true);
+      await editWorkflowStatus(board.statuses[0].id, {
+        name: "Updated metadata",
+        color: "GREEN",
+      }).expect(200);
+      expect(
+        (await queryTasks({ limit: 1, cursor: first.body.nextCursor })).status,
+      ).toBe(409);
+      const fresh = await queryTasks({ limit: 1 });
+      expect(fresh.status).toBe(200);
+      expect(fresh.body.items[0].workflowStatus).toMatchObject({
+        name: "Updated metadata",
+        color: "GREEN",
+      });
+      expect(fresh.body.statusCounts).toEqual([
+        { statusId: board.statuses[0].id, count: 2 },
+      ]);
+    });
+    it("removes workflow display data after current membership is revoked", async () => {
+      expect((await read().expect(200)).body.workflowStatus.id).toBe(
+        board.statuses[0].id,
+      );
+      await db.projectMember.delete({
+        where: { projectId_userId: { projectId, userId: viewer } },
+      });
+      const denied = await read().expect(404);
+      expect(denied.body).not.toHaveProperty("workflowStatus");
+      expect((await queryTasks()).status).toBe(404);
+      await http()
+        .get(`/projects/${projectId}/tasks`)
+        .set("Authorization", "Bearer " + viewer)
+        .expect(404);
+    });
+    it("declares resolved workflow metadata only on fresh read DTOs with the shared board schema", () => {
+      const doc = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      );
+      const s: any = doc.components!.schemas!;
+      expect(
+        s.HumanTaskReadResponseDto.properties.workflowStatus.allOf[0].$ref,
+      ).toBe("#/components/schemas/BoardStatusResponseDto");
+      expect(s.HumanTaskReadResponseDto.required).toContain("workflowStatus");
+      expect(s.HumanTaskResponseDto.properties).not.toHaveProperty(
+        "workflowStatus",
+      );
+      expect(s.HumanTaskQueryResponseDto.properties.items.items.$ref).toBe(
+        "#/components/schemas/HumanTaskReadResponseDto",
+      );
+      expect(Object.keys(s.BoardStatusResponseDto.properties).sort()).toEqual([
+        "color",
+        "id",
+        "name",
+        "palette",
+        "position",
+      ]);
+    });
+    it("round-trips Unicode status create/rename at the database boundary and rejects oversized presentation sequences", async () => {
+      const initialName = "😀".repeat(61);
+      await editWorkflowStatus(board.statuses[0].id, {
+        name: initialName,
+      }).expect(200);
+      expect((await read().expect(200)).body.workflowStatus.name).toBe(
+        initialName,
+      );
+      const fullName = "🧪".repeat(120);
+      const created = await http()
+        .post(`/projects/${projectId}/task-board/statuses`)
+        .set("Authorization", "Bearer " + owner)
+        .set("If-Match", '"1"')
+        .send({ requestId: randomUUID(), name: fullName, color: "TEAL" })
+        .expect(201);
+      const createdStatus = created.body.after.statuses.at(-1);
+      expect(createdStatus.name).toBe(fullName);
+      for (const name of ["🧪".repeat(121), "❤️".repeat(61)])
+        await http()
+          .patch(
+            `/projects/${projectId}/task-board/statuses/${createdStatus.id}`,
+          )
+          .set("Authorization", "Bearer " + owner)
+          .set("If-Match", '"2"')
+          .send({ requestId: randomUUID(), name })
+          .expect(400);
+      expect((await boardEdit().expect(200)).body.revision).toBe(2);
+      expect(
+        (
+          await mutation("put", "/workflow-status", owner, {
+            statusId: createdStatus.id,
+          })
+        ).status,
+      ).toBe(200);
+      expect((await read().expect(200)).body.workflowStatus.name).toBe(
+        fullName,
+      );
+      const renamed = "🚀".repeat(120);
+      await http()
+        .patch(`/projects/${projectId}/task-board/statuses/${createdStatus.id}`)
+        .set("Authorization", "Bearer " + owner)
+        .set("If-Match", '"2"')
+        .send({ requestId: randomUUID(), name: renamed })
+        .expect(200);
+      expect((await read().expect(200)).body.workflowStatus.name).toBe(renamed);
+      expect(
+        (await queryTasks().expect(200)).body.items[0].workflowStatus.name,
+      ).toBe(renamed);
+    });
     it("links deliberately with owner assignment while preserving every legacy task scalar", async () => {
       const legacy = await db.task.create({
         data: {
@@ -1674,7 +1894,9 @@ if (databaseUrl) {
       expect(saved.status).toBe(200);
       expect(saved.headers["cache-control"]).toBe("no-store");
       expect(saved.body.action).toBe("CHECKLIST_REORDER");
-      expect(saved.body.before).toEqual(before);
+      const { workflowStatus, ...frozenBefore } = before;
+      expect(saved.body.before).toEqual(frozenBefore);
+      expect(saved.body.after).not.toHaveProperty("workflowStatus");
       expect(saved.body.after.checklist.map((i: any) => i.id)).toEqual([
         c,
         a,
@@ -1685,7 +1907,10 @@ if (databaseUrl) {
           ...before.checklist.find((i: any) => i.id === id),
           position,
         });
-      expect((await read()).body).toEqual(saved.body.after);
+      expect((await read()).body).toEqual({
+        ...saved.body.after,
+        workflowStatus,
+      });
       expect(await db.task.findUnique({ where: { id: taskId } })).toEqual(
         scalar,
       );

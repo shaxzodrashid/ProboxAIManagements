@@ -1,5 +1,6 @@
 import { Prisma, TaskHumanAudit } from "@prisma/client";
 import { storedTaskDeadline } from "./task-deadline-value";
+import { workflowStatusSnapshot } from "./task-workflow-status";
 export const humanTaskSelection = {
   id: true,
   workspaceId: true,
@@ -15,6 +16,10 @@ export const humanTaskSelection = {
       boardId: true,
       status: {
         select: {
+          id: true,
+          name: true,
+          color: true,
+          position: true,
           board: {
             select: {
               projectId: true,
@@ -67,6 +72,13 @@ export function humanTaskSnapshot(task: HumanTask) {
 }
 export const humanJson = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value));
+/** Fresh display metadata is deliberately excluded from frozen mutation/audit outcomes. */
+export function humanTaskReadSnapshot(task: HumanTask) {
+  return {
+    ...humanTaskSnapshot(task),
+    workflowStatus: workflowStatusSnapshot(task.boardEntry!.status),
+  };
+}
 export function humanOutcome(row: TaskHumanAudit) {
   return {
     taskId: row.taskId,

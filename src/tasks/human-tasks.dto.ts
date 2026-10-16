@@ -13,7 +13,11 @@ import {
   ValidateIf,
 } from "class-validator";
 import { Transform, Type } from "class-transformer";
-import { BoardMutationDto, BoardAuditQueryDto } from "./task-boards.dto";
+import {
+  BoardMutationDto,
+  BoardAuditQueryDto,
+  BoardStatusResponseDto,
+} from "./task-boards.dto";
 import { DeadlineInputDto, DeadlineValueDto } from "./task-deadlines.dto";
 import { TaskPriority } from "@prisma/client";
 
@@ -49,6 +53,15 @@ export class HumanTaskResponseDto {
   projectArchivedAt!: string | null;
   @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
   @ApiProperty({ type: String, format: "date-time" }) updatedAt!: string;
+}
+
+export class HumanTaskReadResponseDto extends HumanTaskResponseDto {
+  @ApiProperty({
+    type: BoardStatusResponseDto,
+    description:
+      "Current human workflow status using the board name/color/palette projection. Not runner status or management authority. Frozen mutation/audit snapshots retain their separate schema.",
+  })
+  workflowStatus!: BoardStatusResponseDto;
 }
 
 export class HumanChecklistItemDto {

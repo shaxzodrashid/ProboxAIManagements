@@ -24,7 +24,7 @@ import {
   ApiValidationErrors,
   ApiErrorResponseDto,
 } from "../openapi/api-docs";
-import { HumanTaskResponseDto } from "./human-tasks.dto";
+import { HumanTaskReadResponseDto } from "./human-tasks.dto";
 import { HumanTasksService } from "./human-tasks.service";
 import {
   HumanTaskQueryDto,
@@ -45,9 +45,9 @@ export class HumanTasksController {
   @ApiOperation({
     summary: "Read deliberately linked human tasks as a current project member",
     description:
-      "Membership is sufficient; no tasks.read grant or task assignment is needed. Public project access and execution read-all do not substitute. Archived projects remain readable by current members. Order: Urgent, High, Medium, Low, unset, then createdAt descending and id descending. Excludes execution criteria/status, sessions, transcripts, credentials and filesystem paths. No historical links are inferred. This compatibility list remains unpaginated.",
+      "Membership is sufficient; no tasks.read grant or task assignment is needed. Public project access and execution read-all do not substitute. Archived projects remain readable by current members. Current workflow label/color/palette is included without board management authority. Order: Urgent, High, Medium, Low, unset, then createdAt descending and id descending. Excludes execution criteria/status, sessions, transcripts, credentials and filesystem paths. No historical links are inferred. This compatibility list remains unpaginated.",
   })
-  @ApiOkResponse({ type: HumanTaskResponseDto, isArray: true })
+  @ApiOkResponse({ type: HumanTaskReadResponseDto, isArray: true })
   list(
     @CurrentUser() actor: AuthenticatedUser,
     @Param("projectId", new ParseUUIDPipe({ version: "4" })) projectId: string,
@@ -84,7 +84,7 @@ export class HumanTasksController {
   @ApiOperation({
     summary: "Read one human task within current project membership",
   })
-  @ApiOkResponse({ type: HumanTaskResponseDto })
+  @ApiOkResponse({ type: HumanTaskReadResponseDto })
   get(
     @CurrentUser() actor: AuthenticatedUser,
     @Param("projectId", new ParseUUIDPipe({ version: "4" })) projectId: string,

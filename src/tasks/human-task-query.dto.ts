@@ -15,7 +15,7 @@ import {
   Min,
   MinLength,
 } from "class-validator";
-import { HumanTaskResponseDto } from "./human-tasks.dto";
+import { HumanTaskReadResponseDto } from "./human-tasks.dto";
 export const QueryPriorities = [
   "URGENT",
   "HIGH",
@@ -128,8 +128,8 @@ export class HumanStatusCountDto {
   @ApiProperty({ minimum: 1 }) count!: number;
 }
 export class HumanTaskQueryResponseDto {
-  @ApiProperty({ type: HumanTaskResponseDto, isArray: true, maxItems: 100 })
-  items!: HumanTaskResponseDto[];
+  @ApiProperty({ type: HumanTaskReadResponseDto, isArray: true, maxItems: 100 })
+  items!: HumanTaskReadResponseDto[];
   @ApiProperty({
     minimum: 0,
     description:
@@ -143,7 +143,7 @@ export class HumanTaskQueryResponseDto {
     isArray: true,
     maxItems: 100,
     description:
-      "Referenced status IDs/counts in the same filtered scope. No empty-column discovery or status labels/colors; board configuration retains its own read authority.",
+      "Referenced status IDs/counts in the same filtered scope. Resolved status labels/colors are on items; no empty-column discovery. Full board configuration retains its own read authority.",
   })
   statusCounts!: HumanStatusCountDto[];
   @ApiProperty() hasMore!: boolean;

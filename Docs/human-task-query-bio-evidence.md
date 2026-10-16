@@ -1,5 +1,11 @@
 # Bounded human task query and API11 evidence — October 14
 
+The subsequent [workflow display increment](task-workflow-display-contracts.md)
+adds current status label/color/palette to fresh task items without board-read
+grants. Status-count summaries remain ID/count only; empty columns and the full
+board configuration retain their separate authority. The original milestone's
+exclusions below describe the earlier response.
+
 Subsequent approved [exact deadline sorting](exact-deadline-sort-contracts.md)
 adds `deadline` / `-deadline` with TIMED-first pinned-instant ordering, then DATE,
 unset last. References below to that comparator as pending describe the earlier

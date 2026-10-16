@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.0-dev.2",
+      "gitRef": "refs/tags/v0.3.0-dev.2",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.0-dev.1",
       "gitRef": "refs/tags/v0.3.0-dev.1",
       "channel": "dev",
@@ -49,6 +55,13 @@
     }
   ],
   "features": [
+    {
+      "id": "human-task-workflow-display",
+      "title": "Current workflow label and palette on member task reads",
+      "since": "0.3.0-dev.2",
+      "state": "supported",
+      "contract": "Docs/task-workflow-display-contracts.md"
+    },
     {
       "id": "project-task-session-filter",
       "title": "Member-scoped session index for explicit project-board tasks",

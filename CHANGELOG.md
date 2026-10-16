@@ -1,5 +1,20 @@
 # Backend changelog
 
+## 0.3.0-dev.2 — human task workflow display
+
+- Add current `workflowStatus` to member-only human task detail, compatibility list
+  and bounded query items, sharing the board's allowlisted identity, label, semantic
+  color, position and fixed palette. No additional board or management grant.
+- Keep frozen mutation/audit responses and legacy execution-task contracts unchanged;
+  no historical snapshot rewrite or runner-status inference.
+- Match status-name validation to the existing 120-Unicode-code-point database
+  boundary, preserving valid astral names and rejecting oversized presentation
+  sequences before writes. Unknown display metadata fails unavailable.
+
+This closes TASK02's resolved per-task workflow-display subset, with no migration,
+new colors, publication, deployment or profile policy. See the
+[workflow display contract](Docs/task-workflow-display-contracts.md).
+
 ## 0.3.0-dev.1 — explicit project-task session query
 
 - Add an optional `projectId` filter to the existing assigned-session index,

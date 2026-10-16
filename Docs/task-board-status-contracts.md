@@ -1,5 +1,10 @@
 # Project task-board/status lifecycle — October 13 decisions
 
+The subsequent [workflow display increment](task-workflow-display-contracts.md)
+adds the same current status label/color/palette to member-only human task reads,
+with frozen mutation/audit snapshots unchanged. It also aligns Unicode name
+validation with the existing database limit.
+
 Later approved retention/member-read rules supersede the open decisions below;
 see [project archive and human reads](project-archive-human-task-contracts.md).
 Archived projects reject new status mutations while prior request readback remains.
