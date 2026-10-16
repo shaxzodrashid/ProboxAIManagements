@@ -21,6 +21,10 @@ import {
 import { DeadlineInputDto, DeadlineValueDto } from "./task-deadlines.dto";
 import { TaskPriority } from "@prisma/client";
 import { PublicIdentityResponseDto } from "../accounts/profile-picker.dto";
+import {
+  TASK_TITLE_MAX_LENGTH,
+  TASK_DESCRIPTION_MAX_LENGTH,
+} from "./task-text-limits";
 
 export class HumanTaskResponseDto {
   @ApiProperty({
@@ -105,17 +109,17 @@ export class HumanTaskDetailsDto extends BoardMutationDto {
   @ValidateIf((_o, v) => v !== undefined && v !== null)
   @IsEnum(TaskPriority)
   priority?: TaskPriority | null;
-  @ApiPropertyOptional({ maxLength: 200 })
+  @ApiPropertyOptional({ maxLength: TASK_TITLE_MAX_LENGTH })
   @ValidateIf((_o, v) => v !== undefined)
   @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
   @IsString()
   @MinLength(1)
-  @MaxLength(200)
+  @MaxLength(TASK_TITLE_MAX_LENGTH)
   title?: string;
-  @ApiPropertyOptional({ maxLength: 8000 })
+  @ApiPropertyOptional({ maxLength: TASK_DESCRIPTION_MAX_LENGTH })
   @ValidateIf((_o, v) => v !== undefined)
   @IsString()
-  @MaxLength(8000)
+  @MaxLength(TASK_DESCRIPTION_MAX_LENGTH)
   description?: string;
 }
 export class HumanTaskAssigneesDto extends BoardMutationDto {

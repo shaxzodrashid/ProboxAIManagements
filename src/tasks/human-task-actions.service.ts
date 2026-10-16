@@ -1,6 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, TaskPriority } from "@prisma/client";
 import { createHash } from "node:crypto";
+import { maxLength } from "class-validator";
+import {
+  TASK_TITLE_MAX_LENGTH,
+  TASK_DESCRIPTION_MAX_LENGTH,
+} from "./task-text-limits";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { authenticationDependency } from "../auth/authentication-failures";
 import { Permissions } from "../authorization/permission.catalog";
@@ -397,13 +402,13 @@ export class HumanTaskActionsService {
             input.title !== undefined &&
             (typeof input.title !== "string" ||
               !input.title.trim() ||
-              input.title.length > 200)
+              !maxLength(input.title, TASK_TITLE_MAX_LENGTH))
           )
             throw fail(400, "Invalid task title");
           if (
             input.description !== undefined &&
             (typeof input.description !== "string" ||
-              input.description.length > 8000)
+              !maxLength(input.description, TASK_DESCRIPTION_MAX_LENGTH))
           )
             throw fail(400, "Invalid task description");
           if (input.priority !== undefined) {

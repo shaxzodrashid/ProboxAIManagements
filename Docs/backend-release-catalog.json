@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.0-dev.6",
+      "gitRef": "refs/tags/v0.3.0-dev.6",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.0-dev.5",
       "gitRef": "refs/tags/v0.3.0-dev.5",
       "channel": "dev",
@@ -73,6 +79,13 @@
     }
   ],
   "features": [
+    {
+      "id": "human-task-text-limit-compatibility",
+      "title": "Human task edits preserve existing creation text limits",
+      "since": "0.3.0-dev.6",
+      "state": "supported",
+      "contract": "Docs/task-text-limit-contracts.md"
+    },
     {
       "id": "human-task-workflow-display",
       "title": "Current workflow label and palette on member task reads",

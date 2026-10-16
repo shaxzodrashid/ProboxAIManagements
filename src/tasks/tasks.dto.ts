@@ -7,6 +7,11 @@ import {
 } from "class-validator";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { SessionStatus, TaskStatus } from "@prisma/client";
+import {
+  TASK_TITLE_MAX_LENGTH,
+  TASK_DESCRIPTION_MAX_LENGTH,
+  TASK_CRITERIA_MAX_LENGTH,
+} from "./task-text-limits";
 
 export class CreateTaskDto {
   @ApiPropertyOptional({
@@ -17,27 +22,30 @@ export class CreateTaskDto {
   @ValidateIf((_o, value) => value !== undefined)
   @IsUUID("4")
   requestId?: string;
-  @ApiProperty({ example: "Add project activity timeline", maxLength: 240 })
+  @ApiProperty({
+    example: "Add project activity timeline",
+    maxLength: TASK_TITLE_MAX_LENGTH,
+  })
   @IsString()
-  @MaxLength(240)
+  @MaxLength(TASK_TITLE_MAX_LENGTH)
   title!: string;
 
   @ApiProperty({
     example:
       "Show project file changes and session milestones in the workspace UI.",
-    maxLength: 16000,
+    maxLength: TASK_DESCRIPTION_MAX_LENGTH,
   })
   @IsString()
-  @MaxLength(16000)
+  @MaxLength(TASK_DESCRIPTION_MAX_LENGTH)
   description!: string;
 
   @ApiPropertyOptional({
     example: "The timeline renders for members and has focused test coverage.",
-    maxLength: 8000,
+    maxLength: TASK_CRITERIA_MAX_LENGTH,
   })
   @IsOptional()
   @IsString()
-  @MaxLength(8000)
+  @MaxLength(TASK_CRITERIA_MAX_LENGTH)
   criteria?: string;
 }
 

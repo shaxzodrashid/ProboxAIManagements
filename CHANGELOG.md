@@ -1,5 +1,17 @@
 # Backend changelog
 
+## 0.3.0-dev.6 — task text limit compatibility
+
+- Preserve existing creation limits on human detail edits: title240 and
+  description16000, using shared limits and the same class-validator length
+  semantics in DTOs and service guards. Valid existing Unicode text can round-trip.
+- Keep checklist title200, execution-only criteria8000, title trimming and
+  nonblank checks, ownership, revisions and frozen replay contracts unchanged.
+
+This fixes TASK04's bounded text-limit compatibility gap. No migration, new
+permission, provider or profile policy is introduced. See the
+[text limit contract](Docs/task-text-limit-contracts.md).
+
 ## 0.3.0-dev.5 — recoverable task creation
 
 - Add optional requestId to existing POST/tasks: same owner/workspace/key and

@@ -10,6 +10,8 @@ import { HumanTaskActionsController } from "../src/tasks/human-task-actions.cont
 import { HumanTaskActionsService } from "../src/tasks/human-task-actions.service";
 import { TaskBoardsController } from "../src/tasks/task-boards.controller";
 import { TaskBoardsService } from "../src/tasks/task-boards.service";
+import { TasksController } from "../src/tasks/tasks.controller";
+import { TasksService } from "../src/tasks/tasks.service";
 import { TaskDeadlinesService } from "../src/tasks/task-deadlines.service";
 import { parseTaskDeadline } from "../src/tasks/task-deadline-value";
 import { ProjectArchiveService } from "../src/projects/project-archive.service";
@@ -217,11 +219,13 @@ if (databaseUrl) {
           HumanTasksController,
           HumanTaskActionsController,
           TaskBoardsController,
+          TasksController,
         ],
         providers: [
           HumanTasksService,
           HumanTaskActionsService,
           TaskBoardsService,
+          TasksService,
           { provide: PrismaService, useValue: db },
           {
             provide: JwtService,
@@ -321,6 +325,150 @@ if (databaseUrl) {
         await db.workspace.deleteMany({ where: { id: { in: [w, foreignW] } } });
       }
       await db.$disconnect();
+    });
+    it.each([
+      ["ASCII", "a".repeat(240), "d".repeat(16000)],
+      ["astral", "🚀".repeat(240), "🚀".repeat(16000)],
+      ["variation selectors", "✈️".repeat(240), "✈️".repeat(16000)],
+    ])(
+      "round-trips legacy task text limits through human edit/read/replay: %s",
+      async (_label, title, description) => {
+        // Keep the independent 100 KiB JSON body cap: this description is 96 KiB.
+        const criteria =
+          _label === "variation selectors" ? "c" : "c".repeat(8000);
+        const created = await http()
+          .post("/tasks")
+          .set("Authorization", "Bearer " + owner)
+          .send({ title, description, criteria });
+        expect(created.status).toBe(201);
+        taskId = created.body.id;
+        expect(
+          (
+            await mutation(
+              "post",
+              "/link",
+              owner,
+              { statusId: board.statuses[0].id },
+              0,
+            )
+          ).status,
+        ).toBe(200);
+        const rev = await revision();
+        const data = { requestId: randomUUID(), title, description };
+        const saved = await mutation("patch", "/details", owner, data, rev);
+        expect(saved.status).toBe(200);
+        expect(saved.body.after).toMatchObject({
+          title,
+          description,
+          revision: rev + 1,
+        });
+        expect((await read()).body).toMatchObject({
+          title,
+          description,
+          revision: rev + 1,
+        });
+        expect(
+          (await mutation("patch", "/details", owner, data, rev)).body,
+        ).toEqual(saved.body);
+        const stored = await db.task.findUniqueOrThrow({
+          where: { id: taskId },
+        });
+        expect(stored).toMatchObject({
+          title,
+          description,
+          criteria,
+          status: "QUEUED",
+          managerId: owner,
+        });
+        expect(await revision()).toBe(rev + 1);
+        expect(
+          await db.taskHumanAudit.count({
+            where: { taskId, requestId: data.requestId },
+          }),
+        ).toBe(1);
+        expect(
+          (
+            await mutation("patch", "/details", owner, {
+              criteria: "Unwritable",
+            })
+          ).status,
+        ).toBe(400);
+      },
+    );
+    it.each([
+      ["title", "a".repeat(241)],
+      ["description", "d".repeat(16001)],
+      ["title", "🚀".repeat(241)],
+      ["description", "🚀".repeat(16001)],
+    ])(
+      "rejects oversized %s before changing task, revision or audit",
+      async (field, value) => {
+        const before = await db.task.findUniqueOrThrow({
+          where: { id: taskId },
+        });
+        const rev = await revision();
+        const count = await db.taskHumanAudit.count({ where: { taskId } });
+        expect(
+          (await mutation("patch", "/details", owner, { [field]: value }))
+            .status,
+        ).toBe(400);
+        await expect(
+          app
+            .get(HumanTaskActionsService)
+            .mutate(actor(), projectId, taskId, rev, "DETAILS", {
+              requestId: randomUUID(),
+              [field]: value,
+            }),
+        ).rejects.toMatchObject({ status: 400 });
+        expect(
+          await db.task.findUniqueOrThrow({ where: { id: taskId } }),
+        ).toEqual(before);
+        expect(await revision()).toBe(rev);
+        expect(await db.taskHumanAudit.count({ where: { taskId } })).toBe(
+          count,
+        );
+      },
+    );
+    it("uses the creation validator's Unicode semantics for direct human edits", async () => {
+      const title = "✈️".repeat(240),
+        description = "🚀".repeat(16000);
+      const saved = await app
+        .get(HumanTaskActionsService)
+        .mutate(actor(), projectId, taskId, await revision(), "DETAILS", {
+          requestId: randomUUID(),
+          title,
+          description,
+        });
+      expect(saved.after).toMatchObject({ title, description });
+      expect(
+        (
+          await mutation("post", "/checklist", owner, {
+            itemId: randomUUID(),
+            assigneeId: owner,
+            title: "a".repeat(201),
+          })
+        ).status,
+      ).toBe(400);
+    });
+    it("documents shared task limits while keeping checklist and execution criteria separate", () => {
+      const schemas: any = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      ).components!.schemas!;
+      for (const name of ["CreateTaskDto", "HumanTaskDetailsDto"]) {
+        expect(schemas[name].properties.title.maxLength).toBe(240);
+        expect(schemas[name].properties.description.maxLength).toBe(16000);
+      }
+      expect(schemas.CreateTaskDto.properties.criteria.maxLength).toBe(8000);
+      expect(schemas.HumanTaskDetailsDto.properties).not.toHaveProperty(
+        "criteria",
+      );
+      expect(schemas.HumanChecklistCreateDto.properties.title.maxLength).toBe(
+        200,
+      );
+      expect(schemas.HumanChecklistUpdateDto.properties.title.maxLength).toBe(
+        200,
+      );
     });
     it("returns exact public assignee identities for detail, list and query with shared checklist lookup", async () => {
       await db.user.update({
