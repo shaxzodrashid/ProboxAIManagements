@@ -1,5 +1,19 @@
 # Backend changelog
 
+## 0.3.0-dev.5 — recoverable task creation
+
+- Add optional requestId to existing POST/tasks: same owner/workspace/key and
+  canonical input replay the original201 task; changed reuse conflicts409.
+- Atomically store a narrow frozen receipt with the task. Create-only owners
+  can reconcile through GET/tasks/creations/:requestId without task-read grants.
+- Preserve legacy no-key behavior, field limits and creator/execution-manager
+  defaults. Recheck current creation authority under the workspace lock.
+
+Additive migration20261016000000 adds opt-in receipts without backfill or grants;
+fresh and legacy-data isolated migration checks passed. This closes TASK04's
+bounded uncertain-create recovery subset, not new project-task creation or the
+full Task Manager. See [recovery contract](Docs/task-creation-recovery-contracts.md).
+
 ## 0.3.0-dev.4 — task identity in project session queries
 
 - Add current task identity/title and explicit board project ID only to the

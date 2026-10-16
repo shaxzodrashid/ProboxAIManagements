@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.3.0-dev.4**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.3.0-dev.5**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -36,11 +36,13 @@ Available since refers to the first tracked Git release containing this bounded 
 | Authorized saved project/directory execution context               | 0.2.0-dev.1     | supported  | [Contract](../Docs/session-directory-context-contracts.md)     |
 | Revision-safe project workflow statuses                            | 0.2.0-dev.1     | supported  | [Contract](../Docs/task-board-status-contracts.md)             |
 | Independent checklist deadlines and whole-list ordering            | 0.2.0-dev.1     | supported  | [Contract](../Docs/checklist-order-contracts.md)               |
+| Opt-in task creation retry and readback                            | 0.3.0-dev.5     | supported  | [Contract](../Docs/task-creation-recovery-contracts.md)        |
 | Priority, deadlines and bounded human task queries                 | 0.2.0-dev.1     | supported  | [Contract](../Docs/exact-deadline-sort-contracts.md)           |
 | Human task edits, assignees, checklists, comments and moves        | 0.2.0-dev.1     | foundation | [Contract](../Docs/human-task-collaboration-contracts.md)      |
 
 ## Release references
 
+- **0.3.0-dev.5**: `refs/tags/v0.3.0-dev.5`, dev, not-deployed.
 - **0.3.0-dev.4**: `refs/tags/v0.3.0-dev.4`, dev, not-deployed.
 - **0.3.0-dev.3**: `refs/tags/v0.3.0-dev.3`, dev, not-deployed.
 - **0.3.0-dev.2**: `refs/tags/v0.3.0-dev.2`, dev, not-deployed.

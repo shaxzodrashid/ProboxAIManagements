@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.0-dev.5",
+      "gitRef": "refs/tags/v0.3.0-dev.5",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.0-dev.4",
       "gitRef": "refs/tags/v0.3.0-dev.4",
       "channel": "dev",
@@ -262,6 +268,13 @@
       "since": "0.3.0-dev.4",
       "state": "supported",
       "contract": "Docs/project-session-task-identity-contracts.md"
+    },
+    {
+      "id": "task-creation-recovery",
+      "title": "Opt-in task creation retry and readback",
+      "since": "0.3.0-dev.5",
+      "state": "supported",
+      "contract": "Docs/task-creation-recovery-contracts.md"
     }
   ]
 }

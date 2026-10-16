@@ -9,6 +9,7 @@ import { authenticationDependency } from "../auth/authentication-failures";
 import { Permissions } from "../authorization/permission.catalog";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateTaskDto } from "./tasks.dto";
+import { createTask, taskCreation } from "./task-creation";
 @Injectable()
 export class TasksService {
   constructor(private readonly prisma: PrismaService) {}
@@ -78,16 +79,20 @@ export class TasksService {
     );
   }
   create(creatorId: string, workspaceId: string, dto: CreateTaskDto) {
-    return this.prisma.task.create({
-      data: {
-        workspaceId,
-        creatorId,
-        managerId: creatorId,
-        title: dto.title,
-        description: dto.description,
-        criteria: dto.criteria,
-      },
-    });
+    return createTask(this.prisma, creatorId, workspaceId, dto);
+  }
+  creation(
+    actor: AuthenticatedUser,
+    requestId: string,
+    query: Record<string, unknown>,
+  ) {
+    return taskCreation(
+      this.prisma,
+      actor.id,
+      actor.workspaceId,
+      requestId,
+      query,
+    );
   }
   list(workspaceId: string, actorId: string, admin: boolean) {
     return this.prisma.task.findMany({

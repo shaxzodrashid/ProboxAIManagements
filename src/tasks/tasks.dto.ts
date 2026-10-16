@@ -1,8 +1,22 @@
-import { IsOptional, IsString, MaxLength } from "class-validator";
+import {
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  ValidateIf,
+} from "class-validator";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { SessionStatus, TaskStatus } from "@prisma/client";
 
 export class CreateTaskDto {
+  @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "Optional client UUIDv4 reused after an uncertain create. Same caller/workspace/key and canonical input replay the frozen original task; changed reuse conflicts. Omit for legacy non-idempotent creation; null is invalid.",
+  })
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsUUID("4")
+  requestId?: string;
   @ApiProperty({ example: "Add project activity timeline", maxLength: 240 })
   @IsString()
   @MaxLength(240)

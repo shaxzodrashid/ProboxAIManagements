@@ -169,6 +169,7 @@ enum TemplateObjectCleanupStatus {
 }
 
 model Workspace {
+  taskCreations              TaskCreationReceipt[]
   projectCreationSubmissions ProjectCreationSubmission[]
   authorizationRevision      Int                                 @default(0)
   id                         String                              @id @default(uuid())
@@ -242,6 +243,7 @@ model TelegramSession {
 }
 
 model User {
+  taskCreations             TaskCreationReceipt[]
   chatGroupsCreated         ChatGroup[]                       @relation("chatGroupCreator")
   chatGroupsOwned           ChatGroup[]                       @relation("chatGroupOwner")
   chatGroupCreations        ChatGroupCreation[]
@@ -423,29 +425,45 @@ model SessionToken {
 }
 
 model Task {
-  humanState  TaskHumanState?
-  assignees   TaskAssignee[]
-  checklist   TaskChecklistItem[]
-  comments    TaskComment[]
-  deadline    TaskDeadline?
-  boardEntry  TaskBoardEntry?
-  id          String              @id @default(uuid())
-  workspaceId String
-  workspace   Workspace           @relation(fields: [workspaceId], references: [id])
-  title       String
-  description String
-  criteria    String?
-  status      TaskStatus          @default(QUEUED)
-  creatorId   String
-  creator     User                @relation("taskCreator", fields: [creatorId], references: [id])
-  managerId   String
-  manager     User                @relation("taskManager", fields: [managerId], references: [id])
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  sessions    ProboxAiSession[]
+  creationReceipt TaskCreationReceipt?
+  humanState      TaskHumanState?
+  assignees       TaskAssignee[]
+  checklist       TaskChecklistItem[]
+  comments        TaskComment[]
+  deadline        TaskDeadline?
+  boardEntry      TaskBoardEntry?
+  id              String               @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id])
+  title           String
+  description     String
+  criteria        String?
+  status          TaskStatus           @default(QUEUED)
+  creatorId       String
+  creator         User                 @relation("taskCreator", fields: [creatorId], references: [id])
+  managerId       String
+  manager         User                 @relation("taskManager", fields: [managerId], references: [id])
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  sessions        ProboxAiSession[]
 
   @@index([workspaceId, status])
   @@index([managerId, status])
+}
+
+model TaskCreationReceipt {
+  workspaceId String
+  creatorId   String
+  requestId   String
+  taskId      String    @unique
+  inputHash   String    @db.VarChar(64)
+  outcome     Json
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator     User      @relation(fields: [creatorId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, creatorId, requestId])
 }
 
 model TaskHumanState {
