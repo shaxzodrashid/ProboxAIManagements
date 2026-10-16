@@ -4,6 +4,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  HttpException,
+  ServiceUnavailableException,
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
@@ -24,17 +26,18 @@ import { hostname } from "node:os";
 import { Observable } from "rxjs";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { manifestInclude } from "../configuration-templates/configuration-templates.service";
+import { structuredCommandArguments } from "../configuration-templates/command-arguments";
 import { TemplateStorageService } from "../configuration-templates/template-storage.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { lockWorkspace } from "../prisma/workspace-lock";
+import { ActiveProjectMutation } from "./project-lifecycle-lock";
 import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
 import {
   hasPermission,
   Permissions,
 } from "../authorization/permission.catalog";
-import {
-  InitializationEventMessage,
-  ProjectInitializationEventsService,
-} from "./project-initialization-events.service";
+import { ProjectInitializationEventsService } from "./project-initialization-events.service";
+import { InitializationEventReadback } from "./initialization-event-readback";
 
 type InitializationWithManifest = Prisma.ProjectInitializationGetPayload<{
   include: {
@@ -42,6 +45,13 @@ type InitializationWithManifest = Prisma.ProjectInitializationGetPayload<{
     templateVersion: { include: typeof manifestInclude };
   };
 }>;
+
+const recoveryAttemptSelect = {
+  id: true,
+  templateVersionId: true,
+  attempt: true,
+  status: true,
+} as const;
 
 type CommandRecord =
   InitializationWithManifest["templateVersion"]["commandStages"][number]["commands"][number];
@@ -116,6 +126,218 @@ export class ProjectInitializationService
     });
   }
 
+  private async enqueueRecoveryProject(
+    tx: Prisma.TransactionClient,
+    actor: AuthenticatedUser,
+    projectId: string,
+  ) {
+    const current = await tx.user.findFirst({
+      where: { id: actor.id, workspaceId: actor.workspaceId, status: "OPEN" },
+      select: {
+        roleAssignments: {
+          select: {
+            role: {
+              select: { permissions: { select: { permissionKey: true } } },
+            },
+          },
+        },
+      },
+    });
+    const grants = new Set(
+      current?.roleAssignments.flatMap((a) =>
+        a.role.permissions.map((p) => p.permissionKey),
+      ),
+    );
+    if (!current || !grants.has(Permissions.PROJECT_INITIALIZATIONS_MANAGE))
+      throw new ForbiddenException("Initialization management is unavailable");
+    const project = await tx.project.findFirst({
+      where: { id: projectId, workspaceId: actor.workspaceId },
+      include: {
+        members: { select: { userId: true } },
+        department: { select: { workspaceId: true, status: true } },
+      },
+    });
+    if (!project || project.department.workspaceId !== actor.workspaceId)
+      throw new NotFoundException("Project not found");
+    if (project.archivedAt)
+      throw new ConflictException(
+        "Archived projects cannot accept initialization",
+      );
+    const member = project.members.some((m) => m.userId === actor.id);
+    // Preserve both existing read scope and member/manage-all write scope.
+    if (
+      (!grants.has(Permissions.PROJECTS_READ_ALL) &&
+        !project.readAccessEnabled &&
+        !member) ||
+      (!grants.has(Permissions.PROJECTS_MANAGE_ALL) && !member)
+    )
+      throw new ForbiddenException(
+        "Only project members and authorized administrators may manage initialization",
+      );
+    return project;
+  }
+
+  private async recoveryTemplateAvailable(
+    tx: Prisma.TransactionClient,
+    project: {
+      workspaceId: string;
+      departmentId: string;
+      appliedTemplateVersionId: string | null;
+      department: { status: string };
+    },
+  ) {
+    if (
+      !project.appliedTemplateVersionId ||
+      project.department.status !== "ACTIVE"
+    )
+      return false;
+    return !!(await tx.configurationTemplateVersion.findFirst({
+      where: {
+        id: project.appliedTemplateVersionId,
+        status: "PUBLISHED",
+        template: {
+          workspaceId: project.workspaceId,
+          departmentId: project.departmentId,
+        },
+      },
+      select: { id: true },
+    }));
+  }
+
+  async enqueueRecoveryState(actor: AuthenticatedUser, projectId: string) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const project = await this.enqueueRecoveryProject(tx, actor, projectId);
+        const latest = await tx.projectInitialization.findFirst({
+          where: { projectId },
+          orderBy: { attempt: "desc" },
+          select: recoveryAttemptSelect,
+        });
+        const blockedReason = latest
+          ? "ATTEMPT_EXISTS"
+          : !project.appliedTemplateVersionId
+            ? "NO_PINNED_TEMPLATE"
+            : !["FAILED", "INITIALIZING"].includes(project.status)
+              ? "PROJECT_NOT_RECOVERABLE"
+              : !(await this.recoveryTemplateAvailable(tx, project))
+                ? "PINNED_TEMPLATE_UNAVAILABLE"
+                : null;
+        return {
+          projectId,
+          projectStatus: project.status,
+          pinnedTemplateVersionId: project.appliedTemplateVersionId,
+          state: latest ? "ATTEMPT_EXISTS" : "NO_ATTEMPT",
+          canRegisterInitialSetup: blockedReason === null,
+          blockedReason,
+          latestAttempt: latest,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  /** Idempotent resource operation: ensure first registration, never retry executable work. */
+  async recoverEnqueue(
+    actor: AuthenticatedUser,
+    projectId: string,
+    templateVersionId: string,
+  ) {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await lockWorkspace(tx, actor.workspaceId);
+        await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} AND "workspaceId" = ${actor.workspaceId} FOR UPDATE`;
+        const project = await this.enqueueRecoveryProject(tx, actor, projectId);
+        if (
+          !project.appliedTemplateVersionId ||
+          project.appliedTemplateVersionId !== templateVersionId
+        )
+          throw new ConflictException({
+            code: "PROJECT_TEMPLATE_CHANGED",
+            message: "Reread the project's pinned template before recovery",
+          });
+        if (project.status === "DELETING")
+          throw new ConflictException({
+            code: "PROJECT_NOT_RECOVERABLE",
+            message: "Project deletion is in progress",
+          });
+        const first = await tx.projectInitialization.findFirst({
+          where: { projectId },
+          orderBy: { attempt: "asc" },
+          select: recoveryAttemptSelect,
+        });
+        if (first) {
+          if (
+            first.attempt !== 1 ||
+            first.templateVersionId !== templateVersionId
+          )
+            throw new ConflictException({
+              code: "INITIALIZATION_HISTORY_CONFLICT",
+              message:
+                "Initialization history does not match first registration; reconcile existing attempts",
+            });
+          return {
+            registered: true,
+            created: false,
+            projectId,
+            projectStatus: project.status,
+            pinnedTemplateVersionId: templateVersionId,
+            initialization: first,
+          };
+        }
+        if (!["FAILED", "INITIALIZING"].includes(project.status))
+          throw new ConflictException({
+            code: "PROJECT_NOT_RECOVERABLE",
+            message:
+              "Only failed or initializing projects with no attempts may register initial setup",
+          });
+        if (!(await this.recoveryTemplateAvailable(tx, project)))
+          throw new ConflictException({
+            code: "PINNED_TEMPLATE_UNAVAILABLE",
+            message:
+              "The original published template or active department is unavailable",
+          });
+        const initialization = await tx.projectInitialization.create({
+          data: { projectId, templateVersionId, attempt: 1, lastSequence: 1 },
+          select: recoveryAttemptSelect,
+        });
+        await tx.projectInitializationEvent.create({
+          data: {
+            initializationId: initialization.id,
+            sequence: 1,
+            type: "initialization.enqueue-recovered",
+            payload: {
+              actorId: actor.id,
+              projectId,
+              templateVersionId,
+              registrationOnly: true,
+            },
+          },
+        });
+        await tx.project.update({
+          where: { id: projectId },
+          data: { status: "INITIALIZING" },
+        });
+        return {
+          registered: true,
+          created: true,
+          projectId,
+          projectStatus: "INITIALIZING",
+          pinnedTemplateVersionId: templateVersionId,
+          initialization,
+        };
+      });
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new ServiceUnavailableException({
+        code: "PROJECT_ENQUEUE_OUTCOME_UNKNOWN",
+        message:
+          "Registration could not be confirmed; read recovery state and retry this same project/template pair",
+        projectId,
+        templateVersionId,
+      });
+    }
+  }
+
   async list(actor: AuthenticatedUser, projectId: string) {
     await this.assertReadAccess(actor, projectId);
     return this.prisma.projectInitialization.findMany({
@@ -145,12 +367,15 @@ export class ProjectInitializationService
     projectId: string,
     initializationId: string,
     after = 0,
+    limit = 100,
   ) {
-    await this.get(actor, projectId, initializationId);
-    return this.prisma.projectInitializationEvent.findMany({
-      where: { initializationId, sequence: { gt: after } },
-      orderBy: { sequence: "asc" },
-    });
+    return new InitializationEventReadback(this.prisma).read(
+      actor,
+      projectId,
+      initializationId,
+      after,
+      limit,
+    );
   }
 
   async stream(
@@ -159,16 +384,16 @@ export class ProjectInitializationService
     initializationId: string,
     after = 0,
   ): Promise<Observable<MessageEvent>> {
-    const events = await this.events(actor, projectId, initializationId, after);
-    const replay: InitializationEventMessage[] = events.map((event) => ({
-      id: event.sequence,
+    await this.events(actor, projectId, initializationId, after, 1);
+    return new InitializationEventReadback(this.prisma).stream(
+      actor,
+      projectId,
       initializationId,
-      type: event.type,
-      data: event.payload as Record<string, unknown>,
-    }));
-    return this.liveEvents.stream(initializationId, replay, after);
+      after,
+    );
   }
 
+  @ActiveProjectMutation()
   async cancel(
     actor: AuthenticatedUser,
     projectId: string,
@@ -215,6 +440,7 @@ export class ProjectInitializationService
     return { cancelled: true };
   }
 
+  @ActiveProjectMutation()
   async retry(actor: AuthenticatedUser, projectId: string) {
     await this.assertWriteAccess(actor, projectId);
     const project = await this.prisma.project.findUnique({
@@ -495,7 +721,7 @@ export class ProjectInitializationService
     const args =
       command.type === TemplateCommandType.SHELL
         ? ["--noprofile", "--norc", "-euo", "pipefail", "-c", command.script!]
-        : jsonStringArray(command.arguments);
+        : structuredCommandArguments(command.arguments, true);
     await this.step(
       initializationId,
       `command:${command.id}`,
@@ -763,12 +989,6 @@ class CommandExecutionError extends Error {
 
 function isCommandResult(value: unknown): value is CommandResult {
   return Boolean(value && typeof value === "object" && "exitCode" in value);
-}
-
-function jsonStringArray(value: Prisma.JsonValue | null): string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string"))
-    throw new Error("Structured command arguments are invalid");
-  return value;
 }
 
 export async function runLimited<T>(

@@ -17,11 +17,21 @@ export const Permissions = {
   PROJECT_FILES_WRITE: "projects.files.write",
   PROJECT_FILES_DELETE: "projects.files.delete",
   PROJECTS_DELETE: "projects.delete",
+  PROJECTS_ARCHIVE: "projects.archive",
   PROJECT_INITIALIZATIONS_READ: "projects.initializations.read",
   PROJECT_INITIALIZATIONS_MANAGE: "projects.initializations.manage",
   TASKS_READ: "tasks.read",
   TASKS_READ_ALL: "tasks.read-all",
   TASKS_CREATE: "tasks.create",
+  TASK_BOARDS_READ: "tasks.boards.read",
+  TASK_STATUSES_MANAGE: "tasks.statuses.manage",
+  TASK_DEADLINES_MANAGE: "tasks.deadlines.manage",
+  TASK_DETAILS_MANAGE: "tasks.details.manage",
+  TASK_ASSIGNEES_MANAGE: "tasks.assignees.manage",
+  TASK_CHECKLIST_MANAGE: "tasks.checklists.manage",
+  TASK_CHECKLIST_COMPLETE: "tasks.checklists.complete",
+  TASK_COMMENTS_CREATE: "tasks.comments.create",
+  TASK_WORKFLOW_MOVE: "tasks.workflow.move",
   SESSIONS_READ: "sessions.read",
   SESSIONS_CREATE: "sessions.create",
   SESSIONS_MANAGE: "sessions.manage",
@@ -36,6 +46,48 @@ export const PermissionDefinitions: ReadonlyArray<{
   description: string;
   category: string;
 }> = [
+  permission(
+    Permissions.TASK_DETAILS_MANAGE,
+    "Edit owned human task details",
+    "Edit title, description and priority only for owned project tasks.",
+    "Tasks",
+  ),
+  permission(
+    Permissions.TASK_ASSIGNEES_MANAGE,
+    "Manage owned task assignments",
+    "Replace employee assignees only for owned project tasks.",
+    "Tasks",
+  ),
+  permission(
+    Permissions.TASK_CHECKLIST_MANAGE,
+    "Manage owned task checklists",
+    "Create, edit and remove checklist definitions only for owned project tasks.",
+    "Tasks",
+  ),
+  permission(
+    Permissions.TASK_CHECKLIST_COMPLETE,
+    "Complete assigned checklist items",
+    "Check or uncheck only the caller's assigned checklist items.",
+    "Tasks",
+  ),
+  permission(
+    Permissions.TASK_COMMENTS_CREATE,
+    "Comment on assigned tasks",
+    "Append plain comments only on assigned project tasks.",
+    "Tasks",
+  ),
+  permission(
+    Permissions.TASK_WORKFLOW_MOVE,
+    "Move assigned human tasks",
+    "Change workflow column only for assigned tasks; never runner status.",
+    "Tasks",
+  ),
+  permission(
+    Permissions.PROJECTS_ARCHIVE,
+    "Archive projects",
+    "Archive owned projects without deleting records or files.",
+    "Projects",
+  ),
   permission(
     Permissions.AUTHORIZATION_READ,
     "View authorization",
@@ -181,10 +233,28 @@ export const PermissionDefinitions: ReadonlyArray<{
     "Sessions",
   ),
   permission(
+    Permissions.TASK_BOARDS_READ,
+    "View task boards",
+    "Read workflow metadata for currently readable projects; does not grant task or session reads.",
+    "Tasks",
+  ),
+  permission(
+    Permissions.TASK_STATUSES_MANAGE,
+    "Manage task workflow statuses",
+    "Read edit snapshots and manage project workflow columns under project membership or manage-all scope; does not grant task edits or project editing.",
+    "Tasks",
+  ),
+  permission(
     Permissions.SESSIONS_CREATE,
     "Create managed sessions",
     "Start managed coding sessions for assigned tasks.",
     "Sessions",
+  ),
+  permission(
+    Permissions.TASK_DEADLINES_MANAGE,
+    "Manage task deadlines",
+    "Edit deadlines for owned linked tasks within current project membership, or currently managed unlinked tasks; read-all does not grant edits.",
+    "Tasks",
   ),
   permission(
     Permissions.SESSIONS_MANAGE,
@@ -220,12 +290,33 @@ const memberPermissions: PermissionKey[] = [
   Permissions.SESSIONS_READ,
 ];
 
+// New capabilities require explicit grants; extending the catalogue must not
+// silently expand existing built-in role defaults during bootstrap.
+export const TaskManagerPermissionKeys: readonly PermissionKey[] = [
+  Permissions.TASK_BOARDS_READ,
+  Permissions.TASK_STATUSES_MANAGE,
+  Permissions.TASK_DEADLINES_MANAGE,
+  Permissions.TASK_DETAILS_MANAGE,
+  Permissions.TASK_ASSIGNEES_MANAGE,
+  Permissions.TASK_CHECKLIST_MANAGE,
+  Permissions.TASK_CHECKLIST_COMPLETE,
+  Permissions.TASK_COMMENTS_CREATE,
+  Permissions.TASK_WORKFLOW_MOVE,
+];
+export const ExplicitGrantPermissionKeys: readonly PermissionKey[] = [
+  ...TaskManagerPermissionKeys,
+  Permissions.PROJECTS_ARCHIVE,
+];
+
 export const SystemRoleDefinitions = [
   {
     key: SystemRoleKeys.ADMIN,
     name: "Administrator",
-    description: "Built-in role with every ProboxAI permission.",
-    permissions: PermissionDefinitions.map(({ key }) => key),
+    description:
+      "Built-in legacy administrator grants; new Task Manager capabilities require explicit assignment.",
+    permissions: PermissionDefinitions.map(({ key }) => key).filter(
+      (key) => !ExplicitGrantPermissionKeys.includes(key),
+    ),
   },
   {
     key: SystemRoleKeys.MANAGER,

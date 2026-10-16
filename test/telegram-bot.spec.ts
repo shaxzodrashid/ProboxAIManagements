@@ -1,3 +1,4 @@
+import { telegramTurnRequestId } from "../src/telegram/telegram-turn-request";
 import { ForbiddenException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -59,7 +60,9 @@ function setup() {
   };
   const sessions = {
     create: jest.fn().mockResolvedValue({ id: "session" }),
-    launchTurn: jest.fn(),
+    acceptTelegramTurn: jest
+      .fn()
+      .mockResolvedValue({ turnId: "turn", accepted: true, status: "QUEUED" }),
     get: jest.fn().mockResolvedValue({
       id: "session",
       cwd: "/opt/apps/project",
@@ -125,6 +128,7 @@ describe("Telegram bot task workflow", () => {
       "user",
       expect.objectContaining({
         cwd: "/opt/apps/project",
+        projectId: "project",
         providerId: "anthropic",
         model: "claude-fable-5-1",
         reasoningEffort: "max",
@@ -134,10 +138,14 @@ describe("Telegram bot task workflow", () => {
     );
     expect(
       h.prisma.telegramSession.create.mock.invocationCallOrder[0],
-    ).toBeLessThan(h.sessions.launchTurn.mock.invocationCallOrder[0]!);
-    expect(h.sessions.launchTurn).toHaveBeenCalledWith(
+    ).toBeLessThan(h.sessions.acceptTelegramTurn.mock.invocationCallOrder[0]!);
+    expect(h.sessions.acceptTelegramTurn).toHaveBeenCalledWith(
+      "user",
+      42n,
       "session",
       "Fix the report",
+      telegramTurnRequestId("user", 42n, 1),
+      true,
     );
     expect(h.state.sessionId).toBe("session");
   });
@@ -146,14 +154,19 @@ describe("Telegram bot task workflow", () => {
     const h = setup();
     h.state.sessionId = "session";
     await h.bot.handle(h.message("Now add tests"));
-    expect(h.sessions.launchTurn).toHaveBeenCalledWith(
+    expect(h.sessions.acceptTelegramTurn).toHaveBeenCalledWith(
+      "user",
+      42n,
       "session",
       "Now add tests",
+      telegramTurnRequestId("user", 42n, 1),
     );
     expect(h.sessions.create).not.toHaveBeenCalled();
-    h.prisma.proboxAiSession.updateMany.mockResolvedValue({ count: 0 });
+    h.sessions.acceptTelegramTurn.mockRejectedValueOnce(
+      new ForbiddenException("This session is still running"),
+    );
     await h.bot.handle(h.message("Another task", 3));
-    expect(h.sessions.launchTurn).toHaveBeenCalledTimes(1);
+    expect(h.sessions.acceptTelegramTurn).toHaveBeenCalledTimes(2);
     expect(h.telegram.sendMessage).toHaveBeenLastCalledWith(
       42n,
       expect.stringContaining("still running"),
@@ -172,6 +185,23 @@ describe("Telegram bot task workflow", () => {
     expect(h.prisma.task.create).not.toHaveBeenCalled();
   });
 
+  it("does not accept another turn after a failed reply and duplicate webhook delivery", async () => {
+    const h = setup();
+    h.state.sessionId = "session";
+    h.telegram.sendMessage.mockRejectedValueOnce(new Error("delivery failed"));
+    await h.bot.handle(h.message("Follow up", 91));
+    h.prisma.telegramUpdate.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("duplicate", {
+        code: "P2002",
+        clientVersion: "6",
+      }),
+    );
+    await h.bot.handle(h.message("Follow up", 91));
+    expect(h.sessions.acceptTelegramTurn).toHaveBeenCalledTimes(1);
+    expect(h.sessions.acceptTelegramTurn.mock.calls[0][4]).toBe(
+      telegramTurnRequestId("user", 42n, 91),
+    );
+  });
   it("ignores group traffic and leaves unlinked accounts to the contact flow", async () => {
     const h = setup();
     const update = h.message("Fix it");

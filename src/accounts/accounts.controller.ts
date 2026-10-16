@@ -4,9 +4,12 @@ import {
   Delete,
   Get,
   Headers,
+  Header,
   HttpCode,
   Param,
+  Patch,
   Post,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 import {
@@ -25,9 +28,19 @@ import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { TelegramService } from "../telegram/telegram.service";
 import { TelegramBotService } from "../telegram/telegram-bot.service";
-import { CreateUserDto, UserResponseDto } from "./accounts.dto";
+import {
+  CreateUserDto,
+  UserResponseDto,
+  SelfProfileResponseDto,
+  UpdateSelfProfileDto,
+} from "./accounts.dto";
 import { AccountsService } from "./accounts.service";
 import {
+  SelfTelegramLinkQueryDto,
+  SelfTelegramLinkResponseDto,
+} from "./telegram-link.dto";
+import {
+  ApiOperationErrors,
   ApiAccessToken,
   ApiAuthenticationErrors,
   ApiErrorResponseDto,
@@ -44,6 +57,65 @@ export class AccountsController {
     private readonly telegram: TelegramService,
     private readonly bot: TelegramBotService,
   ) {}
+  @Get("users/me")
+  @Header("Cache-Control", "no-store")
+  @UseGuards(JwtAuthGuard)
+  @ApiAccessToken()
+  @ApiOperation({
+    summary: "Read your own profile",
+    description:
+      "Available to every authenticated OPEN account, including accounts with no permissions. Identity and workspace come from current persisted authentication. No other user's profile is returned.",
+  })
+  @ApiOkResponse({ type: SelfProfileResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  self(@CurrentUser() user: AuthenticatedUser) {
+    return this.accounts.self(user.workspaceId, user.id);
+  }
+
+  @Get("users/me/telegram-link")
+  @Header("Cache-Control", "no-store")
+  @UseGuards(JwtAuthGuard)
+  @ApiAccessToken()
+  @ApiOperation({
+    summary: "Read your stored Telegram link status",
+    description:
+      "Available to current authenticated OPEN accounts, including zero-permission accounts. No request selectors, Telegram identifiers, phone numbers or credentials. Reads only the stored verification record; does not contact Telegram or offer link/recovery mutations.",
+  })
+  @ApiOkResponse({ type: SelfTelegramLinkResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
+  telegramLink(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() _query: SelfTelegramLinkQueryDto,
+  ) {
+    return this.accounts.telegramLink(user.workspaceId, user.id);
+  }
+
+  @Patch("users/me")
+  @Header("Cache-Control", "no-store")
+  @UseGuards(JwtAuthGuard)
+  @ApiAccessToken()
+  @ApiOperation({
+    summary: "Update your own names, bio and birth date",
+    description:
+      "Allowlisted partial update; unknown fields are rejected. Omitted fields retain values, null clears individual components. Name changes must leave one nonempty component; bio-only and empty updates preserve legacy names. No phone, username, role, permissions, lifecycle or membership editing. Concurrent name changes may return 409; reread before retrying.",
+  })
+  @ApiOkResponse({ type: SelfProfileResponseDto })
+  @ApiConflictResponse({
+    type: ApiErrorResponseDto,
+    description: "Profile changed concurrently; reread before retrying.",
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
+  updateSelf(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateSelfProfileDto,
+  ) {
+    return this.accounts.updateSelf(user.workspaceId, user.id, dto);
+  }
   @Get("users")
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions(Permissions.USERS_READ)
@@ -77,11 +149,12 @@ export class AccountsController {
   })
   @ApiConflictResponse({
     description:
-      "A user with this phone number already exists in the workspace.",
+      "A user with this phone number already exists. Phone uniqueness is global.",
     type: ApiErrorResponseDto,
   })
   @ApiAuthenticationErrors()
   @ApiValidationErrors()
+  @ApiOperationErrors()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateUserDto) {
     return this.accounts.create(user.workspaceId, user.id, dto);
   }
@@ -99,9 +172,10 @@ export class AccountsController {
     format: "uuid",
     description: "User ID in the current workspace.",
   })
-  @ApiOkResponse({ description: "User banned.", type: UserResponseDto })
+  @ApiCreatedResponse({ description: "User banned.", type: UserResponseDto })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
+  @ApiOperationErrors()
   ban(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.accounts.ban(user.workspaceId, user.id, id);
   }
@@ -122,6 +196,7 @@ export class AccountsController {
   @ApiOkResponse({ description: "User deleted.", type: UserResponseDto })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
+  @ApiOperationErrors()
   delete(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.accounts.delete(user.workspaceId, user.id, id);
   }

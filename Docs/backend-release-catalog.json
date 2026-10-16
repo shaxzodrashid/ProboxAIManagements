@@ -1,0 +1,191 @@
+{
+  "baseline": {
+    "packageVersion": "0.1.0",
+    "commit": "31fdd5a9d9a9bf19d6268c24504496bb54b75e2a",
+    "provenance": "Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown."
+  },
+  "releases": [
+    {
+      "version": "0.2.0-dev.2",
+      "gitRef": "refs/tags/v0.2.0-dev.2",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.2.0-dev.1",
+      "gitRef": "refs/tags/v0.2.0-dev.1",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    }
+  ],
+  "features": [
+    {
+      "id": "deployment-systemd-cli",
+      "title": "Systemd deployment CLI and sandbox lifecycle verification",
+      "since": "0.2.0-dev.2",
+      "state": "foundation",
+      "contract": "Docs/deployment-cli.md"
+    },
+    {
+      "id": "account-self-identity",
+      "title": "Self-scoped identity and independent names",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/self-profile-contract.md"
+    },
+    {
+      "id": "profile-audience-contacts-picker",
+      "title": "Profile audiences, directed contacts and private aliases",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/profile-picker-contracts.md"
+    },
+    {
+      "id": "profile-bio",
+      "title": "Optional plain bio, limit1000 and private default",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/human-task-query-bio-evidence.md"
+    },
+    {
+      "id": "profile-birthday-foundation",
+      "title": "Self birthday and independently authorized date parts",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/profile-privacy-foundations.md"
+    },
+    {
+      "id": "self-telegram-link-read",
+      "title": "Stored self Telegram link readback",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/self-telegram-link-contracts.md"
+    },
+    {
+      "id": "authentication-dependency-errors",
+      "title": "Credential rejection versus authentication availability",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/authentication-availability-contracts.md"
+    },
+    {
+      "id": "administrative-atomicity",
+      "title": "Atomic account lifecycle and role changes",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/admin-atomicity-contracts.md"
+    },
+    {
+      "id": "department-template-contracts",
+      "title": "Department/template response, validation and concurrency contracts",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/template-department-contract-fixes.md"
+    },
+    {
+      "id": "project-member-discovery",
+      "title": "Permitted active-workspace project member discovery",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-member-picker-contracts.md"
+    },
+    {
+      "id": "project-creation-recovery",
+      "title": "Durable project creation outcome and retry readback",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-creation-readback-contracts.md"
+    },
+    {
+      "id": "project-enqueue-recovery",
+      "title": "Setup enqueue failure reconciliation",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-enqueue-recovery-contracts.md"
+    },
+    {
+      "id": "project-archive-human-read",
+      "title": "Archive retention and member-only human task reads",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-archive-human-task-contracts.md"
+    },
+    {
+      "id": "task-board-status",
+      "title": "Revision-safe project workflow statuses",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/task-board-status-contracts.md"
+    },
+    {
+      "id": "task-human-collaboration",
+      "title": "Human task edits, assignees, checklists, comments and moves",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/human-task-collaboration-contracts.md"
+    },
+    {
+      "id": "task-checklist-deadlines-order",
+      "title": "Independent checklist deadlines and whole-list ordering",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/checklist-order-contracts.md"
+    },
+    {
+      "id": "task-deadline-priority-query",
+      "title": "Priority, deadlines and bounded human task queries",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/exact-deadline-sort-contracts.md"
+    },
+    {
+      "id": "session-durability",
+      "title": "Durable turn acceptance, replay and terminal state",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/session-durability-contracts.md"
+    },
+    {
+      "id": "session-assigned-index",
+      "title": "Bounded assigned session index",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/session-index-contracts.md"
+    },
+    {
+      "id": "session-execution-context",
+      "title": "Authorized saved project/directory execution context",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/session-directory-context-contracts.md"
+    },
+    {
+      "id": "session-assistant-text",
+      "title": "Canonical assistant text reconstruction",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/session-assistant-text-contracts.md"
+    },
+    {
+      "id": "initialization-event-readback",
+      "title": "Bounded initialization event recovery",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/initialization-event-readback-contracts.md"
+    },
+    {
+      "id": "file-delete-journal",
+      "title": "Deletion identity/readback and recoverable local boundaries",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/file-deletion-journal-contracts.md"
+    },
+    {
+      "id": "chat-group-metadata",
+      "title": "Active-human group metadata and creator-only retry/readback",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/chat-group-metadata-contracts.md"
+    }
+  ]
+}

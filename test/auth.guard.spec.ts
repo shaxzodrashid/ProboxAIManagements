@@ -28,6 +28,7 @@ describe("JwtAuthGuard", () => {
         id: "user-1",
         workspaceId: "workspace-old",
         type: "access",
+        exp: 1800000000,
       }),
     };
     const prisma = {
@@ -93,6 +94,7 @@ describe("JwtAuthGuard", () => {
       ],
       permissions: ["projects.files.read", "projects.read"],
       type: "access",
+      accessExpiresAt: 1800000000000,
     });
   });
 

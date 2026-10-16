@@ -91,32 +91,8 @@ export class TelegramSessionRelay implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     if (!this.telegram.configured) return;
-    // The managed runner is process-local. Never automatically replay prompts
-    // after a server restart; report interrupted work and allow explicit resume.
-    const orphaned = await this.prisma.telegramSession.findMany({
-      where: { session: { status: { in: ["QUEUED", "RUNNING"] } } },
-      select: { sessionId: true },
-    });
-    const ids = orphaned.map((row) => row.sessionId);
-    if (ids.length)
-      await this.prisma.$transaction([
-        this.prisma.proboxAiSession.updateMany({
-          where: { id: { in: ids } },
-          data: { status: "INTERRUPTED", endedAt: new Date() },
-        }),
-        this.prisma.proboxAiTurn.updateMany({
-          where: { sessionId: { in: ids }, status: "RUNNING" },
-          data: { status: "INTERRUPTED", endedAt: new Date() },
-        }),
-        this.prisma.telegramSession.updateMany({
-          where: { sessionId: { in: ids } },
-          data: { finished: false },
-        }),
-        this.prisma.task.updateMany({
-          where: { status: "RUNNING", sessions: { some: { id: { in: ids } } } },
-          data: { status: "CANCELLED" },
-        }),
-      ]);
+    // Central lease reconciliation preserves another live owner and never replays prompts.
+    await this.sessions.reconcileExpiredRuns();
     this.timer = setInterval(() => void this.tick(), 1500);
     this.timer.unref();
   }

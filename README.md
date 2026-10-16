@@ -1,5 +1,11 @@
 # ProboxAI
 
+Session directory preflight and selected-project context: [contract](Docs/session-directory-context-contracts.md).
+
+Persisted project initial-enqueue recovery: [contract](Docs/project-enqueue-recovery-contracts.md).
+
+Original project-creation readback and keyed CLEAR: [contract](Docs/project-creation-readback-contracts.md).
+
 NestJS control plane for authenticated, programmatic ProboxAI coding sessions.
 
 ## Programmatic runner contract
@@ -55,7 +61,21 @@ protected endpoints from the reference. Session event streaming is exposed
 as `text/event-stream`; use an SSE client for that endpoint rather than Swagger's
 standard request runner.
 
+Admin and department operation results, corrective errors and compatibility
+details are documented in [the response contract](Docs/admin-department-response-contracts.md).
+
+Effective upload metadata, file Trash and safe template editor responses are
+documented in [the file/template contract](Docs/file-template-contracts.md).
+The working picker, private contact aliases and viewer-aware public profile reads are
+documented in [their contract](Docs/profile-picker-contracts.md). Cross-workspace
+roster discovery and remaining profile work are outlined in [the implementation
+plan](Docs/profile-audience-implementation-plan.md).
+
 ## User identity and authentication
+
+Self profile read/update and backwards-compatible structured creation names are
+documented in [the profile contract](Docs/self-profile-contract.md). Apply the
+additive `20261011000000_self_profile_names` migration before running this version.
 
 Every user has a pre-registered full name and phone number, a role, and one of
 four lifecycle states: `PENDING`, `OPEN`, `BANNED`, or `DELETED`. Administrators
@@ -432,3 +452,47 @@ under `/api/v1/projects/:projectId/initializations`. Cancellation terminates
 active process groups. Failed, cancelled, timed-out, or restart-interrupted
 attempts quarantine staging and require an explicit clean retry; queued work
 continues after restart.
+
+Session follow-up acceptance and project deletion metadata: [local contract and migration notes](Docs/session-project-deletion-contracts.md).
+
+Session output/state durability and recovery foundations: [local contracts and rollout gates](Docs/session-durability-contracts.md).
+
+Assistant text snapshot/replay semantics: [verified provider boundary and contracts](Docs/session-assistant-text-contracts.md).
+
+Initialization event replay, paging and stream authorization: [local contracts](Docs/initialization-event-readback-contracts.md).
+
+Self Telegram stored-link status: [read contract and recovery boundary](Docs/self-telegram-link-contracts.md).
+
+Assigned-session index, filters and pagination: [local endpoint contract](Docs/session-index-contracts.md).
+
+Project viewer membership: [read contracts and authorization boundaries](Docs/project-viewer-membership-contracts.md).
+
+Authentication availability: [credential rejection versus infrastructure failure](Docs/authentication-availability-contracts.md).
+
+Existing-task detail reads: [stable IDs and authorization scope](Docs/task-detail-read-contracts.md).
+
+Task-board/status lifecycle: [October 13 permissions, migration and audited contracts](Docs/task-board-status-contracts.md).
+
+Task deadlines: [calendar dates, timed instants and linked-owner / unlinked-manager authorization](Docs/task-deadline-contracts.md).
+
+Project archive and member task visibility: [retention, archived filters and human read boundaries](Docs/project-archive-human-task-contracts.md).
+
+Human task collaboration: [assignments, checklist completion, comments, movement and durable outcomes](Docs/human-task-collaboration-contracts.md).
+
+Checklist item deadlines: [independent calendar/timezone values and reaction prerequisite audit](Docs/checklist-item-deadline-contracts.md).
+
+Checklist ordering: [whole-list reorder, authorization, revisions and recovery](Docs/checklist-order-contracts.md).
+
+Human priority and active accounts: [owner-only priority, highest-first list ordering, membership eligibility and approved bio verification](Docs/task-priority-active-bio-contracts.md).
+
+Bounded human task queries: [filters, sorting, generation-safe paging, scoped counts and API11 acceptance evidence](Docs/human-task-query-bio-evidence.md).
+
+Exact deadline ordering: [timed instants first, date-only next and unchanged storage](Docs/exact-deadline-sort-contracts.md).
+
+Group metadata foundations: [active human creation, creator-only readback and durable retries](Docs/chat-group-metadata-contracts.md).
+
+Project member discovery: [permitted active-workspace candidates, filters and bounded pages](Docs/project-member-picker-contracts.md).
+
+Backend releases: [versioning and commit provenance](Docs/backend-release-versioning.md), [Available since by feature](Docs/backend-feature-availability.md) and [changelog](CHANGELOG.md). Dev prereleases are progress snapshots, not deployments; API compatibility remains /api/v1.
+
+Production CLI artifact: [systemd setup, stop/resume/update, health verification and rollback policy](Docs/deployment-cli.md). The script was sandbox-tested; no production deployment or automatic migration is implied.

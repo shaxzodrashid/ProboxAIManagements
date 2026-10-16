@@ -1,4 +1,8 @@
 import { Module } from "@nestjs/common";
+import { ProjectMemberPickerController } from "./project-member-picker.controller";
+import { ProjectMemberPickerService } from "./project-member-picker.service";
+import { ProjectArchiveController } from "./project-archive.controller";
+import { ProjectArchiveService } from "./project-archive.service";
 import { AuthModule } from "../auth/auth.module";
 import { ProjectsController, SettingsController } from "./projects.controller";
 import { ProjectsService } from "./projects.service";
@@ -17,11 +21,15 @@ import { SessionsModule } from "../sessions/sessions.module";
     SessionsModule,
   ],
   controllers: [
+    ProjectMemberPickerController,
+    ProjectArchiveController,
     ProjectsController,
     SettingsController,
     ProjectInitializationsController,
   ],
   providers: [
+    ProjectMemberPickerService,
+    ProjectArchiveService,
     ProjectsService,
     ProjectInitializationService,
     ProjectInitializationEventsService,

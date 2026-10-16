@@ -35,6 +35,7 @@ import {
 } from "./auth.dto";
 import {
   ApiErrorResponseDto,
+  ApiAuthenticationUnavailable,
   ApiIntegrationUnavailable,
   ApiValidationErrors,
 } from "../openapi/api-docs";
@@ -145,6 +146,7 @@ export class AuthController {
   }
 
   @Post("refresh")
+  @ApiAuthenticationUnavailable()
   @HttpCode(200)
   @ApiOperation({ summary: "Refresh an access token" })
   @ApiOkResponse({

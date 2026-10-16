@@ -1,3 +1,4 @@
+import { telegramTurnRequestId } from "./telegram-turn-request";
 import {
   BadRequestException,
   HttpException,
@@ -81,7 +82,13 @@ export class TelegramBotService {
             "text" in message && typeof message.text === "string"
               ? message.text
               : "";
-          await this.dispatch(fresh, chatId, text, callback?.data);
+          await this.dispatch(
+            fresh,
+            chatId,
+            text,
+            update.update_id,
+            callback?.data,
+          );
         } catch (error) {
           this.logger.warn(`Telegram action failed for user ${actor.id}`);
           await this.telegram.sendMessage(
@@ -105,6 +112,7 @@ export class TelegramBotService {
     actor: AuthenticatedUser,
     chatId: bigint,
     text: string,
+    updateId: number,
     callback?: string,
   ) {
     const state = await this.prisma.telegramConversation.upsert({
@@ -300,7 +308,11 @@ export class TelegramBotService {
       await this.binding(actor.id, chatId, state.sessionId);
       const session = await this.sessions.get(actor.id, state.sessionId);
       if (command === "/stop")
-        await this.sessions.interrupt(actor.id, session.id);
+        await this.sessions.interrupt(
+          actor.id,
+          session.id,
+          session.turns.at(-1)?.id ?? "",
+        );
       await this.telegram.sendMessage(
         chatId,
         command === "/stop"
@@ -353,25 +365,16 @@ export class TelegramBotService {
         throw new BadRequestException(
           "This session cannot be resumed yet. Check /status or use /new.",
         );
-      const claimed = await this.prisma.proboxAiSession.updateMany({
-        where: {
-          id: session.id,
-          status: { in: ["COMPLETED", "FAILED", "INTERRUPTED", "PAUSED"] },
-        },
-        data: { status: "QUEUED", endedAt: null },
-      });
-      if (!claimed.count)
-        throw new BadRequestException(
-          "This session is still running. Wait for completion or use /stop.",
-        );
-      await this.prisma.telegramSession.update({
-        where: { sessionId: session.id },
-        data: { finished: false },
-      });
-      this.sessions.launchTurn(session.id, text);
+      const accepted = await this.sessions.acceptTelegramTurn(
+        actor.id,
+        chatId,
+        session.id,
+        text,
+        telegramTurnRequestId(actor.id, chatId, updateId),
+      );
       await this.telegram.sendMessage(
         chatId,
-        `Continuing ${project.name}\nSession: ${session.id}`,
+        `Continuing ${project.name}\nSession: ${session.id}\nTurn: ${accepted.turnId}`,
       );
     } else {
       requirePermissions(actor, P.TASKS_CREATE, P.SESSIONS_CREATE);
@@ -393,6 +396,7 @@ export class TelegramBotService {
         actor.id,
         {
           taskId: task.id,
+          projectId: project.id,
           cwd: directory,
           prompt: text,
           sandbox: "workspace-write",
@@ -416,10 +420,17 @@ export class TelegramBotService {
           data: { sessionId: session.id },
         }),
       ]);
-      this.sessions.launchTurn(session.id, text);
+      const accepted = await this.sessions.acceptTelegramTurn(
+        actor.id,
+        chatId,
+        session.id,
+        text,
+        telegramTurnRequestId(actor.id, chatId, updateId),
+        true,
+      );
       await this.telegram.sendMessage(
         chatId,
-        `Started in ${project.name}\n${selection.effectiveModel} · ${selection.effectiveReasoningEffort}\nSession: ${session.id}`,
+        `Started in ${project.name}\n${selection.effectiveModel} · ${selection.effectiveReasoningEffort}\nSession: ${session.id}\nTurn: ${accepted.turnId}`,
       );
     }
   }

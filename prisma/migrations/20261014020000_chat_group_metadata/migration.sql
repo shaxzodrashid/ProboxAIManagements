@@ -1,0 +1,21 @@
+BEGIN;
+CREATE TABLE "ChatGroup" (
+ "id" TEXT NOT NULL PRIMARY KEY,
+ "name" VARCHAR(120) NOT NULL,
+ "creatorId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+ "ownerId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+ "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX "ChatGroup_creatorId_createdAt_idx" ON "ChatGroup"("creatorId", "createdAt");
+CREATE TABLE "ChatGroupCreation" (
+ "creatorId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+ "requestId" TEXT NOT NULL,
+ "inputHash" VARCHAR(64) NOT NULL,
+ "groupId" TEXT NOT NULL REFERENCES "ChatGroup"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+ "initialName" VARCHAR(120) NOT NULL,
+ "initialOwnerId" TEXT NOT NULL,
+ "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ CONSTRAINT "ChatGroupCreation_pkey" PRIMARY KEY ("creatorId", "requestId")
+);
+CREATE UNIQUE INDEX "ChatGroupCreation_groupId_key" ON "ChatGroupCreation"("groupId");
+COMMIT;

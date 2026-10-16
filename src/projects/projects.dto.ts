@@ -3,10 +3,73 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
 } from "class-validator";
-import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import {
+  ApiExtraModels,
+  getSchemaPath,
+  ApiProperty,
+  ApiPropertyOptional,
+} from "@nestjs/swagger";
+import {
+  ProjectStatus,
+  ProjectInitializationStatus,
+  ProjectFileTrashStatus,
+} from "@prisma/client";
+
+export class ProjectUploadConfigurationResponseDto {
+  @ApiProperty({ type: "integer", minimum: 1, maximum: 1073741824 })
+  maxUploadBytes!: number;
+  @ApiProperty({
+    enum: ["single-file"],
+    description:
+      "multipart/form-data with one file field named file; optional destination folder path.",
+  })
+  requestMode!: "single-file";
+}
+
+export class ProjectFileDeletionConfirmationResponseDto {
+  @ApiProperty({ format: "uuid" }) operationId!: string;
+  @ApiProperty({ enum: [true] }) confirmationRequired!: true;
+  @ApiProperty({ format: "uuid" }) confirmationId!: string;
+  @ApiProperty({ type: String, format: "date-time" }) expiresAt!: string;
+}
+
+export class ProjectFileTrashedResponseDto {
+  @ApiProperty({ format: "uuid" }) operationId!: string;
+  @ApiProperty({ enum: [true] }) trashed!: true;
+  @ApiProperty({ format: "uuid" }) trashId!: string;
+  @ApiProperty({ description: "Original project-relative path." })
+  path!: string;
+  @ApiProperty({ type: String, format: "date-time" }) expiresAt!: string;
+}
+
+export class ProjectTrashItemResponseDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({ format: "uuid" }) projectId!: string;
+  @ApiProperty() originalPath!: string;
+  @ApiProperty() isDirectory!: boolean;
+  @ApiProperty({ format: "uuid" }) deletedById!: string;
+  @ApiProperty({
+    enum: ProjectFileTrashStatus,
+    description:
+      "List selects ACTIVE rows even when expiresAt has passed and cleanup has not run; expiry does not imply restorability.",
+  })
+  status!: ProjectFileTrashStatus;
+  @ApiProperty({ type: String, format: "date-time" }) expiresAt!: string;
+  @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
+  @ApiProperty({ type: String, format: "date-time", nullable: true })
+  restoredAt!: string | null;
+  @ApiProperty({ type: String, format: "date-time", nullable: true })
+  purgedAt!: string | null;
+}
+
+export class ProjectTrashRestoredResponseDto {
+  @ApiProperty({ enum: [true] }) restored!: true;
+  @ApiProperty() path!: string;
+}
 
 const PROJECT_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,119}$/;
 
@@ -71,7 +134,7 @@ export class CreateProjectDto {
   @ApiPropertyOptional({
     enum: EXISTING_PROJECT_DIRECTORY_ACTIONS,
     description:
-      "Required only after the API reports that the project directory already exists. KEEP creates the project using the existing files. CLEAR permanently removes the directory contents before creating the project, while preserving the directory itself. KEEP cannot be combined with configurationTemplateId.",
+      "Required only after the API reports that the project directory already exists. KEEP preserves existing files and cannot be combined with configurationTemplateId. CLEAR permanently removes contents and requires POST /projects/creation-submissions with a client-generated requestId; legacy POST /projects returns 428 for CLEAR.",
   })
   @IsOptional()
   @IsIn(EXISTING_PROJECT_DIRECTORY_ACTIONS)
@@ -162,6 +225,13 @@ export class ProtectedFileTypeDto {
 }
 
 export class DeleteProjectFileDto {
+  @ApiProperty({
+    format: "uuid",
+    description:
+      "Client-generated deletion identity; retain it through retries and reconciliation.",
+  })
+  @IsUUID()
+  operationId!: string;
   @ApiProperty({ example: "secrets/.env", maxLength: 1024 })
   @IsString()
   @MaxLength(1024)
@@ -186,6 +256,13 @@ export class ConfirmProjectDeletionDto {
 
 export class SetProjectsHomeDto {
   @ApiProperty({
+    format: "uuid",
+    description:
+      "Default department ID from the current settings response; protects against concurrent default changes.",
+  })
+  @IsUUID("4")
+  departmentId!: string;
+  @ApiProperty({
     example: "/opt/apps",
     maxLength: 1024,
     description:
@@ -206,6 +283,7 @@ export class ProjectMemberUserDto extends ProjectCreatorDto {
     type: "array",
     items: {
       type: "object",
+      required: ["id", "key", "name"],
       properties: {
         id: { type: "string", format: "uuid" },
         key: { type: "string", example: "MANAGER" },
@@ -215,6 +293,7 @@ export class ProjectMemberUserDto extends ProjectCreatorDto {
   })
   roles!: Array<{ id: string; key: string; name: string }>;
   @ApiProperty({
+    type: String,
     nullable: true,
     deprecated: true,
     enum: ["ADMIN", "MANAGER", "MEMBER"],
@@ -222,10 +301,13 @@ export class ProjectMemberUserDto extends ProjectCreatorDto {
   role!: string | null;
 }
 
-export class ProjectMemberResponseDto {
+export class ProjectMembershipScalarResponseDto {
   @ApiProperty({ format: "uuid" }) projectId!: string;
   @ApiProperty({ format: "uuid" }) userId!: string;
   @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
+}
+
+export class ProjectMemberResponseDto extends ProjectMembershipScalarResponseDto {
   @ApiProperty({ type: ProjectMemberUserDto }) user!: ProjectMemberUserDto;
 }
 
@@ -233,42 +315,118 @@ export class ProjectMemberCountDto {
   @ApiProperty({ example: 3 }) members!: number;
 }
 
-export class ProjectResponseDto {
+export class ProjectScalarResponseDto {
+  @ApiProperty({ type: String, nullable: true, format: "date-time" })
+  archivedAt!: string | null;
+  @ApiProperty({ minimum: 0 }) archiveRevision!: number;
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ format: "uuid" }) workspaceId!: string;
   @ApiProperty({ format: "uuid" }) departmentId!: string;
   @ApiProperty({ example: "Customer Portal" }) name!: string;
   @ApiProperty({ example: "Customer Portal" }) directoryName!: string;
-  @ApiProperty({ nullable: true, example: "Customer-facing web application." })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "Customer-facing web application.",
+  })
   description!: string | null;
   @ApiProperty({ example: false }) readAccessEnabled!: boolean;
-  @ApiProperty({ enum: ["INITIALIZING", "READY", "FAILED"] })
-  status!: "INITIALIZING" | "READY" | "FAILED";
-  @ApiProperty({ nullable: true, format: "uuid" })
+  @ApiProperty({ enum: ProjectStatus }) status!: ProjectStatus;
+  @ApiProperty({ type: String, nullable: true, format: "uuid" })
   appliedTemplateVersionId!: string | null;
   @ApiProperty({ format: "uuid" }) creatorId!: string;
   @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
   @ApiProperty({ type: String, format: "date-time" }) updatedAt!: string;
-  @ApiPropertyOptional({ type: ProjectCreatorDto }) creator?: ProjectCreatorDto;
-  @ApiPropertyOptional({ type: ProjectMemberCountDto, name: "_count" })
-  _count?: ProjectMemberCountDto;
-  @ApiPropertyOptional({ type: ProjectMemberResponseDto, isArray: true })
+}
+
+export class ProjectDepartmentResponseDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() slug!: string;
+}
+
+export class ProjectInitializationSummaryResponseDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({ format: "uuid" }) projectId!: string;
+  @ApiProperty({ format: "uuid" }) templateVersionId!: string;
+  @ApiProperty() attempt!: number;
+  @ApiProperty({ enum: ProjectInitializationStatus })
+  status!: ProjectInitializationStatus;
+  @ApiProperty() lastSequence!: number;
+  @ApiProperty({ type: String, format: "date-time", nullable: true })
+  startedAt!: string | null;
+  @ApiProperty({ type: String, format: "date-time", nullable: true }) endedAt!:
+    string | null;
+  @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
+  @ApiProperty({ type: String, format: "date-time" }) updatedAt!: string;
+}
+
+export class ProjectCreatedResponseDto extends ProjectScalarResponseDto {
+  @ApiProperty({ type: ProjectCreatorDto }) creator!: ProjectCreatorDto;
+  @ApiProperty({ type: ProjectDepartmentResponseDto })
+  department!: ProjectDepartmentResponseDto;
+  @ApiProperty({ type: ProjectMemberResponseDto, isArray: true })
+  members!: ProjectMemberResponseDto[];
+  @ApiPropertyOptional({
+    type: ProjectInitializationSummaryResponseDto,
+    isArray: true,
+    maxItems: 1,
+    description: "Present for templated creation; omitted for empty projects.",
+  })
+  initializations?: ProjectInitializationSummaryResponseDto[];
+}
+
+export class ProjectListItemResponseDto extends ProjectScalarResponseDto {
+  @ApiProperty({
+    type: Boolean,
+    description:
+      "Current caller's persisted ProjectMember relationship at this read. Independent of creator identity, read-all grants, public access and role labels; not a capability or ranking.",
+  })
+  isMember!: boolean;
+  @ApiProperty({ type: ProjectCreatorDto }) creator!: ProjectCreatorDto;
+  @ApiProperty({ type: ProjectDepartmentResponseDto })
+  department!: ProjectDepartmentResponseDto;
+  @ApiProperty({ type: ProjectMemberCountDto }) _count!: ProjectMemberCountDto;
+  @ApiProperty({
+    type: ProjectInitializationSummaryResponseDto,
+    isArray: true,
+    maxItems: 1,
+    description:
+      "Latest safe initialization summary by attempt DESC, or []. No paths, leases or raw errors.",
+  })
+  initializations!: ProjectInitializationSummaryResponseDto[];
+}
+
+export class ProjectResponseDto extends ProjectScalarResponseDto {
+  @ApiProperty({
+    type: Boolean,
+    description:
+      "Current caller's persisted ProjectMember relationship, not inferred from creator/admin/public access. Detail/actions reauthorize independently.",
+  })
+  isMember!: boolean;
+  @ApiProperty({ type: ProjectCreatorDto }) creator!: ProjectCreatorDto;
+  @ApiProperty({ type: ProjectDepartmentResponseDto })
+  department!: ProjectDepartmentResponseDto;
+  @ApiProperty({
+    type: ProjectInitializationSummaryResponseDto,
+    isArray: true,
+    maxItems: 1,
+    description:
+      "Latest safe initialization summary by attempt DESC, or []. No paths, leases or raw errors.",
+  })
+  initializations!: ProjectInitializationSummaryResponseDto[];
+  @ApiPropertyOptional({
+    type: ProjectMemberResponseDto,
+    isArray: true,
+    description:
+      "Returned to project members or projects.read-all callers. Omitted for other authorized workspace readers; omission does not mean zero members.",
+  })
   members?: ProjectMemberResponseDto[];
-  @ApiPropertyOptional({
-    type: "object",
-    additionalProperties: true,
-    description: "Owning department metadata.",
-  })
-  department?: { id: string; name: string; slug: string };
-  @ApiPropertyOptional({
-    type: "object",
-    additionalProperties: true,
-    description: "Latest initialization attempt, when a template was selected.",
-  })
-  initializations?: Record<string, unknown>[];
 }
 
 export class ProjectsHomeResponseDto {
+  @ApiProperty({ minimum: 0 }) revision!: number;
+  @ApiProperty({ format: "uuid" }) departmentId!: string;
   @ApiProperty({ example: "/opt/apps" }) path!: string;
   @ApiProperty({
     example: true,
@@ -313,4 +471,41 @@ export class UploadedProjectFileResponseDto {
 export class MoveProjectFileResponseDto {
   @ApiProperty({ example: "drafts/readme.md" }) sourcePath!: string;
   @ApiProperty({ example: "docs/readme.md" }) destinationPath!: string;
+}
+
+@ApiExtraModels(
+  ProjectFileDeletionConfirmationResponseDto,
+  ProjectFileTrashedResponseDto,
+)
+export class ProjectFileOperationResponseDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({ format: "uuid" }) projectId!: string;
+  @ApiProperty({ enum: ["DELETE"] }) kind!: "DELETE";
+  @ApiProperty() path!: string;
+  @ApiProperty({
+    enum: [
+      "AWAITING_CONFIRMATION",
+      "PREPARED",
+      "COMPLETED",
+      "FAILED",
+      "NEEDS_REPAIR",
+    ],
+  })
+  state!: string;
+  @ApiProperty({
+    oneOf: [
+      { $ref: getSchemaPath(ProjectFileDeletionConfirmationResponseDto) },
+      { $ref: getSchemaPath(ProjectFileTrashedResponseDto) },
+    ],
+    nullable: true,
+    description:
+      "Historical deletion or confirmation result. Null until recorded.",
+  })
+  result!:
+    | ProjectFileDeletionConfirmationResponseDto
+    | ProjectFileTrashedResponseDto
+    | null;
+  @ApiProperty({ type: String, nullable: true }) errorCode!: string | null;
+  @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
+  @ApiProperty({ type: String, format: "date-time" }) updatedAt!: string;
 }

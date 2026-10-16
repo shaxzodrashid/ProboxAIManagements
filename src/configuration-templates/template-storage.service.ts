@@ -9,6 +9,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { Readable } from "node:stream";
+import { storageUnavailable } from "./template-errors";
 
 @Injectable()
 export class TemplateStorageService {
@@ -42,7 +43,11 @@ export class TemplateStorageService {
   }
 
   async headObject(objectKey: string) {
-    await this.ensureBucket();
+    try {
+      await this.ensureBucket();
+    } catch {
+      storageUnavailable();
+    }
     return this.s3().send(
       new HeadObjectCommand({ Bucket: this.bucket(), Key: objectKey }),
     );
@@ -90,7 +95,11 @@ export class TemplateStorageService {
   }
 
   private ensureBucket() {
-    if (!this.bucketReady) this.bucketReady = this.initializeBucket();
+    if (!this.bucketReady)
+      this.bucketReady = this.initializeBucket().catch((error) => {
+        this.bucketReady = undefined;
+        throw error;
+      });
     return this.bucketReady;
   }
 
@@ -98,7 +107,11 @@ export class TemplateStorageService {
     try {
       await this.s3().send(new HeadBucketCommand({ Bucket: this.bucket() }));
     } catch (error) {
-      if (!parseBoolean(process.env.MINIO_AUTO_CREATE_BUCKET, false))
+      if (
+        !parseBoolean(process.env.MINIO_AUTO_CREATE_BUCKET, false) ||
+        (error as { $metadata?: { httpStatusCode?: number } })?.$metadata
+          ?.httpStatusCode !== 404
+      )
         throw error;
       await this.s3().send(new CreateBucketCommand({ Bucket: this.bucket() }));
     }

@@ -8,6 +8,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,
+  { files: ["scripts/**/*.mjs"], languageOptions: { globals: globals.node } },
   {
     files: ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts"],
     languageOptions: {

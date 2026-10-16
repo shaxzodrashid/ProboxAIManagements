@@ -1,5 +1,6 @@
 import { IsOptional, IsString, MaxLength } from "class-validator";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { SessionStatus, TaskStatus } from "@prisma/client";
 
 export class CreateTaskDto {
   @ApiProperty({ example: "Add project activity timeline", maxLength: 240 })
@@ -32,18 +33,7 @@ export class TaskManagerDto {
 
 export class LatestSessionDto {
   @ApiProperty({ format: "uuid" }) id!: string;
-  @ApiProperty({
-    enum: [
-      "QUEUED",
-      "RUNNING",
-      "PAUSED",
-      "COMPLETED",
-      "FAILED",
-      "INTERRUPTED",
-      "ARCHIVED",
-    ],
-  })
-  status!: string;
+  @ApiProperty({ enum: SessionStatus }) status!: SessionStatus;
   @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
 }
 
@@ -52,23 +42,25 @@ export class TaskResponseDto {
   @ApiProperty({ format: "uuid" }) workspaceId!: string;
   @ApiProperty({ example: "Add project activity timeline" }) title!: string;
   @ApiProperty() description!: string;
-  @ApiProperty({ nullable: true }) criteria!: string | null;
-  @ApiProperty({
-    enum: [
-      "QUEUED",
-      "RUNNING",
-      "AWAITING_APPROVAL",
-      "COMPLETED",
-      "FAILED",
-      "CANCELLED",
-    ],
-  })
-  status!: string;
+  @ApiProperty({ type: String, nullable: true }) criteria!: string | null;
+  @ApiProperty({ enum: TaskStatus }) status!: TaskStatus;
   @ApiProperty({ format: "uuid" }) creatorId!: string;
   @ApiProperty({ format: "uuid" }) managerId!: string;
   @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
   @ApiProperty({ type: String, format: "date-time" }) updatedAt!: string;
-  @ApiPropertyOptional({ type: TaskManagerDto }) manager?: TaskManagerDto;
-  @ApiPropertyOptional({ type: LatestSessionDto, isArray: true })
-  sessions?: LatestSessionDto[];
 }
+
+export class TaskListItemResponseDto extends TaskResponseDto {
+  @ApiProperty({ type: TaskManagerDto }) manager!: TaskManagerDto;
+  @ApiProperty({
+    type: LatestSessionDto,
+    isArray: true,
+    maxItems: 1,
+    description:
+      "Zero or one latest session, ordered by createdAt descending. A summary grants no session-detail access.",
+  })
+  sessions!: LatestSessionDto[];
+}
+
+/** Existing task read projection, addressed by a stable task identity. */
+export class TaskDetailResponseDto extends TaskListItemResponseDto {}

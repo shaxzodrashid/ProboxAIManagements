@@ -1,4 +1,9 @@
 import {
+  ExpectedRevision,
+  ApiRevision,
+  RevisionResponseDto,
+} from "../openapi/revision";
+import {
   Body,
   Controller,
   Delete,
@@ -13,7 +18,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
+import { EffectiveFileInterceptor } from "../storage/upload-limits";
 import { diskStorage } from "multer";
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -31,13 +36,22 @@ import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
 import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
+  ApiTemplateErrors,
+  ApiUploadSizeError,
   ApiAccessToken,
   ApiAuthenticationErrors,
   ApiResourceErrors,
   ApiValidationErrors,
 } from "../openapi/api-docs";
 import {
-  ConfigurationTemplateResponseDto,
+  ConfigurationTemplateDetailResponseDto,
+  ConfigurationTemplateListResponseDto,
+  ConfigurationTemplateCreatedResponseDto,
+  TemplateScalarResponseDto,
+  TemplateManifestResponseDto,
+  TemplateFileMutationResponseDto,
+  TemplateFileRemovedResponseDto,
+  TemplateUploadConfigurationResponseDto,
   CreateConfigurationTemplateDto,
   MoveTemplateFileDto,
   ReplaceTemplateManifestDto,
@@ -56,12 +70,28 @@ import {
 @RequirePermissions(Permissions.TEMPLATES_READ)
 @ApiTags("Configuration Templates")
 @ApiAccessToken()
+@ApiTemplateErrors()
 export class ConfigurationTemplatesController {
   constructor(private readonly templates: ConfigurationTemplatesService) {}
 
+  @Get("versions/:versionId/revision")
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
+  @ApiOperation({
+    summary: "Read a workspace-scoped mutation revision without a read grant",
+  })
+  @ApiOkResponse({ type: RevisionResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  revision(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("versionId") id: string,
+  ) {
+    return this.templates.revision(user.workspaceId, id);
+  }
+
   @Get()
   @ApiOperation({ summary: "List configuration templates" })
-  @ApiOkResponse({ type: ConfigurationTemplateResponseDto, isArray: true })
+  @ApiOkResponse({ type: ConfigurationTemplateListResponseDto, isArray: true })
   list(
     @CurrentUser() user: AuthenticatedUser,
     @Query("departmentId") departmentId?: string,
@@ -73,9 +103,21 @@ export class ConfigurationTemplatesController {
     );
   }
 
+  @Get("upload-configuration")
+  @RequirePermissions(Permissions.TEMPLATES_MANAGE)
+  @ApiOperation({
+    summary: "Read effective template upload limits",
+    description:
+      "Management permission required; metadata does not imply storage health or draft writability. Both per-file and per-version limits remain enforced.",
+  })
+  @ApiOkResponse({ type: TemplateUploadConfigurationResponseDto })
+  uploadConfiguration() {
+    return this.templates.uploadConfiguration();
+  }
+
   @Get(":id")
   @ApiOperation({ summary: "Get a template and its visible versions" })
-  @ApiOkResponse({ type: ConfigurationTemplateResponseDto })
+  @ApiOkResponse({ type: ConfigurationTemplateDetailResponseDto })
   get(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.templates.get(
       user.workspaceId,
@@ -87,7 +129,7 @@ export class ConfigurationTemplatesController {
   @Post()
   @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Create a template with draft version 1" })
-  @ApiCreatedResponse({ type: ConfigurationTemplateResponseDto })
+  @ApiCreatedResponse({ type: ConfigurationTemplateCreatedResponseDto })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
   @ApiValidationErrors()
@@ -101,6 +143,7 @@ export class ConfigurationTemplatesController {
   @Patch(":id")
   @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Update template metadata" })
+  @ApiOkResponse({ type: TemplateScalarResponseDto })
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -114,7 +157,10 @@ export class ConfigurationTemplatesController {
   @ApiOperation({
     summary: "Clone the latest published version into a new draft",
   })
-  @ApiCreatedResponse({ description: "Editable draft with copied manifest." })
+  @ApiCreatedResponse({
+    type: TemplateManifestResponseDto,
+    description: "Editable draft with copied manifest.",
+  })
   createDraft(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.templates.createDraft(user.workspaceId, id, user.id);
   }
@@ -122,29 +168,41 @@ export class ConfigurationTemplatesController {
   @Post(":id/archive")
   @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Archive a configuration template" })
+  @ApiCreatedResponse({ type: TemplateScalarResponseDto })
   archive(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.templates.archive(user.workspaceId, id);
   }
 
   @Put("versions/:versionId/manifest")
+  @ApiRevision()
   @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({
     summary: "Atomically replace draft folders and ordered command stages",
   })
-  @ApiOkResponse({ description: "Updated draft manifest." })
+  @ApiOkResponse({
+    type: TemplateManifestResponseDto,
+    description: "Updated draft manifest including preserved files.",
+  })
   replaceManifest(
     @CurrentUser() user: AuthenticatedUser,
     @Param("versionId") versionId: string,
+    @ExpectedRevision() revision: number,
     @Body() dto: ReplaceTemplateManifestDto,
   ) {
-    return this.templates.replaceManifest(user.workspaceId, versionId, dto);
+    return this.templates.replaceManifest(
+      user.workspaceId,
+      versionId,
+      dto,
+      revision,
+    );
   }
 
   @Post("versions/:versionId/files")
+  @ApiRevision()
   @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @UseInterceptors(
-    FileInterceptor("file", {
-      limits: { fileSize: ConfigurationTemplatesService.maxFileBytes() },
+    EffectiveFileInterceptor(() => ({
+      limits: { fileSize: ConfigurationTemplatesService.maxFileBytes() + 1 },
       storage: diskStorage({
         destination: (_request, _file, callback) => {
           const directory =
@@ -155,7 +213,7 @@ export class ConfigurationTemplatesController {
         },
         filename: (_request, _file, callback) => callback(null, randomUUID()),
       }),
-    }),
+    })),
     TemplateUploadCleanupInterceptor,
   )
   @ApiConsumes("multipart/form-data")
@@ -175,9 +233,12 @@ export class ConfigurationTemplatesController {
   @ApiOperation({
     summary: "Upload and register an immutable MinIO-backed file",
   })
+  @ApiCreatedResponse({ type: TemplateFileMutationResponseDto })
+  @ApiUploadSizeError()
   uploadFile(
     @CurrentUser() user: AuthenticatedUser,
     @Param("versionId") versionId: string,
+    @ExpectedRevision() revision: number,
     @Body() dto: UploadTemplateFileDto,
     @UploadedFile(new ParseFilePipe({ fileIsRequired: true }))
     file: {
@@ -192,39 +253,65 @@ export class ConfigurationTemplatesController {
       versionId,
       dto.destinationPath,
       file,
+      revision,
     );
   }
 
   @Patch("versions/:versionId/files/:fileId")
+  @ApiRevision()
   @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Change a draft file destination path" })
+  @ApiOkResponse({ type: TemplateFileMutationResponseDto })
   moveFile(
     @CurrentUser() user: AuthenticatedUser,
     @Param("versionId") versionId: string,
+    @ExpectedRevision() revision: number,
     @Param("fileId") fileId: string,
     @Body() dto: MoveTemplateFileDto,
   ) {
-    return this.templates.moveFile(user.workspaceId, versionId, fileId, dto);
+    return this.templates.moveFile(
+      user.workspaceId,
+      versionId,
+      fileId,
+      dto,
+      revision,
+    );
   }
 
   @Delete("versions/:versionId/files/:fileId")
+  @ApiRevision()
   @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Remove a file registration from a draft" })
+  @ApiOkResponse({ type: TemplateFileRemovedResponseDto })
   removeFile(
     @CurrentUser() user: AuthenticatedUser,
     @Param("versionId") versionId: string,
+    @ExpectedRevision() revision: number,
     @Param("fileId") fileId: string,
   ) {
-    return this.templates.removeFile(user.workspaceId, versionId, fileId);
+    return this.templates.removeFile(
+      user.workspaceId,
+      versionId,
+      fileId,
+      revision,
+    );
   }
 
   @Post("versions/:versionId/publish")
+  @ApiRevision()
   @RequirePermissions(Permissions.TEMPLATES_MANAGE)
   @ApiOperation({ summary: "Validate and immutably publish a draft version" })
+  @ApiCreatedResponse({ type: TemplateManifestResponseDto })
   publish(
     @CurrentUser() user: AuthenticatedUser,
     @Param("versionId") versionId: string,
+    @ExpectedRevision() revision: number,
   ) {
-    return this.templates.publish(user.workspaceId, versionId, user.id);
+    return this.templates.publish(
+      user.workspaceId,
+      versionId,
+      user.id,
+      revision,
+    );
   }
 }

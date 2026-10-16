@@ -4,10 +4,12 @@ export interface AuthenticatedUser {
   roles: Array<{ id: string; key: string; name: string }>;
   permissions: string[];
   type?: "access";
+  accessExpiresAt?: number;
 }
 
 export interface AccessTokenPayload {
   id: string;
   workspaceId: string;
   type: "access";
+  exp?: number;
 }
