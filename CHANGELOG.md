@@ -1,5 +1,19 @@
 # Backend changelog
 
+## 0.3.0-dev.7 — inactive delegated bio domain foundation
+
+- Model trusted employee/agent separation, exact manual approval, revision-safe
+  bio changes, frozen replay and actual-actor history behind mandatory ports.
+- Model separate content/privacy scopes, one-time owner permission snapshots and
+  permanent downward removal; human overwrite clears the current AI badge.
+- Missing identity or atomic persistence fails closed. No production adapters,
+  routes, Nest registration, credentials or migration; current writers unchanged.
+
+In-memory tests prove domain rules and simulated transactions only. Activation
+requires real agent authentication, persistence, coordinated human writers and
+permission-loss hooks together; no live functionality or checklist closure is
+claimed. See [activation boundaries](Docs/delegated-bio-foundation-contracts.md).
+
 ## 0.3.0-dev.6 — task text limit compatibility
 
 - Preserve existing creation limits on human detail edits: title240 and

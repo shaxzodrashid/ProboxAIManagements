@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.3.0-dev.6**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.3.0-dev.7**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -20,6 +20,7 @@ Available since refers to the first tracked Git release containing this bounded 
 | Public identity on fresh human task reads                          | 0.3.0-dev.3     | supported  | [Contract](../Docs/task-assignee-identity-contracts.md)        |
 | Human task edits preserve existing creation text limits            | 0.3.0-dev.6     | supported  | [Contract](../Docs/task-text-limit-contracts.md)               |
 | Current workflow label and palette on member task reads            | 0.3.0-dev.2     | supported  | [Contract](../Docs/task-workflow-display-contracts.md)         |
+| Inactive domain rules for owner-approved delegated bio edits       | 0.3.0-dev.7     | foundation | [Contract](../Docs/delegated-bio-foundation-contracts.md)      |
 | Bounded initialization event recovery                              | 0.2.0-dev.1     | supported  | [Contract](../Docs/initialization-event-readback-contracts.md) |
 | Profile audiences, directed contacts and private aliases           | 0.2.0-dev.1     | supported  | [Contract](../Docs/profile-picker-contracts.md)                |
 | Optional plain bio, limit1000 and private default                  | 0.2.0-dev.1     | supported  | [Contract](../Docs/human-task-query-bio-evidence.md)           |
@@ -43,6 +44,7 @@ Available since refers to the first tracked Git release containing this bounded 
 
 ## Release references
 
+- **0.3.0-dev.7**: `refs/tags/v0.3.0-dev.7`, dev, not-deployed.
 - **0.3.0-dev.6**: `refs/tags/v0.3.0-dev.6`, dev, not-deployed.
 - **0.3.0-dev.5**: `refs/tags/v0.3.0-dev.5`, dev, not-deployed.
 - **0.3.0-dev.4**: `refs/tags/v0.3.0-dev.4`, dev, not-deployed.

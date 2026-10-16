@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.0-dev.7",
+      "gitRef": "refs/tags/v0.3.0-dev.7",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.0-dev.6",
       "gitRef": "refs/tags/v0.3.0-dev.6",
       "channel": "dev",
@@ -79,6 +85,13 @@
     }
   ],
   "features": [
+    {
+      "id": "inactive-delegated-bio-domain",
+      "title": "Inactive domain rules for owner-approved delegated bio edits",
+      "since": "0.3.0-dev.7",
+      "state": "foundation",
+      "contract": "Docs/delegated-bio-foundation-contracts.md"
+    },
     {
       "id": "human-task-text-limit-compatibility",
       "title": "Human task edits preserve existing creation text limits",
