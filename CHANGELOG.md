@@ -1,5 +1,19 @@
 # Backend changelog
 
+## 0.3.0-dev.8 — shared manual availability and UI handoff
+
+- Add self read/set/clear and public read for one shared Available/Away/Busy value.
+  No selected default, audience-specific rule or automatic presence inference.
+- Coordinate human writes with revisions, request receipts and truthful employee
+  history; exact retries never overwrite a newer status. Agent execution stays off.
+- Retain legacy STATUS audience metadata without applying it to shared availability;
+  other profile privacy remains independent. Add the ongoing backend/UI handoff.
+
+Additive migration20261016010000 has no user/policy/grant backfill. Custom text,
+badge symbols, expiry and coordinated main-profile/status Save remain unfinished.
+See [status contract](Docs/shared-manual-status-contracts.md) and
+[UI impact](Docs/backend-ui-handoff.md). No deployment or live credentials.
+
 ## 0.3.0-dev.7 — inactive delegated bio domain foundation
 
 - Model trusted employee/agent separation, exact manual approval, revision-safe

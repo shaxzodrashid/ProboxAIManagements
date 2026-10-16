@@ -9,15 +9,27 @@ import { AccountsController } from "./accounts.controller";
 import { AccountsService } from "./accounts.service";
 import { AuthorizationModule } from "../authorization/authorization.module";
 import { TelegramBotModule } from "../telegram/telegram-bot.module";
+import {
+  ManualStatusController,
+  PublicManualStatusController,
+} from "./manual-status.controller";
+import { ManualStatusService } from "./manual-status.service";
 @Module({
   imports: [AuthModule, AuthorizationModule, TelegramBotModule],
   controllers: [
+    ManualStatusController,
+    PublicManualStatusController,
     AccountsController,
     ProfilePrivacyController,
     ProfilePickerController,
     PublicProfileController,
   ],
-  providers: [AccountsService, ProfilePrivacyService, ProfilePickerService],
+  providers: [
+    AccountsService,
+    ProfilePrivacyService,
+    ProfilePickerService,
+    ManualStatusService,
+  ],
   exports: [AccountsService, ProfilePrivacyService],
 })
 export class AccountsModule {}

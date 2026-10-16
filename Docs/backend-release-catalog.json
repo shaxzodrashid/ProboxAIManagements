@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.0-dev.8",
+      "gitRef": "refs/tags/v0.3.0-dev.8",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.0-dev.7",
       "gitRef": "refs/tags/v0.3.0-dev.7",
       "channel": "dev",
@@ -85,6 +91,13 @@
     }
   ],
   "features": [
+    {
+      "id": "shared-manual-availability",
+      "title": "One shared manual availability with self revision and retry recovery",
+      "since": "0.3.0-dev.8",
+      "state": "supported",
+      "contract": "Docs/shared-manual-status-contracts.md"
+    },
     {
       "id": "inactive-delegated-bio-domain",
       "title": "Inactive domain rules for owner-approved delegated bio edits",

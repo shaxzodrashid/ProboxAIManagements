@@ -41,7 +41,12 @@ export class ReplaceProfileAudienceDto {
   workspaceIds!: string[];
 }
 export class ProfileAudienceResponseDto extends ReplaceProfileAudienceDto {
-  @ApiProperty({ enum: ProfileAudienceField }) field!: ProfileAudienceField;
+  @ApiProperty({
+    enum: ProfileAudienceField,
+    description:
+      "STATUS is retained legacy metadata only; it does not hide or vary the shared manual availability at /profiles/:accountId/status. Other field audiences remain effective.",
+  })
+  field!: ProfileAudienceField;
   @ApiProperty({
     description: "Number of selected account entries, not distinct viewers.",
   })
@@ -60,7 +65,11 @@ export class ProfileContactRemovedDto {
 }
 
 export class SaveProfileAudienceDto extends ReplaceProfileAudienceDto {
-  @ApiProperty({ enum: ProfileAudienceField })
+  @ApiProperty({
+    enum: ProfileAudienceField,
+    description:
+      "STATUS saves legacy metadata only and has no effect on shared manual availability. Other field privacy policies remain independent.",
+  })
   @IsEnum(ProfileAudienceField)
   field!: ProfileAudienceField;
 }

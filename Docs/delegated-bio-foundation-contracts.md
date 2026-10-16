@@ -112,6 +112,9 @@ privacy, authorization and other regressions must still pass unchanged.
 
 No real human-writer coordination, real permission-loss integration, persistent
 approval, public badge delivery or live agent execution is claimed. No checklist
-ID is closed. Availability overlap/fallback, employee rosters, broader history
-disclosure and SESSION07 command-output policy remain separate pending contracts.
+ID is closed. The later owner simplification removes availability overlap/fallback
+and employee-roster dependencies for status: see
+[shared manual availability](shared-manual-status-contracts.md). Broader history
+disclosure and SESSION07 command-output policy remain separate pending contracts;
+any independently selected employee-roster feature retains its own contract.
 The separately uncommitted linked-agent assessment and user README are preserved.

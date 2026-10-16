@@ -22,7 +22,11 @@ import { ProfileAudienceField } from "@prisma/client";
 import { ProfileAudienceResponseDto } from "./profile-privacy.dto";
 
 export class AudiencePickerQueryDto {
-  @ApiProperty({ enum: ProfileAudienceField })
+  @ApiProperty({
+    enum: ProfileAudienceField,
+    description:
+      "STATUS selects legacy audience metadata, not privacy for the universally shared manual availability. Other field pickers retain their audience semantics.",
+  })
   @IsEnum(ProfileAudienceField)
   field!: ProfileAudienceField;
   @ApiPropertyOptional({

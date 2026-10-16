@@ -243,6 +243,7 @@ model TelegramSession {
 }
 
 model User {
+  manualProfileStatus       ManualProfileStatus?
   taskCreations             TaskCreationReceipt[]
   chatGroupsCreated         ChatGroup[]                       @relation("chatGroupCreator")
   chatGroupsOwned           ChatGroup[]                       @relation("chatGroupOwner")
@@ -291,6 +292,36 @@ model User {
   roleAssignmentsMade       UserRoleAssignment[]              @relation("roleAssignmentCreator")
 
   @@unique([id, workspaceId])
+}
+
+enum ManualAvailability {
+  AVAILABLE
+  AWAY
+  BUSY
+}
+
+model ManualProfileStatus {
+  ownerId      String                        @id
+  owner        User                          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  availability ManualAvailability?
+  revision     Int                           @default(0)
+  mutations    ManualProfileStatusMutation[]
+}
+
+model ManualProfileStatusMutation {
+  ownerId          String
+  requestId        String
+  status           ManualProfileStatus @relation(fields: [ownerId], references: [ownerId], onDelete: Cascade)
+  workspaceId      String
+  actorId          String
+  expectedRevision Int
+  revision         Int
+  before           ManualAvailability?
+  availability     ManualAvailability?
+  createdAt        DateTime            @default(now())
+
+  @@id([ownerId, requestId])
+  @@unique([ownerId, revision])
 }
 
 model ChatGroup {
