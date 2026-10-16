@@ -287,7 +287,12 @@ export class ProfilePrivacyService {
     return this.transaction(async (tx) => {
       await this.owner(tx, workspaceId, ownerId);
       await tx.profileContact.deleteMany({
-        where: { ownerId, contactAccountId },
+        // UUID text is case-insensitive even though the legacy FK is TEXT.
+        // Revoke every matching caller-owned spelling; never rewrite identities.
+        where: {
+          ownerId,
+          contactAccountId: { equals: contactAccountId, mode: "insensitive" },
+        },
       });
       return { removed: true };
     }, true);

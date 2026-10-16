@@ -1,5 +1,19 @@
 # Backend changelog
 
+## 0.2.3-dev.1 — profile Contact revocation correction
+
+- Remove caller-owned directed Contact grants and private aliases with
+  case-insensitive UUID matching. A valid uppercase or mixed-case DELETE can no
+  longer report success while leaving Contacts-only biography or birthday access.
+- Revoke matching historical text spellings without rewriting account identities;
+  preserve other owners' Contacts and all separately selected audience policies.
+- Cover actual HTTP/PostgreSQL redaction after removal, repeated requests,
+  historical references, authentication and validation. No schema migration or
+  new profile/status/default policy is introduced. See
+  [contract and verification](Docs/profile-contact-revocation-contracts.md).
+
+Local development checkpoint only. No push, deployment or production action.
+
 ## 0.2.2 — concurrent profile test-server lifetime
 
 - Give the self-profile HTTP suite an explicitly listening loopback server for its
