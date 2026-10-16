@@ -1,6 +1,6 @@
 {
   "name": "proboxai",
-  "version": "0.2.0-dev.2",
+  "version": "0.2.0",
   "private": true,
   "description": "ProboxAI programmatic coding-session control plane",
   "bin": {

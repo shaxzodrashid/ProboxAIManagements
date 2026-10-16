@@ -34,6 +34,15 @@ assert.equal(syntax.status, 0, syntax.stderr);
 let passed = 0;
 function scenario(name, command, expected, check, overrides = {}) {
   const root = mkdtempSync(join(tmpdir(), "proboxai-deploy-test-"));
+  const multiEnv = name.startsWith("multi-env");
+  const environmentPaths = [
+    join(root, "service.env"),
+    ...(multiEnv
+      ? ["database", "minio", "anthropic", "telegram"].map((layer) =>
+          join(root, `${layer}.env`),
+        )
+      : []),
+  ];
   const bin = join(root, "bin"),
     state = join(root, "state"),
     source = join(root, "source"),
@@ -54,13 +63,22 @@ function scenario(name, command, expected, check, overrides = {}) {
     writeFileSync(join(root, "source-head"), "a".repeat(40));
     writeFileSync(
       join(root, "service.env"),
-      name === "port-mismatch"
+      name === "port-mismatch" || multiEnv
         ? "NODE_ENV=production\nPORT=4000\n"
         : "NODE_ENV=production\n",
       {
         mode: 0o600,
       },
     );
+    for (const [index, path] of environmentPaths.entries()) {
+      if (index === 0 || (name === "multi-env-missing" && index === 4))
+        continue;
+      writeFileSync(
+        path,
+        `DEPLOY_TEST_LAYER_${index}=fixture\nDEPLOY_TEST_LAST_LAYER=${index}\n${index === 4 ? "PORT=3000\n" : ""}`,
+        { mode: 0o600 },
+      );
+    }
     writeFileSync(
       join(old, "dist", "main.js"),
       "// Known-good fixture; never executed\n",
@@ -117,7 +135,16 @@ esac`,
   case "$2" in
    --property=WorkingDirectory) [[ "$scenario" != bad-unit ]] && echo "$root/state/current" || echo /wrong ;;
    --property=User) id -un ;;
-   --property=EnvironmentFiles) echo "$root/service.env (ignore_errors=no)" ;;
+   --property=EnvironmentFiles)
+    if [[ "$scenario" = multi-env* ]]; then
+     files=(service database minio anthropic telegram)
+     [[ "$scenario" != multi-env-order-mismatch ]] || files=(service minio database anthropic telegram)
+     separator=$'\\n'
+     [[ "$scenario" != multi-env-single-line ]] || separator=' '
+     prefix=''
+     for file in "\${files[@]}"; do printf '%s%s (ignore_errors=no)' "$prefix" "$root/$file.env"; prefix=$separator; done
+     printf '\\n'
+    else echo "$root/service.env (ignore_errors=no)"; fi ;;
    --property=ExecStart) echo "{ argv[]=$root/bin/node dist/main.js ; }" ;;
   esac ;;
  is-active) value=$(cat "$root/active"); [[ "\${2:-}" = --quiet ]] || { [[ "$value" = 1 ]] && echo active || echo inactive; }; [[ "$value" = 1 ]] ;;
@@ -134,7 +161,10 @@ esac`,
       'if [[ "$1" = -u ]]; then [[ "$scenario" = root-user ]] && echo 0 || echo 1000; else echo proboxai; fi',
     );
     mock("shellcheck", "exit 0");
-    mock("stat", '[[ "$scenario" != world-env ]] && echo 600 || echo 644');
+    mock(
+      "stat",
+      'if [[ "$scenario" = world-env || ( "$scenario" = multi-env-world && "${*: -1}" = */telegram.env ) ]]; then echo 644; else echo 600; fi',
+    );
     mock(
       "sudo",
       '[[ "$1" = -n && "$2" = systemctl ]] || exit 99; shift 2; exec "$root/bin/systemctl" "$@"',
@@ -143,17 +173,24 @@ esac`,
       "pnpm",
       `[[ "$scenario" != build-fail ]] || { [[ "$1" != build ]] || exit 1; }
 [[ "\${PROFILE_TEST_DATABASE_URL:-}" = '' ]] || exit 91
+[[ "\${DEPLOY_TEST_LAYER_1:-}" = '' && "\${DEPLOY_TEST_LAYER_2:-}" = '' && "\${DEPLOY_TEST_LAYER_3:-}" = '' && "\${DEPLOY_TEST_LAYER_4:-}" = '' ]] || exit 94
 [[ "\${DATABASE_URL:-}" = 'postgresql://build_only@127.0.0.1:1/build_only' ]] || exit 92
 if [[ "$1" = build ]]; then mkdir -p dist node_modules/prisma/build; echo '// fixture' > dist/main.js; touch node_modules/prisma/build/index.js; fi`,
     );
     mock(
       "node",
-      `if [[ "\${1:-}" = --env-file=* && "\${2:-}" != -p ]]; then
- [[ "$PWD" = "$root/state/releases/"* && "$3" = migrate && "$4" = status && "$5" = --schema && "$6" = "$PWD/prisma/schema.prisma" && -f "$6" ]] || exit 93
+      `env_args=()
+while [[ "\${1:-}" = --env-file=* ]]; do env_args+=("$1"); shift; done
+if (( \${#env_args[@]} > 0 )) && [[ "\${1:-}" != -p ]]; then
+ [[ "$PWD" = "$root/state/releases/"* && "$2" = migrate && "$3" = status && "$4" = --schema && "$5" = "$PWD/prisma/schema.prisma" && -f "$5" ]] || exit 93
+ if [[ "$scenario" = multi-env* ]]; then
+  ${quote(unix(process.execPath))} "\${env_args[@]}" -e 'const a=require("node:assert/strict"); for(let i=1;i<=4;i++)a.equal(process.env["DEPLOY_TEST_LAYER_"+i],"fixture"); a.equal(process.env.DEPLOY_TEST_LAST_LAYER,"4"); a.equal(process.env.PORT,"3000")'
+  echo environment-order-verified >> "$root/calls"
+ fi
  printf 'candidate-migration-scope:%s\\n' "$PWD" >> "$root/calls"
  [[ "$scenario" != migration-pending && "$scenario" != candidate-new-migration-pending ]]; exit
 fi
-exec ${quote(unix(process.execPath))} "$@"`,
+exec ${quote(unix(process.execPath))} "\${env_args[@]}" "$@"`,
     );
     mock(
       "curl",
@@ -206,7 +243,10 @@ else printf '%s' '{"status":"ok","service":"proboxai","dependencies":{"postgres"
           ...process.env,
           PROBOX_DEPLOY_REPO: unix(source),
           PROBOX_DEPLOY_STATE: unix(state),
-          PROBOX_DEPLOY_ENV_FILE: unix(join(root, "service.env")),
+          PROBOX_DEPLOY_ENV_FILE: multiEnv ? "" : unix(environmentPaths[0]),
+          PROBOX_DEPLOY_ENV_FILES: multiEnv
+            ? environmentPaths.map(unix).join("\n")
+            : "",
           PROBOX_DEPLOY_NODE: unix(join(bin, "node")),
           PROBOX_DEPLOY_HEALTH_TIMEOUT: "1",
           PROFILE_TEST_DATABASE_URL: "must-not-reach-build",
@@ -306,6 +346,24 @@ scenario("healthy", "restart", 2, unchanged, {
   PROBOX_DEPLOY_HEALTH_TIMEOUT: "9999",
 });
 scenario("world-env", "restart", 2, unchanged);
+for (const name of ["multi-env", "multi-env-single-line"])
+  scenario(name, "restart", 0, ({ calls, current, old }) => {
+    assert.notEqual(realpathSync(current), realpathSync(old));
+    assert(calls.includes("environment-order-verified"));
+    assert(calls.includes("--env-file="));
+  });
+for (const name of [
+  "multi-env-order-mismatch",
+  "multi-env-missing",
+  "multi-env-world",
+])
+  scenario(name, "restart", 2, unchanged);
+scenario("healthy", "restart", 2, unchanged, {
+  PROBOX_DEPLOY_ENV_FILES: "/another/file.env",
+});
+scenario("healthy", "restart", 2, unchanged, {
+  PROBOX_DEPLOY_ENV_FILE: "relative.env",
+});
 scenario("port-mismatch", "restart", 2, unchanged);
 scenario("healthy", "restart", 2, unchanged, {
   PROBOX_DEPLOY_HEALTH_URL: "http://127.0.0.1:65536/api/v1/health/ready",

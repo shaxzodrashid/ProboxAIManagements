@@ -32,7 +32,7 @@ release preparation and rollback, the operator must explicitly change it to the
 release symlink. This script never edits/reloads systemd units or security settings.
 
 Prepare a private state directory outside the clean production source checkout,
-owned by the existing service user; keep the existing private environment file and
+owned by the existing service user; keep the existing private environment files and
 absolute storage/workspace paths outside release directories. State contains
 `current`, `releases/`, `logs/`, `deploy.lock` and `deployments.log`. Releases, logs
 and failed candidates are retained; retention/pruning is an explicit operator task.
@@ -86,6 +86,19 @@ or external health URL is accepted. Readiness must report ProboxAI and both
 PostgreSQL/MinIO ok; Swagger info.version must match the selected release's recorded
 public version. Curl connection/body/time limits bound retries and response size.
 
+For units with multiple `EnvironmentFile=` entries, set
+`PROBOX_DEPLOY_ENV_FILES` instead of `PROBOX_DEPLOY_ENV_FILE`: one absolute path
+per line, in exactly the same order as systemd. Paths containing whitespace and
+blank entries are rejected. Every file must be readable and private. The CLI checks
+the entire ordered list, including required-file semantics, and passes every file
+to Node in that order for configuration validation and migration status. Later
+files override earlier files. Neither variable contains the file contents; do not
+source or merge credential files. Setting both variables is rejected.
+
+See [the app2 setup runbook](deployment-app2.md) for the existing `/srv/proboxai/api`
+installation, five environment files and `/usr/local/bin/node`. CLI setup can retain
+the existing 0.1.0 runtime; updating to a dev prerelease remains rejected.
+
 Required Linux tools are Bash, Git, systemd, util-linux flock, coreutils, curl,
 tar, pnpm and a Node runtime supporting the backend and `--env-file`. Update preparation
 and development verification also require ShellCheck. The entire lifecycle command holds one exclusive lock.
@@ -103,8 +116,8 @@ integration tests requiring a separate isolated database remain skipped in this
 production preparation. They must pass in development/CI before merging main.
 
 Read-only `prisma migrate status` runs from the candidate with its explicit schema
-and migrations, using a clean process environment plus the exact service environment
-file. Pending/failed/unconfirmed migration state blocks update
+and migrations, using a clean process environment plus the exact ordered service environment
+files. Pending/failed/unconfirmed migration state blocks update
 before service switch. Source HEAD/dirty state is checked again after preparation;
 only a fast-forward to the prepared main commit is allowed. Runtime source checkout
 may advance even if subsequent health fails; rollback never resets Git history.

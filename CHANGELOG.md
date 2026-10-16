@@ -1,5 +1,22 @@
 # Backend changelog
 
+## 0.2.0 — stable release
+
+- Promote the bounded backend contracts from `0.2.0-dev.1` and deployment tooling
+  from `0.2.0-dev.2` to a stable package version. Preserve each feature's original
+  introduction reference and foundation/supported scope.
+- Support the existing ordered systemd environment-file list in the deployment
+  CLI, including private-file validation, configuration checks and read-only
+  candidate migration status. Retain the single-file configuration contract.
+- Document the app2 baseline cutover, exact runtime paths and recovery procedure.
+- Rollout from baseline `0.1.0` requires 20 database migrations, duplicate-draft and
+  default-department preflight, a verified database backup, and coordinated shutdown
+  of old writers/executors. Migrations add permission definitions without granting
+  them to existing roles. No seed or automatic data reconciliation is included.
+
+Release preparation is not proof of production deployment. See the
+[rollout procedure](Docs/release-0.2.0-rollout.md).
+
 ## 0.2.0-dev.2 — deployment tooling checkpoint
 
 - Linux/systemd CLI for help/status/logs, backend-only stop/resume and main-only

@@ -16,8 +16,11 @@ real contract evidence; preserve existing introduction versions. Run
 `pnpm release:docs` and review generated feature availability. The actual precommit
 hook runs `pnpm release:check`; stale docs or inconsistent metadata fail the hook.
 After all checks and commit, create an annotated `vVERSION` tag at that commit.
-Run `pnpm release:check -- --published` to verify provenance, then push dev and its
-new tag without overwriting any existing tag. Future tags remain immutable.
+Run `pnpm release:check -- --published` to verify provenance. For a development
+checkpoint, push dev and its new tag. For a stable production release, prepare from
+current remote main, publish the verified commit to main with its annotated tag,
+and independently read back both remote references. Never overwrite an existing
+tag. Future tags remain immutable. Publication alone does not prove deployment.
 
 `--published` checks local tag objects and the current HEAD; remote publication
 requires a successful authorized push and separate remote-ref verification. An
