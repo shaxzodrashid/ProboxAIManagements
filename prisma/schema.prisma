@@ -500,17 +500,36 @@ model AuthOtp {
 }
 
 model SessionToken {
-  id         String              @id @default(uuid())
-  userId     String
-  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  purpose    SessionTokenPurpose
-  tokenHash  String              @unique
-  expiresAt  DateTime
-  revokedAt  DateTime?
-  consumedAt DateTime?
-  createdAt  DateTime            @default(now())
+  browserSessions BrowserSession[]
+  id              String              @id @default(uuid())
+  userId          String
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose         SessionTokenPurpose
+  tokenHash       String              @unique
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  consumedAt      DateTime?
+  createdAt       DateTime            @default(now())
 
   @@index([userId, purpose, expiresAt])
+}
+
+// Opaque browser IDs are hashed. Token/CSRF bundles use independent AEAD encryption.
+model BrowserSession {
+  id                String        @id
+  userId            String?
+  workspaceId       String?
+  refreshId         String?
+  refresh           SessionToken? @relation(fields: [refreshId], references: [id], onDelete: Cascade)
+  bundle            String
+  csrfHash          String
+  createdAt         DateTime      @default(now())
+  idleExpiresAt     DateTime
+  absoluteExpiresAt DateTime
+  revokedAt         DateTime?
+
+  @@index([absoluteExpiresAt])
+  @@index([refreshId])
 }
 
 model Task {

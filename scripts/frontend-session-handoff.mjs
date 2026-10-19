@@ -16,14 +16,26 @@ const databaseUrl = requireFixtureDatabase(
 );
 const flags = new Set(process.argv.slice(2).filter((value) => value !== "--"));
 const portFlag = [...flags].find((x) => x.startsWith("--port="));
+const browserOriginFlag = [...flags].find((x) =>
+  x.startsWith("--browser-origin="),
+);
+const browserOrigin = browserOriginFlag?.slice("--browser-origin=".length);
+if (browserOrigin !== undefined && browserOrigin !== "http://127.0.0.1:5173")
+  throw new Error("Browser fixture origin must be http://127.0.0.1:5173");
 const port = portFlag
   ? Number(portFlag.slice(7))
   : flags.has("--verify")
     ? 0
     : 3050;
 for (const flag of flags)
-  if (!["--verify", "--prepare"].includes(flag) && flag !== portFlag)
-    throw new Error("Use --prepare, --verify, or --port=<loopback port>");
+  if (
+    !["--verify", "--prepare"].includes(flag) &&
+    flag !== portFlag &&
+    flag !== browserOriginFlag
+  )
+    throw new Error(
+      "Use --prepare, --verify, --port=<loopback port>, or --browser-origin=http://127.0.0.1:5173",
+    );
 if (flags.has("--prepare")) {
   const child = spawnSync(
     process.execPath,
@@ -38,7 +50,11 @@ if (flags.has("--prepare")) {
   if (child.status !== 0) process.exit(child.status ?? 1);
   if (!flags.has("--verify")) process.exit(0);
 }
-const fixture = await createFrontendSessionHarness(databaseUrl, port);
+const fixture = await createFrontendSessionHarness(
+  databaseUrl,
+  port,
+  browserOrigin,
+);
 if (!flags.has("--verify")) {
   console.log(
     "CONTROLLED LOCAL FIXTURE: real API/guards/database; synthetic credentials; no live agent. Ctrl+C cleans this fixture.",

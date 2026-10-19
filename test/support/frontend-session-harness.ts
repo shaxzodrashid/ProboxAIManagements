@@ -31,6 +31,12 @@ import { WorkspacePathPolicy } from "../../src/storage/workspace-path-policy.ser
 import { PrismaService } from "../../src/prisma/prisma.service";
 import { TelegramService } from "../../src/telegram/telegram.service";
 import { TelegramBotService } from "../../src/telegram/telegram-bot.service";
+import { BrowserSessionController } from "../../src/browser-sessions/browser-session.controller";
+import {
+  BrowserSessionService,
+  BROWSER_SESSION_CONFIG,
+} from "../../src/browser-sessions/browser-session.service";
+import { BrowserSessionConfig } from "../../src/browser-sessions/browser-session.config";
 
 export const fixtureDatabaseUrl =
   "postgresql://profile_test@127.0.0.1:55439/profile_test";
@@ -163,6 +169,7 @@ export async function untilFixture(
 export async function createFrontendSessionHarness(
   databaseUrl: string,
   port = 0,
+  browserOrigin?: string,
 ) {
   requireFixtureDatabase(databaseUrl);
   if (!Number.isInteger(port) || port < 0 || port > 65535)
@@ -178,6 +185,16 @@ export async function createFrontendSessionHarness(
   let workspaceId: string | undefined;
   let app: INestApplication | undefined;
   const runner = new ControlledFrontendRunner();
+  const browserConfig: BrowserSessionConfig = {
+    enabled: true,
+    origin: browserOrigin ?? "http://127.0.0.1:0",
+    secure: false,
+    key: randomBytes(32),
+    keyId: `fixture_${randomBytes(8).toString("hex")}`,
+    idleMs: 30 * 60_000,
+    absoluteMs: 8 * 60 * 60_000,
+    anonymousMs: 10 * 60_000,
+  };
   let closed = false;
   async function close() {
     if (closed) return;
@@ -189,6 +206,9 @@ export async function createFrontendSessionHarness(
         await app.close();
       }
       if (workspaceId) {
+        await prisma.browserSession.deleteMany({
+          where: { bundle: { startsWith: browserConfig.keyId + "." } },
+        });
         await untilFixture(
           async () =>
             (await prisma.proboxAiSession.count({
@@ -333,6 +353,7 @@ export async function createFrontendSessionHarness(
     projects.onModuleInit = () => {};
     const module = await Test.createTestingModule({
       controllers: [
+        BrowserSessionController,
         AuthController,
         AccountsController,
         AuthorizationController,
@@ -341,6 +362,8 @@ export async function createFrontendSessionHarness(
         SessionsController,
       ],
       providers: [
+        BrowserSessionService,
+        { provide: BROWSER_SESSION_CONFIG, useValue: browserConfig },
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: jwt },
         { provide: TelegramService, useValue: telegram },
@@ -383,6 +406,7 @@ export async function createFrontendSessionHarness(
     await app.listen(port, "127.0.0.1");
     const address = app.getHttpServer().address();
     const baseUrl = `http://127.0.0.1:${address.port}/api/v1`;
+    browserConfig.origin = browserOrigin ?? `http://127.0.0.1:${address.port}`;
     return {
       app,
       prisma,
@@ -399,8 +423,7 @@ export async function createFrontendSessionHarness(
         projectId: project.id,
         taskId: task.id,
         directory: path.join(root, directoryName),
-        browserAuthentication:
-          "Pending BFF contract: this is the existing bearer API, not browser session transport",
+        browserAuthentication: `Controlled local cookie BFF at ${browserConfig.origin}/api/v1/browser; existing bearer API also available`,
         providerCalls: 0,
       },
     };

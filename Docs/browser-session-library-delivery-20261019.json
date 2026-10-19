@@ -1,0 +1,27 @@
+{
+  "status": "succeeded",
+  "library_file_id": "libfile_4b1d53e411a88191b8ead5b5b6db581a",
+  "file_id": "file_00000000191081f5a6ca536cd7ebca66",
+  "file_name": "ProboxAI-browser-login-handoff-2026-10-19-1792394691598.zip",
+  "library_path": "/ProboxAI-browser-login-handoff-2026-10-19-1792394691598.zip",
+  "current_version_number": 0,
+  "mime_type": "application/zip",
+  "file_size_bytes": 18249,
+  "local_file": "artifacts/ProboxAI-browser-login-handoff-2026-10-19-1792394691598.zip",
+  "sha256": "1bc08338241049485b42208dff06f3dafb94749067f5f925b4d486600b3d1bfb",
+  "payload_scope": "Sanitized documentation/contracts/evidence; requires updated checkouts; not standalone application or patch",
+  "validation": {
+    "archiveEntries": 7,
+    "crcPassed": true,
+    "entryHashesPassed": true,
+    "schemaReferencesPassed": true,
+    "sanitizationScanPassed": true,
+    "sourceFilesMatched": 34
+  },
+  "local_metadata": {
+    "nativeLibrarySaveConfirmed": true,
+    "extendedAttributeWritebackSucceeded": false,
+    "reason": "Current Python helper cannot apply os.setxattr on Windows; exact Library identity retained in this sidecar. ZIP bytes unchanged."
+  },
+  "preservation": "Existing implementation files, verification record and earlier artifacts retained; no feature or database work performed"
+}

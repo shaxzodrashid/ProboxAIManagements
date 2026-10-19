@@ -1,5 +1,11 @@
 # Proposed same-origin browser session / BFF contract
 
+**19 October update:** the owner approved local implementation at06:35 UTC.
+The implemented subset and its tested boundaries are recorded in
+[Local browser login implementation](browser-session-local-implementation.md).
+The review-draft language below is historical; unresolved deployment and product
+choices are not implicitly approved by that implementation.
+
 **Review draft only — not approved or implemented.** The parent has asked the user
 about the BFF direction and is awaiting an answer. Every new route, duration,
 storage rule and control below is proposed. Existing frontend ADR-003 remains in

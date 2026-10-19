@@ -25,6 +25,12 @@ import { TelegramModule } from "../telegram/telegram.module";
     OptionalJwtAuthGuard,
     PermissionsGuard,
   ],
-  exports: [JwtModule, JwtAuthGuard, OptionalJwtAuthGuard, PermissionsGuard],
+  exports: [
+    AuthService,
+    JwtModule,
+    JwtAuthGuard,
+    OptionalJwtAuthGuard,
+    PermissionsGuard,
+  ],
 })
 export class AuthModule {}

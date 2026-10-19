@@ -26,9 +26,22 @@ final binary Git diff and stderr stream.
 Install dependencies with `pnpm install`. The install runs Husky's `prepare`
 script and configures the repository's Git hooks automatically.
 
+The deployment checks also require Bash and ShellCheck on the development
+machine. On Windows, install Git for Windows (which provides Bash) and ShellCheck:
+
+```powershell
+winget install --id koalaman.shellcheck --exact --source winget
+```
+
+Open a new terminal after installation so it picks up the updated `PATH`, then
+verify with `shellcheck --version` and `pnpm deploy:check`. For custom executable
+locations, set `PROBOX_TEST_BASH` and `PROBOX_SHELLCHECK` to their respective paths.
+
 Every commit must pass the following checks:
 
 - ESLint and Prettier checks for staged files.
+- Release contract validation, deployment Bash syntax/ShellCheck, and deployment
+  scenario tests.
 - A full TypeScript typecheck, including tests.
 - The complete Jest test suite.
 

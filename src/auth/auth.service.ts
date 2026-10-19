@@ -122,10 +122,10 @@ export class AuthService {
     return { message: "Registration completed successfully." };
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, db: Prisma.TransactionClient = this.prisma) {
     const username = normalizeUsername(dto.username);
     const user = await loginDependency(() =>
-      this.prisma.user.findUnique({ where: { username } }),
+      db.user.findUnique({ where: { username } }),
     );
     const passwordMatches = user?.passwordHash
       ? await this.verifyPassword(dto.password, user.passwordHash)
@@ -140,7 +140,7 @@ export class AuthService {
 
     const refreshToken = randomToken();
     await loginDependency(() =>
-      this.prisma.sessionToken.create({
+      db.sessionToken.create({
         data: {
           userId: user.id,
           purpose: SessionTokenPurpose.REFRESH,
@@ -155,9 +155,12 @@ export class AuthService {
     };
   }
 
-  async refresh(refreshToken: string) {
+  async refresh(
+    refreshToken: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
     const token = await authenticationDependency(() =>
-      this.prisma.sessionToken.findUnique({
+      db.sessionToken.findUnique({
         where: { tokenHash: hashToken(refreshToken) },
         include: { user: true },
       }),

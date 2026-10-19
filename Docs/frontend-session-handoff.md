@@ -1,5 +1,10 @@
 # Frontend development through sessions
 
+**19 October local update:** approved cookie/BFF login and the frontend adapter
+are now implemented. See the [current implementation and test contract](browser-session-local-implementation.md).
+The bearer-first instructions below remain useful for existing clients; prior
+statements that BFF approval is pending are historical. Production remains disabled.
+
 The backend can be exercised locally from real password login through session
 creation, persisted assistant output, SSE, completion, follow-up and interruption.
 Use the controlled harness below: it runs existing controllers, guards, services

@@ -13,6 +13,7 @@ import { DepartmentsModule } from "./departments/departments.module";
 import { ConfigurationTemplatesModule } from "./configuration-templates/configuration-templates.module";
 import { AuthorizationModule } from "./authorization/authorization.module";
 import { GroupsModule } from "./groups/groups.module";
+import { BrowserSessionModule } from "./browser-sessions/browser-session.module";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { GroupsModule } from "./groups/groups.module";
     StorageModule,
     TelegramModule,
     AuthModule,
+    BrowserSessionModule,
     AuthorizationModule,
     AccountsModule,
     TasksModule,
