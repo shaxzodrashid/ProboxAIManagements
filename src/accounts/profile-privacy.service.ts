@@ -20,6 +20,9 @@ import { AccountsService } from "./accounts.service";
 import { SaveSelfProfileDto } from "./profile-privacy.dto";
 import { ReplaceProfileAudienceDto } from "./profile-privacy.dto";
 import { audienceAllows } from "./profile-audience";
+import { resolveProfileAccountId } from "./profile-account-lookup";
+import { customStatusSelect, storedCustomStatus } from "./custom-status";
+import { avatarMetadata, avatarSelect } from "./profile-avatar-domain";
 
 const recipients = {
   accountRecipients: true,
@@ -319,9 +322,21 @@ export class ProfilePrivacyService {
       where = { username };
     }
     return this.transaction(async (tx) => {
+      let lookup = where;
+      if (where.id !== undefined) {
+        const id = await resolveProfileAccountId(tx, where.id);
+        if (!id) throw new NotFoundException("Profile not found");
+        lookup = { id };
+      }
       const owner = await tx.user.findFirst({
-        where: { ...where, status: UserStatus.OPEN },
-        select: { ...publicIdentitySelect, bio: true, birthDate: true },
+        where: { ...lookup, status: UserStatus.OPEN },
+        select: {
+          ...publicIdentitySelect,
+          ...customStatusSelect,
+          avatarAsset: { select: avatarSelect },
+          bio: true,
+          birthDate: true,
+        },
       });
       if (!owner) throw new NotFoundException("Profile not found");
       const viewer = viewerId
@@ -351,8 +366,16 @@ export class ProfilePrivacyService {
           viewer,
           contact,
         );
+      const customStatus = storedCustomStatus(owner);
       return {
         ...publicIdentity(owner),
+        customStatus:
+          allows(ProfileAudienceField.STATUS) && customStatus?.active
+            ? customStatus
+            : null,
+        avatar: allows(ProfileAudienceField.AVATAR)
+          ? avatarMetadata(owner.avatarAsset, owner.id)
+          : null,
         bio: allows(ProfileAudienceField.BIO) ? owner.bio : null,
         birthdayDayMonth:
           owner.birthDate && allows(ProfileAudienceField.BIRTHDAY_DAY_MONTH)

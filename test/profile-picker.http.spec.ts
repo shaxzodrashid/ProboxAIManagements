@@ -37,6 +37,113 @@ if (url) {
       c: string,
       pending: string;
     const prefix = "picker" + randomUUID().replaceAll("-", "").slice(0, 12);
+    it("preserves exact legacy case-duplicate identities and rejects ambiguous or inactive fallback", async () => {
+      const lowerId = "de" + randomUUID().slice(2).toLowerCase();
+      const upperId = lowerId.toUpperCase();
+      const mixedId = "D" + lowerId.slice(1);
+      try {
+        for (const [id, fullName] of [
+          [lowerId, "Lower legacy identity"],
+          [upperId, "Upper legacy identity"],
+        ] as const) {
+          await prisma.user.create({
+            data: {
+              id,
+              workspaceId: w2,
+              phoneNumber: randomUUID(),
+              fullName,
+              status: "OPEN",
+            },
+          });
+        }
+        for (const [id, displayName] of [
+          [lowerId, "Lower legacy identity"],
+          [upperId, "Upper legacy identity"],
+        ] as const) {
+          const result = await request(app.getHttpServer())
+            .get("/profiles/" + id)
+            .expect(200);
+          expect(result.body).toMatchObject({ id, displayName, bio: null });
+        }
+        expect(mixedId).not.toBe(upperId);
+        await request(app.getHttpServer())
+          .get("/profiles/" + mixedId)
+          .expect(404);
+        await prisma.user.update({
+          where: { id: upperId },
+          data: { status: "BANNED" },
+        });
+        await request(app.getHttpServer())
+          .get("/profiles/" + upperId)
+          .expect(404);
+        await request(app.getHttpServer())
+          .get("/profiles/" + mixedId)
+          .expect(404);
+        await prisma.user.delete({ where: { id: lowerId } });
+        await request(app.getHttpServer())
+          .get("/profiles/" + lowerId)
+          .expect(404);
+        await prisma.user.update({
+          where: { id: upperId },
+          data: { status: "OPEN" },
+        });
+        expect(
+          (
+            await request(app.getHttpServer())
+              .get("/profiles/" + lowerId)
+              .expect(200)
+          ).body.id,
+        ).toBe(upperId);
+      } finally {
+        await prisma.user.deleteMany({
+          where: { id: { in: [lowerId, upperId] } },
+        });
+      }
+    });
+    it("treats uppercase profile UUIDs as the same identity without changing audiences", async () => {
+      const canonical = await request(app.getHttpServer())
+        .get("/profiles/" + b)
+        .expect(200);
+      const upper = await request(app.getHttpServer())
+        .get("/profiles/" + b.toUpperCase())
+        .expect(200);
+      expect(upper.body).toEqual(canonical.body);
+      expect(upper.body.id).toBe(b);
+      expect(upper.body.bio).toBeNull();
+      expect(upper.headers["cache-control"]).toBe("no-store");
+      await prisma.user.update({
+        where: { id: b },
+        data: { status: "BANNED" },
+      });
+      await request(app.getHttpServer())
+        .get("/profiles/" + b.toUpperCase())
+        .expect(404);
+      await request(app.getHttpServer())
+        .get("/profiles/" + randomUUID().toUpperCase())
+        .expect(404);
+    });
+    it("rejects public viewer and workspace query overrides on both lookup routes", async () => {
+      for (const route of [
+        "/profiles/" + a,
+        "/profiles/by-username/" + prefix + "_owner",
+      ]) {
+        for (const query of [
+          "?viewerId=" + a,
+          "?workspaceId=" + w1,
+          "?includePrivate=true",
+          "?field=BIO",
+        ]) {
+          await request(app.getHttpServer())
+            .get(route + query)
+            .expect(400);
+        }
+      }
+      const row = await prisma.user.findUniqueOrThrow({ where: { id: a } });
+      expect(row.bio).toBe("private biography");
+      expect(
+        await prisma.profileAudiencePolicy.count({ where: { ownerId: a } }),
+      ).toBe(0);
+    });
     beforeAll(async () => {
       prisma = new PrismaClient({ datasources: { db: { url } } });
       w1 = (
@@ -625,6 +732,8 @@ if (url) {
       const result = await publicRead().expect(200);
       expect(result.headers["cache-control"]).toBe("no-store");
       expect(result.body).toEqual({
+        avatar: null,
+        customStatus: null,
         id: a,
         displayName: prefix + " Owner",
         firstName: null,
@@ -680,14 +789,11 @@ if (url) {
         "private biography",
       );
       expect((await publicRead(b, a).expect(200)).body.bio).toBeNull();
-      expect(
-        (
-          await http()
-            .get("/profiles/" + a)
-            .query({ viewer: b })
-            .expect(200)
-        ).body.bio,
-      ).toBeNull();
+      await http()
+        .get("/profiles/" + a)
+        .query({ viewer: b })
+        .expect(400);
+      expect((await publicRead(a).expect(200)).body.bio).toBeNull();
       await http()
         .delete("/users/me/contacts/" + b)
         .set("Authorization", "Bearer " + a)
@@ -729,6 +835,27 @@ if (url) {
         { indexname: string }[]
       >`SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname IN ('User_public_fullName_search_idx', 'User_public_firstName_search_idx', 'User_public_lastName_search_idx', 'User_public_username_search_idx', 'ProfileContact_alias_search_idx') AND indexdef LIKE '%USING gin%'`;
       expect(indexes).toHaveLength(5);
+      // A small fixture can legitimately use another covering index even with
+      // seqscan disabled. Assert the installed expression/validity, not one
+      // cost-based plan. Case-variant HTTP tests above verify lookup behavior.
+      const casefold = await prisma.$queryRaw<
+        {
+          valid: boolean;
+          ready: boolean;
+          unique: boolean;
+          expression: string;
+        }[]
+      >`SELECT i.indisvalid AS valid, i.indisready AS ready,
+          i.indisunique AS unique, pg_get_expr(i.indexprs, i.indrelid) AS expression
+        FROM pg_index i
+        JOIN pg_class idx ON idx.oid = i.indexrelid
+        JOIN pg_class tab ON tab.oid = i.indrelid
+        JOIN pg_namespace ns ON ns.oid = tab.relnamespace
+        WHERE ns.nspname = 'public' AND tab.relname = 'User'
+          AND idx.relname = 'User_id_casefold_idx'`;
+      expect(casefold).toEqual([
+        { valid: true, ready: true, unique: false, expression: "lower(id)" },
+      ]);
     });
     it("OpenAPI declares discriminated picker items, privacy-safe public fields and nullable aliases", () => {
       const doc: any = SwaggerModule.createDocument(
@@ -736,6 +863,15 @@ if (url) {
         new DocumentBuilder().build(),
       );
       const schemas = doc.components.schemas;
+      for (const route of [
+        "/profiles/{accountId}",
+        "/profiles/by-username/{username}",
+      ]) {
+        expect(doc.paths[route].get.responses["400"]).toBeDefined();
+        expect(
+          doc.paths[route].get.parameters.every((p: any) => p.in !== "query"),
+        ).toBe(true);
+      }
       expect(
         schemas.AudiencePickerResponseDto.properties.items.items.oneOf,
       ).toHaveLength(2);

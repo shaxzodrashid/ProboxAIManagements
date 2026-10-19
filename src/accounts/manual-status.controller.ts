@@ -21,6 +21,7 @@ import { JwtAuthGuard } from "../auth/auth.guards";
 import { OptionalJwtAuthGuard } from "../auth/optional-jwt-auth.guard";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
+  ApiErrorResponseDto,
   ApiAccessToken,
   ApiAuthenticationErrors,
   ApiResourceErrors,
@@ -41,6 +42,7 @@ import { ManualStatusService } from "./manual-status.service";
 @ApiTags("Manual availability")
 @ApiAccessToken()
 @ApiServiceUnavailableResponse({
+  type: ApiErrorResponseDto,
   description:
     "MANUAL_STATUS_UNAVAILABLE: status data/read or write reconciliation is unavailable. Distinguish this operation code from authentication infrastructure/refresh failure; an uncertain write does not prove rollback.",
 })
@@ -66,6 +68,7 @@ export class ManualStatusController {
   @Put()
   @Header("Cache-Control", "no-store")
   @ApiConflictResponse({
+    type: ApiErrorResponseDto,
     description:
       "MANUAL_STATUS_REVISION_CONFLICT: current value changed. MANUAL_STATUS_REQUEST_CONFLICT: request ID reused with different original revision or availability. Preserve the draft and reconcile; no automatic stale retry.",
   })
@@ -106,6 +109,7 @@ export class ManualStatusController {
 @UseGuards(OptionalJwtAuthGuard)
 @ApiTags("Public profiles")
 @ApiServiceUnavailableResponse({
+  type: ApiErrorResponseDto,
   description:
     "MANUAL_STATUS_UNAVAILABLE: status data is temporarily unavailable. Authentication infrastructure failures remain separate from status reload failure.",
 })
@@ -120,7 +124,7 @@ export class PublicManualStatusController {
   @ApiOperation({
     summary: "Read one shared manual availability",
     description:
-      "Same current value for everyone, including anonymous, cross-workspace and owner viewers. Only OPEN accounts resolve; missing/inactive profiles share404. Supplied invalid authentication rejects. Legacy STATUS audience records do not hide or vary this value. No online/offline, last-active time, workspace, actor history or private profile fields.",
+      "Same current value for everyone, including anonymous, cross-workspace and owner viewers. Exact stored identity wins; alternate UUID casing resolves only a unique account. Ambiguous/missing/inactive profiles share404. Supplied invalid authentication rejects. Legacy STATUS audience records do not hide or vary this value. No online/offline, last-active time, workspace, actor history or private profile fields.",
   })
   read(
     @Param("accountId", new ParseUUIDPipe({ version: "4" })) accountId: string,

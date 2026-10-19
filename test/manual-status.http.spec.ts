@@ -141,6 +141,66 @@ if (url) {
         await db.manualProfileStatus.count({ where: { ownerId: owner } }),
       ).toBe(0);
     });
+    it("keeps availability on the exact legacy account and denies ambiguous or inactive case variants", async () => {
+      const lower = "de" + randomUUID().slice(2).toLowerCase();
+      const upper = lower.toUpperCase();
+      const mixed = "D" + lower.slice(1);
+      try {
+        for (const id of [lower, upper]) {
+          await db.user.create({
+            data: {
+              id,
+              workspaceId: w,
+              phoneNumber: randomUUID(),
+              fullName: "Legacy status identity",
+              status: "OPEN",
+            },
+          });
+        }
+        await db.manualProfileStatus.create({
+          data: { ownerId: lower, availability: "BUSY", revision: 1 },
+        });
+        await db.manualProfileStatus.create({
+          data: { ownerId: upper, availability: "AWAY", revision: 1 },
+        });
+        expect(
+          (await http().get(`/profiles/${lower}/status`).expect(200)).body,
+        ).toEqual({ accountId: lower, availability: "BUSY" });
+        expect(
+          (await http().get(`/profiles/${upper}/status`).expect(200)).body,
+        ).toEqual({ accountId: upper, availability: "AWAY" });
+        await http().get(`/profiles/${mixed}/status`).expect(404);
+        await db.user.update({
+          where: { id: upper },
+          data: { status: "BANNED" },
+        });
+        await http().get(`/profiles/${upper}/status`).expect(404);
+        await http().get(`/profiles/${mixed}/status`).expect(404);
+        await db.user.delete({ where: { id: lower } });
+        await http().get(`/profiles/${lower}/status`).expect(404);
+        await db.user.update({
+          where: { id: upper },
+          data: { status: "OPEN" },
+        });
+        expect(
+          (await http().get(`/profiles/${lower}/status`).expect(200)).body,
+        ).toEqual({ accountId: upper, availability: "AWAY" });
+        expect(
+          await db.manualProfileStatusMutation.count({
+            where: { ownerId: upper },
+          }),
+        ).toBe(0);
+        expect(
+          (
+            await db.manualProfileStatus.findUniqueOrThrow({
+              where: { ownerId: upper },
+            })
+          ).revision,
+        ).toBe(1);
+      } finally {
+        await db.user.deleteMany({ where: { id: { in: [lower, upper] } } });
+      }
+    });
     it.each(["AVAILABLE", "AWAY", "BUSY"])(
       "round-trips selected %s with truthful human attribution and no profile/lifecycle changes",
       async (availability) => {
@@ -496,7 +556,9 @@ if (url) {
         "SaveProfileAudienceDto",
         "AudiencePickerQueryDto",
       ])
-        expect(schemas[name].properties.field.description).toContain("legacy");
+        expect(schemas[name].properties.field.description).toContain(
+          "custom text/emoji",
+        );
     });
   },
 );

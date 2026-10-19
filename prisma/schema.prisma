@@ -243,6 +243,12 @@ model TelegramSession {
 }
 
 model User {
+  customStatusText          String?                           @db.VarChar(300)
+  customStatusEmoji         String?                           @db.VarChar(32)
+  customStatusExpiresAt     DateTime?                         @db.Timestamptz(3)
+  avatarAssetId             String?                           @unique
+  avatarAsset               ProfileAvatarAsset?               @relation("activeProfileAvatar", fields: [avatarAssetId], references: [id], onDelete: SetNull)
+  avatarUploads             ProfileAvatarAsset[]              @relation("profileAvatarOwner")
   profileRevision           Int                               @default(0)
   profileSaves              ProfileSaveReceipt[]
   manualProfileStatus       ManualProfileStatus?
@@ -294,6 +300,40 @@ model User {
   roleAssignmentsMade       UserRoleAssignment[]              @relation("roleAssignmentCreator")
 
   @@unique([id, workspaceId])
+}
+
+enum ProfileAvatarState {
+  UPLOADING
+  STAGED
+  ACTIVE
+  DELETE_PENDING
+  DELETING
+  DELETED
+}
+
+model ProfileAvatarAsset {
+  id            String             @id @default(uuid())
+  ownerId       String
+  owner         User               @relation("profileAvatarOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  activeFor     User?              @relation("activeProfileAvatar")
+  requestId     String
+  inputHash     String
+  objectKey     String             @unique
+  sha256        String
+  size          Int
+  width         Int
+  height        Int
+  state         ProfileAvatarState @default(UPLOADING)
+  expiresAt     DateTime
+  uploadedAt    DateTime?
+  attempts      Int                @default(0)
+  nextAttemptAt DateTime           @default(now())
+  lastErrorCode String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@unique([ownerId, requestId])
+  @@index([state, nextAttemptAt, expiresAt])
 }
 
 // Private acknowledgments only: never a snapshot of historical profile content.
@@ -481,19 +521,20 @@ model Task {
   comments        TaskComment[]
   deadline        TaskDeadline?
   boardEntry      TaskBoardEntry?
-  id              String               @id @default(uuid())
+  sharedEntries   TaskSharedBoardEntry[]
+  id              String                 @id @default(uuid())
   workspaceId     String
-  workspace       Workspace            @relation(fields: [workspaceId], references: [id])
+  workspace       Workspace              @relation(fields: [workspaceId], references: [id])
   title           String
   description     String
   criteria        String?
-  status          TaskStatus           @default(QUEUED)
+  status          TaskStatus             @default(QUEUED)
   creatorId       String
-  creator         User                 @relation("taskCreator", fields: [creatorId], references: [id])
+  creator         User                   @relation("taskCreator", fields: [creatorId], references: [id])
   managerId       String
-  manager         User                 @relation("taskManager", fields: [managerId], references: [id])
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  manager         User                   @relation("taskManager", fields: [managerId], references: [id])
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
   sessions        ProboxAiSession[]
 
   @@index([workspaceId, status])
@@ -516,12 +557,16 @@ model TaskCreationReceipt {
 }
 
 model TaskHumanState {
-  priority  TaskPriority?
-  taskId    String           @id
-  task      Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  revision  Int              @default(0)
-  updatedAt DateTime         @default(now()) @updatedAt
-  audits    TaskHumanAudit[]
+  completed         Boolean?
+  completedById     String?
+  completedAt       DateTime?
+  priority          TaskPriority?
+  taskId            String                 @id
+  task              Task                   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  revision          Int                    @default(0)
+  updatedAt         DateTime               @default(now()) @updatedAt
+  audits            TaskHumanAudit[]
+  sharingOperations TaskSharingOperation[]
 }
 
 model TaskAssignee {
@@ -676,13 +721,14 @@ model TaskBoard {
 }
 
 model TaskBoardStatus {
-  id       String           @id @default(dbgenerated("(gen_random_uuid())::text"))
-  boardId  String
-  board    TaskBoard        @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  name     String
-  color    String
-  position Int
-  entries  TaskBoardEntry[]
+  id            String                 @id @default(dbgenerated("(gen_random_uuid())::text"))
+  boardId       String
+  board         TaskBoard              @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  name          String
+  color         String
+  position      Int
+  entries       TaskBoardEntry[]
+  sharedEntries TaskSharedBoardEntry[]
 
   @@unique([boardId, id])
   @@unique([boardId, position])
@@ -697,6 +743,37 @@ model TaskBoardEntry {
   status   TaskBoardStatus @relation(fields: [boardId, statusId], references: [boardId, id], onDelete: Restrict)
 
   @@index([boardId, statusId])
+}
+
+// Additional explicit associations preserve the existing original board/execution context.
+model TaskSharedBoardEntry {
+  taskId      String
+  task        Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  boardId     String
+  statusId    String
+  status      TaskBoardStatus @relation(fields: [boardId, statusId], references: [boardId, id], onDelete: Restrict)
+  createdById String
+  createdAt   DateTime        @default(now())
+
+  @@id([taskId, boardId])
+  @@index([boardId, statusId])
+}
+
+model TaskSharingOperation {
+  taskId          String
+  state           TaskHumanState @relation(fields: [taskId], references: [taskId], onDelete: Cascade)
+  requestId       String
+  actorId         String
+  projectId       String
+  targetProjectId String?
+  action          String
+  revision        Int
+  inputHash       String
+  outcome         Json
+  createdAt       DateTime       @default(now())
+
+  @@id([taskId, requestId])
+  @@unique([taskId, revision])
 }
 
 model TaskBoardAudit {

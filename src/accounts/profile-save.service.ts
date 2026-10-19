@@ -15,6 +15,16 @@ import {
 import { ManualStatusService } from "./manual-status.service";
 import { ProfilePrivacyService } from "./profile-privacy.service";
 import { CommitSelfProfileDto } from "./profile-save.dto";
+import {
+  customStatusSelect,
+  normalizedStatus,
+  storedCustomStatus,
+} from "./custom-status";
+import {
+  applyProfileAvatar,
+  avatarMetadata,
+  avatarSelect,
+} from "./profile-avatar-domain";
 
 const fail = (status: number, code: string, message: string) =>
   operationError(status, code, message, "profileSave");
@@ -52,7 +62,13 @@ export class ProfileSaveService {
       throw fail(403, "PROFILE_SAVE_DENIED", "Human self access required");
     const user = await tx.user.findFirst({
       where: { id: actor.id, workspaceId: actor.workspaceId, status: "OPEN" },
-      select: { ...selfProfileSelect, profileRevision: true },
+      select: {
+        ...selfProfileSelect,
+        ...customStatusSelect,
+        avatarAssetId: true,
+        avatarAsset: { select: avatarSelect },
+        profileRevision: true,
+      },
     });
     if (!user) throw fail(404, "RESOURCE_NOT_FOUND", "Account not found");
     return user;
@@ -69,6 +85,8 @@ export class ProfileSaveService {
       });
       return {
         profile: toSelfProfile(user),
+        customStatus: storedCustomStatus(user),
+        avatar: avatarMetadata(user.avatarAsset),
         audiences: this.privacy.responses(rows),
         status: {
           availability: current?.availability ?? null,
@@ -123,14 +141,26 @@ export class ProfileSaveService {
         "Each audience field may appear only once",
       );
     for (const p of dto.audiences) this.privacy.validateAudience(p.field, p);
+    const customStatus =
+      dto.customStatus === undefined
+        ? undefined
+        : normalizedStatus(dto.customStatus);
     // Fixed property order, normalized set order, and omitted vs explicit null retained.
     const intent = {
       expectedRevision: dto.expectedRevision,
       ...Object.fromEntries(
-        ["firstName", "lastName", "bio", "birthDate", "availability"]
+        [
+          "firstName",
+          "lastName",
+          "bio",
+          "birthDate",
+          "availability",
+          "avatarAssetId",
+        ]
           .filter((k) => dto[k as keyof CommitSelfProfileDto] !== undefined)
           .map((k) => [k, dto[k as keyof CommitSelfProfileDto]]),
       ),
+      ...(customStatus !== undefined ? { customStatus } : {}),
       audiences: dto.audiences
         .map((p) => ({
           field: p.field,
@@ -170,12 +200,37 @@ export class ProfileSaveService {
           "PROFILE_SAVE_REVISION_CONFLICT",
           "Profile changed; preserve the draft and reread before saving",
         );
+      // Clock-dependent validation follows receipt matching: committed replay is
+      // still valid after expiry, and can never reapply an old status/avatar.
+      if (
+        customStatus?.expiresAt &&
+        ((!customStatus.text && !customStatus.emoji) ||
+          new Date(customStatus.expiresAt).getTime() <= Date.now())
+      )
+        throw fail(
+          400,
+          "PROFILE_STATUS_EXPIRY_INVALID",
+          "Custom status expiry requires content and a future explicit instant",
+        );
       await this.accounts.updateSelfInTransaction(
         tx,
         actor.workspaceId,
         actor.id,
         dto,
       );
+      if (customStatus !== undefined)
+        await tx.user.update({
+          where: { id: actor.id },
+          data: {
+            customStatusText: customStatus?.text ?? null,
+            customStatusEmoji: customStatus?.emoji ?? null,
+            customStatusExpiresAt: customStatus?.expiresAt
+              ? new Date(customStatus.expiresAt)
+              : null,
+          },
+        });
+      if (dto.avatarAssetId !== undefined)
+        await applyProfileAvatar(tx, actor.id, dto.avatarAssetId);
       for (const policy of dto.audiences)
         await this.privacy.replaceInTransaction(
           tx,

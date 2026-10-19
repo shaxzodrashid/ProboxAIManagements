@@ -10,6 +10,7 @@ import { operationError } from "../openapi/operation-errors";
 import { lockWorkspace } from "../prisma/workspace-lock";
 import { PrismaService } from "../prisma/prisma.service";
 import { SetManualStatusDto } from "./manual-status.dto";
+import { resolveProfileAccountId } from "./profile-account-lookup";
 
 const fail = (status: number, code: string, message: string) =>
   operationError(status, code, message, "manualStatus");
@@ -66,8 +67,10 @@ export class ManualStatusService {
   }
   publicStatus(accountId: string) {
     return this.transaction(async (tx) => {
+      const id = await resolveProfileAccountId(tx, accountId);
+      if (!id) throw fail(404, "RESOURCE_NOT_FOUND", "Profile not found");
       const user = await tx.user.findFirst({
-        where: { id: accountId.toLowerCase(), status: "OPEN" },
+        where: { id, status: "OPEN" },
         select: {
           id: true,
           manualProfileStatus: { select: { availability: true } },

@@ -1,0 +1,85 @@
+{
+  "reviewScope": "Fresh final-source review of session writers and their workspace/task coordination, separate from the implementation pass; not an external reviewer attestation.",
+  "ordering": [
+    "Workspace row",
+    "Task row",
+    "ProboxAiSession row",
+    "turn/event/state writes"
+  ],
+  "participatingPaths": [
+    {
+      "method": "create",
+      "order": "Workspace then Task; newly inserted session/turn are owned by the creating transaction"
+    },
+    {
+      "method": "acceptTurn",
+      "order": "lockRun before actor/receipt checks and session/turn writes; includes REST and Telegram follow-ups"
+    },
+    {
+      "method": "runAcceptedTurn",
+      "order": "lockRun in both claim and terminal-result transactions"
+    },
+    {
+      "method": "interruptScoped",
+      "order": "lockRun in intent and signal-result transactions; final acknowledgment is a separate authorized read"
+    },
+    {
+      "method": "maySpawn",
+      "order": "lockRun before final authority/directory/lease checks and any terminal transition"
+    },
+    {
+      "method": "renewLease",
+      "order": "lockRun before lease and interruption/event updates; review found and corrected the remaining session-first path"
+    },
+    {
+      "method": "reconcileExpiredRuns",
+      "order": "Candidate discovery is read-only; each mutation transaction calls lockRun"
+    },
+    {
+      "method": "recordEvent",
+      "order": "lockRun before durable event append and thread/token metadata updates"
+    },
+    {
+      "method": "terminal, aggregateTask, stateEvent",
+      "order": "Internal helpers called inside the enclosing creation or lockRun transaction"
+    },
+    {
+      "method": "appendSessionEvent",
+      "order": "Caller owns the session lock; event sequence/hash and lastSequence update share that transaction"
+    }
+  ],
+  "adjacentPaths": [
+    "Workspace-managed account/role/task mutations acquire the Workspace row first.",
+    "Project archival takes its lifecycle advisory lock before Workspace; session execution reads archive state without taking the advisory lock, so no inverse advisory dependency was found.",
+    "Project deletion checks active/context session state under Workspace fencing; no separate direct session writer was found outside SessionsService and appendSessionEvent.",
+    "History, snapshots and SSE polling use authorized reads rather than SELECT FOR UPDATE."
+  ],
+  "demonstratedFindings": [
+    {
+      "path": "recordEvent",
+      "before": "Actual concurrent runner/admission deadlock plus a deterministic physical NOWAIT regression failed before correction",
+      "correction": "Use existing lockRun order"
+    },
+    {
+      "path": "renewLease",
+      "before": "Fresh review found session-only locking; the same physical NOWAIT regression failed on the untouched heartbeat path",
+      "correction": "Use existing lockRun order"
+    }
+  ],
+  "regressionDesign": "Hold Workspace in an independent transaction, start event or lease persistence, probe the session with FOR UPDATE NOWAIT, then release barriers. This verifies physical lock availability, not merely source/query ordering. Original strict lifecycle and response assertions remain intact.",
+  "coverage": [
+    "event and heartbeat lock barriers",
+    "real HTTP initial/follow-up/interrupt",
+    "SSE and reconnect sequence parity",
+    "receipt dedup and changed/active conflicts",
+    "existing durable session/deletion and service regressions"
+  ],
+  "limits": [
+    "This is scoped lock-path review, not a proof that PostgreSQL can never deadlock.",
+    "The prior Windows1450 resource incident remains distinct; no host resource setting was changed.",
+    "Consistent Workspace serialization can delay heartbeats behind long workspace transactions; no lease duration, timeout or retry policy was changed."
+  ],
+  "contractChanges": false,
+  "migrationAdded": false,
+  "assertionsWeakened": false
+}

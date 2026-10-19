@@ -20,12 +20,14 @@ import {
 } from "class-validator";
 import { ProfileAudienceField } from "@prisma/client";
 import { ProfileAudienceResponseDto } from "./profile-privacy.dto";
+import { CustomStatusResponseDto } from "./custom-status";
+import { ProfileAvatarResponseDto } from "./profile-avatar-domain";
 
 export class AudiencePickerQueryDto {
   @ApiProperty({
     enum: ProfileAudienceField,
     description:
-      "STATUS selects legacy audience metadata, not privacy for the universally shared manual availability. Other field pickers retain their audience semantics.",
+      "STATUS selects custom text/emoji audience, never privacy for universally shared manual availability. Other field pickers retain their audience semantics.",
   })
   @IsEnum(ProfileAudienceField)
   field!: ProfileAudienceField;
@@ -95,6 +97,20 @@ export class BirthdayDayMonthResponseDto {
   @ApiProperty({ minimum: 1, maximum: 12 }) month!: number;
 }
 export class PublicProfileResponseDto extends PublicIdentityResponseDto {
+  @ApiProperty({
+    type: CustomStatusResponseDto,
+    nullable: true,
+    description:
+      "Null for unset, expired or STATUS-audience-hidden custom status. Shared availability has a separate unchanged endpoint.",
+  })
+  customStatus!: CustomStatusResponseDto | null;
+  @ApiProperty({
+    type: ProfileAvatarResponseDto,
+    nullable: true,
+    description:
+      "Null for unset or hidden images, with no hidden asset metadata.",
+  })
+  avatar!: ProfileAvatarResponseDto | null;
   @ApiProperty({ type: String, nullable: true }) bio!: string | null;
   @ApiProperty({ type: BirthdayDayMonthResponseDto, nullable: true })
   birthdayDayMonth!: BirthdayDayMonthResponseDto | null;

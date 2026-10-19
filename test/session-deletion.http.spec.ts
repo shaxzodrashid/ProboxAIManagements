@@ -1854,7 +1854,8 @@ async function until(fn: () => Promise<boolean>) {
           item: {
             id: "tool_1",
             type: "command_execution",
-            command: "private command",
+            command: "pnpm test",
+            exit_code: 0,
             aggregated_output: "private output",
             status: "completed",
           },
@@ -1892,6 +1893,20 @@ async function until(fn: () => Promise<boolean>) {
         }),
       ).toEqual({ projectionVersion: 2 });
       expect(next.events[1].data.omissionReason).toBe("TOOL_DETAILS_EXCLUDED");
+      expect(next.events[1].data.commandDetails).toMatchObject({
+        commandLabel: "pnpm test",
+        exitCode: 0,
+        outputState: "OMITTED",
+        provisional: true,
+      });
+      const storedCommand = await prisma.sessionEvent.findFirstOrThrow({
+        where: { sessionId, sequence: 4 },
+      });
+      expect(storedCommand.projectionVersion).toBe(3);
+      expect(storedCommand.rawPayload).toEqual(next.events[1].data);
+      expect(JSON.stringify(storedCommand.rawPayload)).not.toMatch(
+        /private output|private raw line|aggregated_output/,
+      );
       expect(JSON.stringify(next)).not.toMatch(
         /private command|private output|private raw line|hidden|actor/,
       );
@@ -2284,13 +2299,26 @@ async function until(fn: () => Promise<boolean>) {
       await pending.get(sessionId)!.event({
         type: "item.completed",
         payload: {
-          item: { id: "answer", type: "agent_message", text: "Live answer" },
+          item: {
+            id: "command",
+            type: "command_execution",
+            command: "git diff --check",
+            status: "completed",
+            exit_code: 0,
+            aggregated_output: "private stream output",
+          },
         },
         rawLine: "raw",
       });
       await until(async () => events.length === 3);
       expect(events.map((e) => e.id)).toEqual(["1", "2", "3"]);
       expect(events[2].data).not.toHaveProperty("actor");
+      expect(events[2].data.data.commandDetails).toMatchObject({
+        commandLabel: "git diff --check",
+        exitCode: 0,
+        outputState: "OMITTED",
+      });
+      expect(JSON.stringify(events)).not.toContain("private stream output");
       const rest = (await eventHistory(owner, "?after=2").expect(200)).body;
       expect(JSON.parse(JSON.stringify(events[2].data))).toEqual(
         rest.events[0],
@@ -2868,6 +2896,19 @@ async function until(fn: () => Promise<boolean>) {
         "SNAPSHOT",
         "UNVERIFIED_FRAME",
       ]);
+      expect(schemas.CommandDisclosureDto.properties.policy.enum).toEqual([
+        "STRICT_ALLOWLIST_V1",
+      ]);
+      expect(schemas.CommandDisclosureDto.properties.provisional.enum).toEqual([
+        true,
+      ]);
+      expect(schemas.CommandDisclosureDto.properties.outputState.enum).toEqual([
+        "OMITTED",
+      ]);
+      expect(
+        schemas.PersistedSessionEventDto.properties.data.properties
+          .commandDetails.allOf[0].$ref,
+      ).toContain("CommandDisclosureDto");
       expect(
         schemas.AssistantTextUpdateDto.properties.runCompletion.enum,
       ).toEqual(["USE_SERVER_STATE"]);

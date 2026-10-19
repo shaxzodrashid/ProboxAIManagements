@@ -1,7 +1,7 @@
 import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { JwtService } from "@nestjs/jwt";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { TasksController } from "../src/tasks/tasks.controller";
@@ -167,6 +167,11 @@ if (url) {
       const results = await Promise.all(
         Array.from({ length: 6 }, () => post({ ...body, requestId })),
       );
+      // Preserve response bodies in any failure diff; a status-only assertion
+      // cannot distinguish an authorization dependency outage from a write error.
+      expect(results.map((r) => ({ status: r.status, body: r.body }))).toEqual(
+        results.map(() => ({ status: 201, body: results[0].body })),
+      );
       for (const r of results) {
         expect(r.status).toBe(201);
         expect(r.body).toEqual(results[0].body);
@@ -178,6 +183,38 @@ if (url) {
       expect((await read(requestId).expect(200)).body).toEqual(results[0].body);
       expect(results[0].headers["cache-control"]).toBe("no-store");
       expect((await read(requestId)).headers["cache-control"]).toBe("no-store");
+    });
+    it("distinguishes a failed authorization database read from concurrent receipt creation", async () => {
+      const requestId = randomUUID();
+      const failure = new Prisma.PrismaClientUnknownRequestError(
+        'could not open file "base/16384/17429": Invalid argument (Windows 1450)',
+        { clientVersion: "6.19.3" },
+      );
+      const lookup = jest
+        .spyOn(db.user, "findFirst")
+        .mockRejectedValueOnce(failure);
+      try {
+        const result = await post({ ...body, requestId }).expect(503);
+        expect(result.body).toEqual({
+          statusCode: 503,
+          message: "Authentication is temporarily unavailable",
+          error: "Service Unavailable",
+        });
+        expect(await count()).toBe(0);
+        expect(
+          await db.taskCreationReceipt.count({ where: { workspaceId: w } }),
+        ).toBe(0);
+      } finally {
+        lookup.mockRestore();
+      }
+      const accepted = await post({ ...body, requestId }).expect(201);
+      expect((await post({ ...body, requestId }).expect(201)).body).toEqual(
+        accepted.body,
+      );
+      expect(await count()).toBe(1);
+      expect(
+        await db.taskCreationReceipt.count({ where: { workspaceId: w } }),
+      ).toBe(1);
     });
     it("conflicts concurrent changed reuse without a second task", async () => {
       const requestId = randomUUID();

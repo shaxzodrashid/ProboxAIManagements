@@ -129,6 +129,7 @@ export class AuthController {
   }
 
   @Post("login")
+  @ApiAuthenticationUnavailable()
   @HttpCode(200)
   @ApiOperation({ summary: "Sign in with username and password" })
   @ApiOkResponse({

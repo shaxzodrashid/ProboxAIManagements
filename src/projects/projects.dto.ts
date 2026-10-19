@@ -216,8 +216,9 @@ export class MoveProjectFileDto {
 export class ProtectedFileTypeDto {
   @ApiProperty({
     example: ".env",
+    maxLength: 64,
     description:
-      "Case-insensitive file extension protected by a second deletion confirmation.",
+      "Leading-dot file extension protected by a second deletion confirmation. Case-insensitive; boundary whitespace is trimmed. At most 64 input characters.",
   })
   @IsString()
   @MaxLength(64)

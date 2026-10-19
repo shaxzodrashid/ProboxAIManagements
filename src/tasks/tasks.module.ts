@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { SharedTasksController } from "./shared-tasks.controller";
+import { SharedTasksService } from "./shared-tasks.service";
 import { HumanTasksController } from "./human-tasks.controller";
 import { HumanTasksService } from "./human-tasks.service";
 import { HumanTaskActionsService } from "./human-task-actions.service";
@@ -13,6 +15,7 @@ import { TaskDeadlinesService } from "./task-deadlines.service";
 @Module({
   imports: [AuthModule],
   controllers: [
+    SharedTasksController,
     HumanTaskActionsController,
     TasksController,
     TaskBoardsController,
@@ -20,6 +23,7 @@ import { TaskDeadlinesService } from "./task-deadlines.service";
     HumanTasksController,
   ],
   providers: [
+    SharedTasksService,
     HumanTaskActionsService,
     TasksService,
     TaskBoardsService,

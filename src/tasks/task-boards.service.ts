@@ -498,6 +498,20 @@ export class TaskBoardsService {
             "Status not found",
             "removeStatus",
           );
+        // Shared workflow changes have separate scoped receipts. Do not move
+        // those entries through the original-project human audit projection.
+        if (
+          await tx.taskSharedBoardEntry.count({
+            where: { boardId: board.id, statusId },
+          })
+        )
+          throw operationError(
+            409,
+            "STATUS_IN_USE",
+            "Move shared tasks explicitly before removing their column",
+            "removeStatus",
+            "replacementStatusId",
+          );
         const count = await tx.taskBoardEntry.count({
           where: { boardId: board.id, statusId },
         });

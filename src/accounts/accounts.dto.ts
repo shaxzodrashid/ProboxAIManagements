@@ -17,6 +17,9 @@ import { UserStatus } from "@prisma/client";
 import { Transform } from "class-transformer";
 import { ApiProperty } from "@nestjs/swagger";
 import { BirthDateValidator } from "./profile-birthday";
+/** Profile content routes accept identity only from the path/current authentication. */
+export class ProfileQueryDto {}
+
 export class CreateUserDto {
   @ApiProperty({
     required: false,

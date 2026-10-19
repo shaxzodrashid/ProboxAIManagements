@@ -28,9 +28,13 @@ export async function appendSessionEvent(
       type,
       rawPayload: payload,
       projectionVersion:
-        type === "item.completed" && record(payload).projectionVersion === 2
-          ? 2
-          : 1,
+        ["item.started", "item.updated", "item.completed"].includes(type) &&
+        record(payload).projectionVersion === 3 &&
+        record(record(payload).item).type === "command_execution"
+          ? 3
+          : type === "item.completed" && record(payload).projectionVersion === 2
+            ? 2
+            : 1,
       previousHash: previous?.payloadHash,
       payloadHash: ProboxAiRunner.hash(
         JSON.stringify(payload),

@@ -8,10 +8,12 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Param,
   Patch,
   Post,
   Put,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 import {
@@ -27,6 +29,7 @@ import {
   ApiAccessToken,
   ApiAuthenticationErrors,
   ApiOperationErrors,
+  ApiValidationErrors,
 } from "../openapi/api-docs";
 import {
   CreateRoleDto,
@@ -37,6 +40,8 @@ import {
   SetRolePermissionsDto,
   SetUserRolesDto,
   UpdateRoleDto,
+  SelfAuthorizationQueryDto,
+  SelfAuthorizationResponseDto,
 } from "./authorization.dto";
 import { Permissions } from "./permission.catalog";
 import { AuthorizationService } from "./authorization.service";
@@ -50,19 +55,18 @@ export class AuthorizationController {
   constructor(private readonly authorization: AuthorizationService) {}
 
   @Get("me")
-  @ApiOperation({ summary: "Get the caller's current effective authorization" })
-  @ApiOkResponse({
-    schema: {
-      type: "object",
-      properties: {
-        id: { type: "string", format: "uuid" },
-        workspaceId: { type: "string", format: "uuid" },
-        roles: { type: "array", items: { type: "object" } },
-        permissions: { type: "array", items: { type: "string" } },
-      },
-    },
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({
+    summary: "Get the caller's current effective authorization",
+    description:
+      "Current OPEN self, including zero-grant accounts. Identity, workspace, roles and sorted deduplicated permissions come from current persisted authentication, not token role/workspace claims. No query selectors. Successful responses are no-store. Resource scope and lifecycle still govern each action; this is not a can-perform-action decision or a personal profile.",
   })
-  me(@CurrentUser() user: AuthenticatedUser) {
+  @ApiOkResponse({ type: SelfAuthorizationResponseDto })
+  @ApiValidationErrors()
+  me(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() _query: SelfAuthorizationQueryDto,
+  ) {
     return {
       id: user.id,
       workspaceId: user.workspaceId,
@@ -72,6 +76,7 @@ export class AuthorizationController {
   }
 
   @Get("revision")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_MANAGE)
   @ApiOkResponse({ type: RevisionResponseDto })
   revision(@CurrentUser() user: AuthenticatedUser) {
@@ -79,6 +84,7 @@ export class AuthorizationController {
   }
 
   @Get("roles/:id/edit")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_MANAGE)
   @ApiOperation({
     summary:
@@ -90,6 +96,7 @@ export class AuthorizationController {
   }
 
   @Get("users/:userId/roles")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_MANAGE)
   @ApiOperation({
     summary: "Read user role assignments with workspace authorization revision",
@@ -103,6 +110,7 @@ export class AuthorizationController {
   }
 
   @Get("permissions")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_READ)
   @ApiOperation({ summary: "List the assignable permission catalog" })
   @ApiOkResponse({ type: PermissionResponseDto, isArray: true })
@@ -111,6 +119,7 @@ export class AuthorizationController {
   }
 
   @Get("roles")
+  @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_READ)
   @ApiOperation({ summary: "List workspace roles with permissions" })
   @ApiOkResponse({ type: RoleResponseDto, isArray: true })

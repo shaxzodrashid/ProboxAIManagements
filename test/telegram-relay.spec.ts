@@ -104,7 +104,7 @@ describe("Telegram persisted session relay", () => {
       "Session session-\nChecking",
       "Session session-\nTool activity: 1 call\nCommand: 1",
       "Session session-\nDone: [report](report.txt)",
-      "Session session-: completed.\nSelect this session to continue, or /new for a fresh task.",
+      "Session session-: completed.\nView the session and check Status before a follow-up. /new prepares a fresh task; it does not reopen this run.",
     ]);
     expect(messages[2]![2]).toMatchObject({
       inline_keyboard: [

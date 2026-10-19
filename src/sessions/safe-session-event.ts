@@ -1,5 +1,6 @@
 import { SessionEvent } from "@prisma/client";
 import { RunnerEvent } from "./proboxai-runner.service";
+import { commandDisclosure } from "./command-disclosure";
 
 export const record = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" && !Array.isArray(v)
@@ -25,7 +26,7 @@ function boundedText(value: string) {
   }
   return { text: redacted.slice(0, 16384), truncated: redacted.length > 16384 };
 }
-/** Content projection, not an exhaustive secret detector. Tool details and reasoning are excluded. */
+/** Content projection, not an exhaustive secret detector. Raw tool details and reasoning are excluded. */
 export function safeRunnerEvent(event: RunnerEvent) {
   const item = record(event.payload.item);
   if (["item.started", "item.updated", "item.completed"].includes(event.type)) {
@@ -56,7 +57,7 @@ export function safeRunnerEvent(event: RunnerEvent) {
       return {
         type: event.type,
         payload: {
-          projectionVersion: 1,
+          projectionVersion: item.type === "command_execution" ? 3 : 1,
           item: {
             id,
             type: String(item.type),
@@ -68,6 +69,9 @@ export function safeRunnerEvent(event: RunnerEvent) {
           },
           omitted: true,
           omissionReason: "TOOL_DETAILS_EXCLUDED",
+          ...(item.type === "command_execution"
+            ? { commandDetails: commandDisclosure(event.type, item) }
+            : {}),
         },
       };
   }
@@ -100,7 +104,7 @@ export function safeRunnerEvent(event: RunnerEvent) {
   };
 }
 export function eventResponse(e: SessionEvent) {
-  const legacy = ![1, 2].includes(e.projectionVersion);
+  const legacy = ![1, 2, 3].includes(e.projectionVersion);
   // Historical partial text has no verified update semantics. Preserve its
   // bounded display frame without upgrading it to a completed snapshot.
   const historicalItem = record(record(e.rawPayload).item);
@@ -109,15 +113,51 @@ export function eventResponse(e: SessionEvent) {
     ["item.started", "item.updated", "item.completed"].includes(e.type) &&
     historicalItem.type === "agent_message" &&
     typeof historicalItem.text === "string";
-  const projected = legacy
-    ? safeRunnerEvent({
-        type: e.type,
-        payload: record(e.rawPayload),
-        rawLine: "",
-      })
-    : { type: e.type, payload: e.rawPayload };
+  const projected =
+    legacy ||
+    e.projectionVersion === 3 ||
+    toolTypes.has(String(historicalItem.type))
+      ? safeRunnerEvent({
+          type: e.type,
+          payload: record(e.rawPayload),
+          rawLine: "",
+        })
+      : { type: e.type, payload: e.rawPayload };
   const item = record(record(projected.payload).item);
   let data = record(projected.payload);
+  if (
+    historicalItem.type === "command_execution" &&
+    ["item.started", "item.updated", "item.completed"].includes(e.type)
+  ) {
+    // Rebuild the public envelope on every read. Historical raw commands never
+    // acquire new disclosure rights; v3 can only retain its stored safe subset.
+    const safe = safeRunnerEvent({
+      type: e.type,
+      payload: {
+        item: {
+          id: historicalItem.id,
+          type: historicalItem.type,
+          status: historicalItem.status,
+        },
+      },
+      rawLine: "",
+    });
+    data = record(safe.payload);
+    if (e.projectionVersion === 3) {
+      data.commandDetails = commandDisclosure(
+        e.type,
+        {
+          ...record(data.item),
+          status: historicalItem.status,
+          commandDetails: record(e.rawPayload).commandDetails,
+        },
+        true,
+      );
+    } else {
+      delete data.commandDetails;
+      data.projectionVersion = 1;
+    }
+  }
   if (historicalText || item.type === "agent_message") {
     const safe = safeRunnerEvent({
       type: "item.completed",
@@ -162,7 +202,8 @@ export function eventResponse(e: SessionEvent) {
     type: historicalText ? e.type : projected.type,
     createdAt: e.createdAt,
     source:
-      !legacy && ["session.state", "session.interruption"].includes(e.type)
+      e.projectionVersion === 1 &&
+      ["session.state", "session.interruption"].includes(e.type)
         ? "SERVER"
         : "RUNNER",
     legacyProjection: legacy,

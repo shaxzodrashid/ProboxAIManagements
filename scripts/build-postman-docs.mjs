@@ -147,7 +147,7 @@ for (const [fullPath, methods] of Object.entries(spec.paths)) {
     verifyRefs(contract);
     const description = [
       `# ${op.summary ?? op.operationId}`,
-      "Local implementation verified at 0.3.0-dev.9. Deployment is unverified; set base_url (including /api/v1) only after checking the target release. No agent-runtime endpoints are included.",
+      `Source-derived contract from the locally tested ${spec.info.version} development patch. Deployment is unverified; set base_url (including /api/v1) only after checking the target release. No agent-runtime endpoints are included.`,
       op.description ?? "",
       "Authorization uses current effective permission keys plus resource scope and lifecycle checks. Role labels do not replace these checks.",
       "This is a request template, not a captured successful execution. Replace placeholders and read conditional field rules before sending. Do not run a whole collection against live data: mutations may change files, credentials or execution state. No requests were executed as part of this documentation update.",
@@ -254,7 +254,20 @@ for (const [fullPath, methods] of Object.entries(spec.paths)) {
 }
 if (process.argv[2] === "--chunk") {
   const offset = Number(process.argv[3]);
-  process.stdout.write(JSON.stringify(operations.slice(offset, offset + 2)));
+  const count = Number(process.argv[4] ?? 2);
+  if (
+    !Number.isSafeInteger(offset) ||
+    offset < 0 ||
+    !Number.isSafeInteger(count) ||
+    count < 1 ||
+    count > 10
+  )
+    throw new Error(
+      "Chunk offset must be nonnegative and count must be 1 through 10",
+    );
+  process.stdout.write(
+    JSON.stringify(operations.slice(offset, offset + count)),
+  );
 } else {
   writeFileSync(
     new URL("postman-operation-docs.json", root),

@@ -21,7 +21,8 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
-  ApiProduces,
+  ApiExtraModels,
+  getSchemaPath,
   ApiResponse,
   ApiTags,
 } from "@nestjs/swagger";
@@ -53,12 +54,14 @@ import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
 import { CurrentUser, RequirePermissions } from "../auth/auth.decorator";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
+  ApiErrorResponseDto,
   ApiAccessToken,
   ApiAuthenticationErrors,
   ApiResourceErrors,
   ApiValidationErrors,
 } from "../openapi/api-docs";
 import { Permissions } from "../authorization/permission.catalog";
+import { ModelCatalogResponseDto } from "./model-catalog.dto";
 
 @Controller("sessions")
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -81,6 +84,7 @@ export class SessionsController {
   @ApiAuthenticationErrors()
   @ApiValidationErrors()
   @ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
     description: "SESSION_LIST_UNAVAILABLE; retry an authorized fresh read.",
   })
   list(
@@ -141,7 +145,10 @@ export class SessionsController {
     description:
       "Returns the current managed catalog. Clients must only offer each model's supportedReasoningEfforts and use defaultReasoningEffort when no effort is chosen.",
   })
-  @ApiOkResponse({ description: "Catalog used to validate new sessions." })
+  @ApiOkResponse({
+    description: "Catalog used to validate new sessions.",
+    type: ModelCatalogResponseDto,
+  })
   @ApiAuthenticationErrors()
   @ApiValidationErrors()
   modelCatalog(@Query() query: ModelCatalogQueryDto) {
@@ -201,9 +208,11 @@ export class SessionsController {
       "Durable acceptance and current persisted run state; acceptance does not mean run success.",
   })
   @ApiConflictResponse({
+    type: ApiErrorResponseDto,
     description: "An active turn or a request ID bound to another submission.",
   })
   @ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
     description:
       "Unknown submission outcome; reconcile or retry the same request ID.",
   })
@@ -293,8 +302,15 @@ export class SessionsController {
     description:
       "Persisted polling with no history-to-live gap. Use after or Last-Event-ID (identical if both supplied). Reconnect after the last delivered sequence and deduplicate by sequence. Current account/grants/assignment are checked each batch. Stream ends at access-token expiry or authorization loss; transport errors require REST reconciliation.",
   })
-  @ApiProduces("text/event-stream")
-  @ApiResponse({ status: 200, type: SessionEventDto })
+  @ApiExtraModels(SessionEventDto)
+  @ApiResponse({
+    status: 200,
+    content: {
+      "text/event-stream": {
+        schema: { $ref: getSchemaPath(SessionEventDto) },
+      },
+    },
+  })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
   @ApiValidationErrors()

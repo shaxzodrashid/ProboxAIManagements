@@ -6,9 +6,37 @@ import {
   SavedSelfProfileResponseDto,
 } from "./profile-privacy.dto";
 import { ManualStatusResponseDto } from "./manual-status.dto";
+import { Type, Transform } from "class-transformer";
+import { IsObject, ValidateNested } from "class-validator";
+import { CustomStatusInputDto, CustomStatusResponseDto } from "./custom-status";
+import { ProfileAvatarResponseDto } from "./profile-avatar-domain";
 
 export class ProfileSaveQueryDto {}
 export class CommitSelfProfileDto extends SaveSelfProfileDto {
+  @ApiPropertyOptional({
+    type: CustomStatusInputDto,
+    nullable: true,
+    description:
+      "Omit to retain, null clears, object replaces the entire custom text/emoji/expiry unit. STATUS audience applies; availability stays separate.",
+  })
+  @ValidateIf((_o, value) => value !== undefined && value !== null)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => CustomStatusInputDto)
+  customStatus?: CustomStatusInputDto | null;
+  @ApiPropertyOptional({
+    type: String,
+    format: "uuid",
+    nullable: true,
+    description:
+      "Owned staged avatar asset to publish atomically. Omit retains; null removes. Never a path or storage URL.",
+  })
+  @Transform(({ value }) =>
+    typeof value === "string" ? value.toLowerCase() : value,
+  )
+  @ValidateIf((_o, value) => value !== undefined && value !== null)
+  @IsUUID("4")
+  avatarAssetId?: string | null;
   @ApiProperty({
     format: "uuid",
     description: "UUIDv4 retained for exact whole-Save retry/readback.",
@@ -38,6 +66,10 @@ export class CommitSelfProfileDto extends SaveSelfProfileDto {
   availability?: ManualAvailability | null;
 }
 export class ProfileEditResponseDto extends SavedSelfProfileResponseDto {
+  @ApiProperty({ type: CustomStatusResponseDto, nullable: true })
+  customStatus!: CustomStatusResponseDto | null;
+  @ApiProperty({ type: ProfileAvatarResponseDto, nullable: true })
+  avatar!: ProfileAvatarResponseDto | null;
   @ApiProperty({
     minimum: 0,
     description:

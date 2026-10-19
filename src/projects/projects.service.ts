@@ -1751,6 +1751,9 @@ export class ProjectsService {
       database.taskBoardEntry.count({
         where: { status: { board: { projectId: project.id } } },
       }),
+      database.taskSharedBoardEntry.count({
+        where: { status: { board: { projectId: project.id } } },
+      }),
       database.taskBoardAudit.count({
         where: { board: { projectId: project.id } },
       }),

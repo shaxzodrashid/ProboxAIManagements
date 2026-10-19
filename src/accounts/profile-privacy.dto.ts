@@ -44,7 +44,7 @@ export class ProfileAudienceResponseDto extends ReplaceProfileAudienceDto {
   @ApiProperty({
     enum: ProfileAudienceField,
     description:
-      "STATUS is retained legacy metadata only; it does not hide or vary the shared manual availability at /profiles/:accountId/status. Other field audiences remain effective.",
+      "STATUS controls custom text/emoji only; it never hides or varies shared manual availability at /profiles/:accountId/status. Other field audiences remain independent.",
   })
   field!: ProfileAudienceField;
   @ApiProperty({
@@ -68,7 +68,7 @@ export class SaveProfileAudienceDto extends ReplaceProfileAudienceDto {
   @ApiProperty({
     enum: ProfileAudienceField,
     description:
-      "STATUS saves legacy metadata only and has no effect on shared manual availability. Other field privacy policies remain independent.",
+      "STATUS selects custom text/emoji visibility only and has no effect on shared manual availability. Other field privacy policies remain independent.",
   })
   @IsEnum(ProfileAudienceField)
   field!: ProfileAudienceField;

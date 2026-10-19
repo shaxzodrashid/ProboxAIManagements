@@ -91,6 +91,26 @@ describe("self profile HTTP contract", () => {
     await app.close();
   });
   const call = () => request(app.getHttpServer());
+  it("rejects unsupported self-profile query selectors before reading or writing content", async () => {
+    for (const query of [
+      "?accountId=other",
+      "?workspaceId=foreign",
+      "?viewerId=other",
+      "?availability=BUSY",
+    ]) {
+      await call()
+        .get("/users/me" + query)
+        .set("Authorization", "Bearer token")
+        .expect(400);
+      await call()
+        .patch("/users/me" + query)
+        .set("Authorization", "Bearer token")
+        .send({ bio: "Must not persist" })
+        .expect(400);
+    }
+    expect(prisma.user.updateMany).not.toHaveBeenCalled();
+    expect(row.bio).toBeNull();
+  });
   it.each([
     [false, false, false, "NOT_LINKED"],
     [true, true, true, "LINKED"],
@@ -340,6 +360,14 @@ describe("self profile HTTP contract", () => {
         .build(),
     );
     expect(doc.paths["/users/me"]?.get?.responses["200"]).toBeDefined();
+    expect(doc.paths["/users/me"]?.get?.responses["400"]).toBeDefined();
+    for (const method of ["get", "patch"] as const) {
+      expect(
+        (doc.paths["/users/me"]?.[method]?.parameters ?? []).every(
+          (p: any) => p.in !== "query",
+        ),
+      ).toBe(true);
+    }
     expect(doc.paths["/users/me"]?.patch?.responses["409"]).toBeDefined();
     const schemas = doc.components!.schemas!;
     expect(

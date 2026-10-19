@@ -1,5 +1,12 @@
 # Overnight backend gap review — 16 October 2026
 
+**Historical review:** the [18 October frontend readiness inventory](frontend-readiness-20261018.md)
+records current local coverage and separates it from deployment and the historical
+Postman snapshot. Later approved avatar/custom-status, shared-task association and
+creator-only confirmation, provisional command metadata and response/error-contract
+increments supersede the corresponding missing-feature statements below. Remaining
+mirror/reopening/storage choices do not block independent contract corrections.
+
 Scope: finish the approved atomic human Profile Save, assess additional established
 requirements without asking the resting owner, and document registered APIs in the
 existing private Postman workspace. No push, deployment, production migration,
@@ -77,3 +84,10 @@ replacement because it could not verify trusted authorization for this exact
 workspace mutation/disclosure. Zero collection writes succeeded; readback confirmed
 the first collection unchanged. No workaround was attempted. The prepared local
 artifacts and exact pending plan remain available in [the API handoff](api/README.md).
+
+Resolution, 17 October 2026: direct approval cleared the external documentation
+authorization block. The bulk retry reached Postman but exceeded its payload limit;
+supported per-request updates completed. Readback verified 161 saved requests across
+the same ten personal collections, covering all 160 operations, with 81 original
+requests and 114 saved response examples preserved. No application endpoint, push,
+deployment or production migration was executed. See [publication evidence](api/postman-publication-result.json).

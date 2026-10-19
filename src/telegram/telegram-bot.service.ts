@@ -23,12 +23,14 @@ import {
 import { AuthenticatedUser } from "../auth/auth.types";
 import { Permissions as P } from "../authorization/permission.catalog";
 import { fileReferences, record } from "./telegram-rendering";
+import { TelegramModelPanel } from "./telegram-model-panel";
 
 @Injectable()
 export class TelegramBotService {
   private readonly logger = new Logger(TelegramBotService.name);
   // Serialize one user's commands, but never hold the webhook open for a Codex turn.
   private readonly queues = new Map<string, Promise<void>>();
+  private readonly modelPanels: TelegramModelPanel;
   constructor(
     private readonly prisma: PrismaService,
     private readonly projects: ProjectsService,
@@ -36,7 +38,31 @@ export class TelegramBotService {
     private readonly catalog: ModelCatalogService,
     private readonly telegram: TelegramService,
     private readonly identities: TelegramIdentityService,
-  ) {}
+  ) {
+    this.modelPanels = new TelegramModelPanel(
+      catalog,
+      telegram,
+      async (actor, chatId, base, selection) => {
+        const fresh = await this.identities.actor(chatId);
+        if (
+          !fresh ||
+          fresh.id !== actor.id ||
+          fresh.workspaceId !== actor.workspaceId ||
+          !fresh.permissions.includes(P.SESSIONS_CREATE)
+        )
+          return 0;
+        const result = await this.prisma.telegramConversation.updateMany({
+          where: { userId: actor.id, ...base },
+          data: {
+            providerId: selection.providerId,
+            model: selection.effectiveModel,
+            reasoningEffort: selection.effectiveReasoningEffort,
+          },
+        });
+        return result.count;
+      },
+    );
+  }
 
   async handle(update: Update): Promise<boolean> {
     const callback =
@@ -57,7 +83,19 @@ export class TelegramBotService {
       if (callback) await this.telegram.answerCallback(callback.id);
       return false; // Existing account/contact registration flow.
     }
-    if (callback) await this.telegram.answerCallback(callback.id);
+    if (callback) {
+      if (callback.data?.startsWith("mp:"))
+        await this.telegram.answerCallback(
+          callback.id,
+          this.modelPanels.feedback(
+            actor,
+            chatId,
+            message.message_id,
+            callback.data,
+          ),
+        );
+      else await this.telegram.answerCallback(callback.id);
+    }
     if (!Number.isSafeInteger(update.update_id)) return true;
     try {
       await this.prisma.telegramUpdate.create({
@@ -88,14 +126,29 @@ export class TelegramBotService {
             text,
             update.update_id,
             callback?.data,
+            callback ? message.message_id : undefined,
           );
         } catch (error) {
           this.logger.warn(`Telegram action failed for user ${actor.id}`);
+          if (callback && /^(mp:|models$|[vme]:)/.test(callback.data ?? "")) {
+            await this.telegram.editMessage(
+              chatId,
+              message.message_id,
+              error instanceof HttpException && error.getStatus() < 500
+                ? error.message
+                : "The model panel could not be updated. Use /model to read saved settings. No task was started.",
+              new InlineKeyboard()
+                .text("Models", "models")
+                .text("Menu", "home"),
+            );
+            return;
+          }
           await this.telegram.sendMessage(
             chatId,
-            error instanceof HttpException
+            error instanceof HttpException && error.getStatus() < 500
               ? error.message
-              : "Unable to complete this action. Use /status to check before retrying.",
+              : "The result could not be confirmed. Check Status or Recent sessions before sending the task again. Your request may already have been accepted.",
+            this.recoveryKeyboard(),
           );
         }
       })
@@ -114,6 +167,7 @@ export class TelegramBotService {
     text: string,
     updateId: number,
     callback?: string,
+    callbackMessageId?: number,
   ) {
     const state = await this.prisma.telegramConversation.upsert({
       where: { userId: actor.id },
@@ -143,101 +197,71 @@ export class TelegramBotService {
       });
       await this.telegram.sendMessage(
         chatId,
-        `Project: ${project.name}\nSend your task, or choose /model first.`,
-        new InlineKeyboard().text("Choose model", "models"),
+        `Project selected: ${project.name}\nSend a task to request a new session, or choose its model first. Existing sessions are not stopped.`,
+        new InlineKeyboard()
+          .text("Choose model", "models")
+          .row()
+          .text("Back to projects", "projects")
+          .text("Menu", "home"),
       );
       return;
     }
     if (command === "/model" || action === "models") {
       requirePermissions(actor, P.SESSIONS_CREATE);
-      const keyboard = new InlineKeyboard();
-      for (const provider of this.catalog.list())
-        keyboard.text(provider.displayName, `v:${provider.id}`).row();
-      await this.telegram.sendMessage(
-        chatId,
-        "Choose a provider for your next session:",
-        keyboard,
-      );
+      await this.modelPanels.open(actor, chatId, state, callbackMessageId);
       return;
     }
-    if (action === "v") {
+    if (action === "mp") {
       requirePermissions(actor, P.SESSIONS_CREATE);
-      const provider = this.catalog.list(parts[0])[0]!;
-      const keyboard = new InlineKeyboard();
-      for (const model of provider.models)
-        keyboard.text(model.displayName, `m:${provider.id}:${model.id}`).row();
-      await this.telegram.sendMessage(
-        chatId,
-        `${provider.displayName} models:`,
-        keyboard,
-      );
+      if (callbackMessageId !== undefined)
+        await this.modelPanels.handle(
+          actor,
+          chatId,
+          callbackMessageId,
+          callback!,
+        );
       return;
     }
-    if (action === "m") {
+    if (["v", "m", "e"].includes(action ?? "")) {
       requirePermissions(actor, P.SESSIONS_CREATE);
-      const selection = this.catalog.resolve(parts[0], parts[1]);
-      await this.prisma.telegramConversation.update({
-        where: { userId: actor.id },
-        data: {
-          providerId: selection.providerId,
-          model: selection.effectiveModel,
-          reasoningEffort: selection.effectiveReasoningEffort,
-        },
-      });
-      const model = this.catalog
-        .list(selection.providerId)[0]!
-        .models.find((m) => m.id === selection.effectiveModel)!;
-      const keyboard = new InlineKeyboard();
-      for (const effort of model.supportedReasoningEfforts)
-        keyboard
-          .text(effort, `e:${selection.providerId}:${model.id}:${effort}`)
-          .row();
-      await this.telegram.sendMessage(
-        chatId,
-        `${model.displayName} selected. Choose reasoning effort (default: ${model.defaultReasoningEffort}). Applies to new sessions; use /new to start one.`,
-        keyboard,
-      );
+      if (callbackMessageId !== undefined)
+        await this.telegram.editMessage(
+          chatId,
+          callbackMessageId,
+          "These model buttons are outdated. Nothing was saved. Open Models to choose and confirm.",
+          new InlineKeyboard().text("Models", "models").text("Menu", "home"),
+        );
       return;
     }
-    if (action === "e") {
-      requirePermissions(actor, P.SESSIONS_CREATE);
-      const selection = this.catalog.resolve(parts[0], parts[1], parts[2]);
-      await this.prisma.telegramConversation.update({
-        where: { userId: actor.id },
-        data: {
-          providerId: selection.providerId,
-          model: selection.effectiveModel,
-          reasoningEffort: selection.effectiveReasoningEffort,
-        },
-      });
-      await this.telegram.sendMessage(
-        chatId,
-        `${selection.effectiveModel} · ${selection.effectiveReasoningEffort}\nReady for your next session. Use /new, then send a task.`,
-      );
+    if (command === "/cancel" && (await this.modelPanels.cancel(actor, chatId)))
       return;
-    }
     if (command === "/projects" || action === "projects") {
       requirePermissions(actor, P.PROJECTS_READ);
       const projects = await this.projects.list(actor);
       // Page through all projects without exceeding Telegram's keyboard size.
-      const page = Math.max(0, Number(parts[0]) || 0);
       const ready = projects.filter((p) => p.status === "READY");
+      const requested = Number(parts[0]);
+      const page = Math.min(
+        Math.max(0, Math.ceil(ready.length / 20) - 1),
+        Number.isSafeInteger(requested) && requested >= 0 ? requested : 0,
+      );
       const keyboard = new InlineKeyboard();
       for (const project of ready.slice(page * 20, (page + 1) * 20))
         keyboard.text(project.name.slice(0, 60), `p:${project.id}`).row();
       if (page > 0) keyboard.text("Previous", `projects:${page - 1}`);
       if (ready.length > (page + 1) * 20)
         keyboard.text("Next", `projects:${page + 1}`);
+      keyboard.row().text("Menu", "home");
       await this.telegram.sendMessage(
         chatId,
         ready.length
-          ? "Choose a project. Running tasks requires project membership or management access."
-          : "No ready projects are available.",
+          ? `Choose a ready project · page ${page + 1}/${Math.ceil(ready.length / 20)}.\nStarting work still checks your current permissions and project access.`
+          : "No ready projects are available to choose. A project may still be initializing; check it in the app, then reopen Projects.",
         keyboard,
       );
       return;
     }
-    if (command === "/sessions") {
+    if (command === "/sessions" || action === "sessions") {
       requirePermissions(actor, P.SESSIONS_READ);
       const bindings = await this.prisma.telegramSession.findMany({
         where: { userId: actor.id, chatId },
@@ -256,11 +280,12 @@ export class TelegramBotService {
             `s:${binding.sessionId}`,
           )
           .row();
+      keyboard.text("Projects", "projects").text("Menu", "home");
       await this.telegram.sendMessage(
         chatId,
         bindings.length
-          ? "Select a recent session to continue:"
-          : "No Telegram sessions yet. Use /projects.",
+          ? "Select one of your 20 most recent Telegram sessions. Selecting it does not send a task or resume work."
+          : "No Telegram sessions yet. Choose a project, then send a task to request your first session.",
         keyboard,
       );
       return;
@@ -276,11 +301,12 @@ export class TelegramBotService {
       });
       await this.telegram.sendMessage(
         chatId,
-        `Session selected: ${binding.sessionId}\nUse /status or send a follow-up.`,
+        `Session selected: ${binding.sessionId}\nCheck Status before sending a follow-up. Selection alone does not resume work.`,
+        this.recoveryKeyboard(),
       );
       return;
     }
-    if (command === "/new") {
+    if (command === "/new" || action === "new") {
       await this.prisma.telegramConversation.update({
         where: { userId: actor.id },
         data: { sessionId: null },
@@ -288,12 +314,17 @@ export class TelegramBotService {
       await this.telegram.sendMessage(
         chatId,
         state.projectId
-          ? "Send a task to start a new session in the selected project."
-          : "Choose /projects first.",
+          ? "New session prepared for the selected project. Send a task when ready. Existing work continues; no task has been sent yet."
+          : "Choose a project first. No task has been sent.",
+        new InlineKeyboard()
+          .text("Projects", "projects")
+          .text("Models", "models")
+          .row()
+          .text("Menu", "home"),
       );
       return;
     }
-    if (command === "/status" || command === "/stop") {
+    if (command === "/status" || action === "status" || command === "/stop") {
       requirePermissions(
         actor,
         command === "/stop" ? P.SESSIONS_MANAGE : P.SESSIONS_READ,
@@ -301,7 +332,8 @@ export class TelegramBotService {
       if (!state.sessionId) {
         await this.telegram.sendMessage(
           chatId,
-          "No session selected. Use /sessions or /projects.",
+          "No session selected. Choose Recent sessions to inspect existing work, or Projects for a new task.",
+          this.recoveryKeyboard(),
         );
         return;
       }
@@ -316,8 +348,9 @@ export class TelegramBotService {
       await this.telegram.sendMessage(
         chatId,
         command === "/stop"
-          ? "Interruption requested."
-          : `Session: ${session.id}\n${session.status}\n${session.providerId} · ${session.model} · ${session.effectiveReasoningEffort}`,
+          ? "Interruption requested. This does not confirm the process has stopped. Check Status for the latest saved state."
+          : `Session: ${session.id}\nState: ${session.status}\n${session.providerId} · ${session.model} · ${session.effectiveReasoningEffort}\n${this.stopEvidence(session.stopConfirmation, session.recoveryReason)}`,
+        this.recoveryKeyboard(),
       );
       return;
     }
@@ -329,10 +362,11 @@ export class TelegramBotService {
     ) {
       await this.telegram.sendMessage(
         chatId,
-        "ProboxAI\n/projects — choose an existing project\n/model — provider, model and reasoning for new sessions\n/new — start a fresh session with your next message\n/sessions — select a recent session\n/status — current session\n/stop — interrupt\n\nSend a task after choosing a project. Further messages continue that session. File buttons download referenced project files.",
-        new InlineKeyboard()
-          .text("Projects", "projects")
-          .text("Models", "models"),
+        (command === "/cancel"
+          ? "Back to menu. Selections are unchanged; running work continues.\n\n"
+          : "") +
+          "ProboxAI\nChoose a project, optionally choose a model, then send a task. Later messages continue the selected session.\n\n/projects · /sessions · /model · /status\n/new prepares a fresh session; it does not stop existing work.\n/stop requests interruption. /cancel returns to this menu.\nFile buttons download referenced project files.",
+        this.menuKeyboard(),
       );
       return;
     }
@@ -340,7 +374,11 @@ export class TelegramBotService {
     if (text.length > 8000)
       throw new BadRequestException("Tasks must be at most 8000 characters.");
     if (!state.projectId) {
-      await this.telegram.sendMessage(chatId, "Choose /projects first.");
+      await this.telegram.sendMessage(
+        chatId,
+        "Choose a project before sending a task. Your message was not submitted.",
+        this.menuKeyboard(),
+      );
       return;
     }
     requirePermissions(
@@ -374,7 +412,8 @@ export class TelegramBotService {
       );
       await this.telegram.sendMessage(
         chatId,
-        `Continuing ${project.name}\nSession: ${session.id}\nTurn: ${accepted.turnId}`,
+        `Follow-up accepted · ${accepted.status}\nProject: ${project.name}\nSession: ${session.id}\nTurn: ${accepted.turnId}\nAcceptance is not completion. Updates will arrive here; check Status if delivery is delayed.`,
+        this.recoveryKeyboard(),
       );
     } else {
       requirePermissions(actor, P.TASKS_CREATE, P.SESSIONS_CREATE);
@@ -430,9 +469,42 @@ export class TelegramBotService {
       );
       await this.telegram.sendMessage(
         chatId,
-        `Started in ${project.name}\n${selection.effectiveModel} · ${selection.effectiveReasoningEffort}\nSession: ${session.id}\nTurn: ${accepted.turnId}`,
+        `Task accepted · ${accepted.status}\nProject: ${project.name}\n${selection.effectiveModel} · ${selection.effectiveReasoningEffort}\nSession: ${session.id}\nTurn: ${accepted.turnId}\nAcceptance is not completion. Updates will arrive here; check Status before resending.`,
+        this.recoveryKeyboard(),
       );
     }
+  }
+
+  private menuKeyboard() {
+    return new InlineKeyboard()
+      .text("Projects", "projects")
+      .text("Recent sessions", "sessions")
+      .row()
+      .text("Models", "models")
+      .text("Status", "status")
+      .row()
+      .text("New session", "new");
+  }
+
+  private stopEvidence(confirmation: string, recoveryReason: string | null) {
+    if (confirmation === "STOP_UNCONFIRMED")
+      return (
+        "Stop unconfirmed. Do not assume work stopped; follow-ups are blocked. Check the app for recovery state." +
+        (recoveryReason === "OWNER_LOST" ? " The run owner was lost." : "")
+      );
+    if (confirmation === "LOCAL_EXIT_OBSERVED")
+      return "Runner exit observed locally. This does not prove all descendant processes stopped.";
+    if (confirmation === "NOT_STARTED")
+      return "Stop evidence: no runner start recorded in this state.";
+    return "Stop evidence: exit has not been observed.";
+  }
+
+  private recoveryKeyboard() {
+    return new InlineKeyboard()
+      .text("Check status", "status")
+      .text("Recent sessions", "sessions")
+      .row()
+      .text("Menu", "home");
   }
 
   private async binding(userId: string, chatId: bigint, sessionId: string) {

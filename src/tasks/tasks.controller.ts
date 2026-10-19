@@ -60,9 +60,11 @@ export class TasksController {
   @ApiAuthenticationErrors()
   @ApiValidationErrors()
   @ApiConflictResponse({
+    type: ApiErrorResponseDto,
     description: "Request ID reused with different creation input.",
   })
   @ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
     description:
       "TASK_CREATION_UNAVAILABLE; an uncertain response does not prove rollback.",
   })
@@ -91,6 +93,7 @@ export class TasksController {
   @ApiAuthenticationErrors()
   @ApiValidationErrors()
   @ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
     description: "TASK_CREATION_UNAVAILABLE; retry authorized readback.",
   })
   creation(

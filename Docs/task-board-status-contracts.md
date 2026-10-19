@@ -1,5 +1,11 @@
 # Project task-board/status lifecycle — October 13 decisions
 
+The later [shared-task association foundation](shared-human-task-contracts.md)
+adds additional-board associations without replacing the original task entry.
+Move occupied shared entries explicitly before removing their column. Canonical
+human completion is stored independently, with no inference from Done labels,
+colors or runner success; its write authority remains pending clarification.
+
 The subsequent [workflow display increment](task-workflow-display-contracts.md)
 adds the same current status label/color/palette to member-only human task reads,
 with frozen mutation/audit snapshots unchanged. It also aligns Unicode name

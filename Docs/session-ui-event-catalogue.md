@@ -1,5 +1,11 @@
 # Session UI event catalogue — 2026-10-11
 
+**17 October provisional command update:** [Command disclosure contracts](session-command-disclosure-contracts.md)
+supersede the command-detail exclusion below only for the exact allowlisted labels
+and validated terminal exit codes in new v3 command events. Output text remains
+omitted, including empty provider output. Historical rows remain omitted; SESSION07
+is still partial. The user's strict safe-only decision is provisional and revisitable.
+
 This describes the local backend patch, not a deployed API or complete vendor protocol. bin/proboxai.mjs forwards Codex arguments/streams; the runner accepts arbitrary JSONL objects. No provider schema/normalization layer exists here. Synthetic tests do not prove every vendor event.
 
 **12 October SESSION09 update:** [Assistant text contracts](session-assistant-text-contracts.md) supersede this milestone's assistant-text row and missing-text-semantics statements below. Installed Codex 0.162.1 and its matching upstream source were verified: exec JSON emits completed full assistant items, without assistant starts/updates/token deltas. New completed text uses projectionVersion 2 and explicit snapshot identity/revision/phase/continuation metadata. Historical raw/v1 text remains unverified and provisional; unsupported live partial text is a neutral omission. REST/SSE share the same projection. Other tool/detail/summary gaps below remain unchanged. The dated table retains the prior discovery evidence.

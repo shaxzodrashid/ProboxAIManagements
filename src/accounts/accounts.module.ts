@@ -16,9 +16,17 @@ import {
 import { ManualStatusService } from "./manual-status.service";
 import { ProfileSaveController } from "./profile-save.controller";
 import { ProfileSaveService } from "./profile-save.service";
+import {
+  ProfileAvatarController,
+  PublicProfileAvatarController,
+} from "./profile-avatar.controller";
+import { ProfileAvatarService } from "./profile-avatar.service";
+import { ProfileAvatarStorage } from "./profile-avatar-storage";
 @Module({
   imports: [AuthModule, AuthorizationModule, TelegramBotModule],
   controllers: [
+    ProfileAvatarController,
+    PublicProfileAvatarController,
     ProfileSaveController,
     ManualStatusController,
     PublicManualStatusController,
@@ -28,6 +36,8 @@ import { ProfileSaveService } from "./profile-save.service";
     PublicProfileController,
   ],
   providers: [
+    ProfileAvatarService,
+    ProfileAvatarStorage,
     ProfileSaveService,
     AccountsService,
     ProfilePrivacyService,

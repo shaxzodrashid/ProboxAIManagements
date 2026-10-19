@@ -39,7 +39,6 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
-  ApiProduces,
   ApiQuery,
   ApiTags,
 } from "@nestjs/swagger";
@@ -78,10 +77,15 @@ import {
 } from "./projects.dto";
 import { ProjectsService } from "./projects.service";
 import {
+  ProtectedFileTypeResponseDto,
+  ProtectedFileTypeRemovedResponseDto,
+} from "./protected-file-types.dto";
+import {
   SubmitProjectCreationDto,
   ProjectCreationOutcomeDto,
 } from "./project-creation-submission.dto";
 import {
+  ApiErrorResponseDto,
   ApiUploadSizeError,
   ApiAccessToken,
   ApiAuthenticationErrors,
@@ -110,9 +114,11 @@ export class ProjectsController {
   })
   @ApiAcceptedResponse({ type: ProjectCreationOutcomeDto })
   @ApiConflictResponse({
+    type: ApiErrorResponseDto,
     description: "Identity reuse or overlapping unresolved creation.",
   })
   @ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
     description: "PROJECT_CREATION_OUTCOME_UNKNOWN; read the same identity.",
   })
   @ApiAuthenticationErrors()
@@ -177,6 +183,7 @@ export class ProjectsController {
     type: ProjectCreatedResponseDto,
   })
   @ApiResponse({
+    type: ApiErrorResponseDto,
     status: 428,
     description:
       "PROJECT_CREATION_ID_REQUIRED: CLEAR must use keyed creation-submissions.",
@@ -435,6 +442,15 @@ export class ProjectsController {
   @Get(":id/protected-file-types")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "List protected file extensions" })
+  @ApiOkResponse({
+    type: ProtectedFileTypeResponseDto,
+    isArray: true,
+    description:
+      "Existing project-scoped rules ordered by extension; sensitive access and projects.files.delete remain required.",
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   listProtectedFileTypes(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -445,6 +461,14 @@ export class ProjectsController {
   @Post(":id/protected-file-types")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Append a protected file extension" })
+  @ApiCreatedResponse({
+    type: ProtectedFileTypeResponseDto,
+    description:
+      "Created or existing normalized rule; repeated normalized extensions preserve the original record and creation attribution.",
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   addProtectedFileType(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -456,6 +480,10 @@ export class ProjectsController {
   @Put(":id/protected-file-types/:typeId")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Update a protected file extension (owner only)" })
+  @ApiOkResponse({ type: ProtectedFileTypeResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   updateProtectedFileType(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -473,6 +501,10 @@ export class ProjectsController {
   @Delete(":id/protected-file-types/:typeId")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Remove a protected file extension (owner only)" })
+  @ApiOkResponse({ type: ProtectedFileTypeRemovedResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   removeProtectedFileType(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -529,6 +561,9 @@ export class ProjectsController {
   @Get(":id/file-operations")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOkResponse({ type: ProjectFileOperationResponseDto, isArray: true })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   fileOperations(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -539,6 +574,9 @@ export class ProjectsController {
   @Get(":id/file-operations/:operationId")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOkResponse({ type: ProjectFileOperationResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   fileOperation(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -554,6 +592,9 @@ export class ProjectsController {
       "Inspect a deletion outcome and repair its database state without moving bytes",
   })
   @ApiCreatedResponse({ type: ProjectFileOperationResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   reconcileFileOperation(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -735,11 +776,14 @@ export class ProjectsController {
     example: "docs/README.md",
     description: "Project-relative file path.",
   })
-  @ApiProduces("application/octet-stream")
   @ApiOkResponse({
     description:
       "Binary file stream. The response includes an attachment Content-Disposition header.",
-    schema: { type: "string", format: "binary" },
+    content: {
+      "application/octet-stream": {
+        schema: { type: "string", format: "binary" },
+      },
+    },
   })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()

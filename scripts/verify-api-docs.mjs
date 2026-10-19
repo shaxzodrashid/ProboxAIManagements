@@ -7,6 +7,53 @@ const read = (name) =>
 const operations = read("postman-operation-docs.json");
 const inventory = read("endpoints.json");
 const spec = read("openapi.json");
+// One verified bodyless success is intentional. Never invent a JSON schema for it.
+const bodylessSuccesses = new Set(["POST /api/v1/telegram/webhook 200"]);
+for (const [path, methods] of Object.entries(spec.paths)) {
+  for (const [method, operation] of Object.entries(methods)) {
+    const operationIdentity = `${method.toUpperCase()} ${path}`;
+    // Require the actual access-token guard's failure contracts, not 401s on
+    // quiet API-key webhooks or public/optional authentication projections.
+    if (operation.security?.some((security) => "access-token" in security)) {
+      for (const status of ["401", "403", "503"])
+        assert(
+          operation.responses?.[status]?.content?.["application/json"]?.schema,
+          `Missing access-token error schema: ${operationIdentity} ${status}`,
+        );
+    }
+    for (const [, name] of path.matchAll(/\{([^}]+)\}/g))
+      assert(
+        operation.parameters?.some(
+          (parameter) =>
+            parameter.in === "path" &&
+            parameter.name === name &&
+            parameter.required === true,
+        ),
+        `Missing required path parameter: ${operationIdentity} ${name}`,
+      );
+    for (const [status, response] of Object.entries(
+      operation.responses ?? {},
+    )) {
+      if (/^[45]\d\d$/.test(status))
+        assert(
+          response.content?.["application/json"]?.schema,
+          `Missing JSON error schema: ${operationIdentity} ${status}`,
+        );
+      if (!/^20[012]$/.test(status)) continue;
+      const identity = `${method.toUpperCase()} ${path} ${status}`;
+      if (bodylessSuccesses.has(identity)) {
+        assert.equal(response.content, undefined, identity);
+        assert.match(response.description, /[Ee]mpty/);
+      } else {
+        const content = Object.values(response.content ?? {});
+        assert(
+          content.length && content.every((media) => media.schema),
+          `Missing success schema: ${identity}`,
+        );
+      }
+    }
+  }
+}
 const key = (method, path) =>
   method.toUpperCase() + " " + path.replace(/\{[^}]+\}/g, "{}");
 assert.equal(operations.length, inventory.length);
@@ -15,6 +62,10 @@ for (const row of inventory)
   assert(operations.some((o) => o.key === key(row.method, row.path)));
 for (const op of operations) {
   assert(op.request.description.includes("Deployment is unverified"));
+  assert(
+    op.request.description.includes(`locally tested ${spec.info.version}`),
+    `Stale documentation version: ${op.key}`,
+  );
   const match = op.request.description.match(/```json\s*\n([\s\S]*?)\n\s*```/);
   assert(match, op.key);
   const contract = JSON.parse(match[1]);
@@ -59,5 +110,5 @@ for (const op of operations) {
   }
 }
 console.log(
-  `${operations.length} unique runtime operations documented; embedded refs, credential placeholders, body syntax, quoted revisions and optional uploads verified. No application requests executed.`,
+  `${operations.length} unique runtime operations documented; nonempty success schemas, access-token error schemas, required path parameters, verified bodyless webhook, embedded refs, credential placeholders, body syntax, quoted revisions and optional uploads verified. No application requests executed.`,
 );

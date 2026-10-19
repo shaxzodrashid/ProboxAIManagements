@@ -122,7 +122,68 @@ sequence under `/api/v1/auth`. The final request accepts only `password` and
 `passwordConfirmation`, uses its own purpose-bound temporary Bearer token, and
 revokes every refresh token after changing the password.
 
+## Routine production deployments (app2)
+
+After the one-time release-directory and systemd setup, deploy a verified stable
+release published to `main` with this single command from app2's root shell:
+
+```bash
+runuser -u proboxai -- /srv/proboxai/operator/proboxai-deploy restart
+```
+
+It works from any directory. The command runs the configured wrapper as the
+`proboxai` service user; the wrapper loads
+`/srv/proboxai/operator/config.sh`. The lower-level `./deploy.sh restart` entry
+point requires that service user and the deployment environment configuration.
+
+The CLI fetches `main`, prepares an isolated release with frozen dependencies,
+generates Prisma Client, runs release/deployment checks, typecheck, lint, tests
+and build, then checks migration readiness. Preparation runs while the existing
+backend remains available. After successful checks, it fast-forwards the clean
+source checkout, briefly stops the backend, switches the release symlink and
+starts the candidate. Success requires dependency readiness and the matching
+OpenAPI release version. Dirty/divergent source and dev/prerelease versions are
+rejected. Preparation failure keeps the existing runtime selected; a failed
+runtime switch attempts restoration and verification of the previous release.
+
+Wait for the shell prompt to return. A successful update prints
+`Deployment healthy: <version>`. For a failed operation, inspect the private log
+path printed by the CLI before retrying. Check the active release with:
+
+```bash
+runuser -u proboxai -- /srv/proboxai/operator/proboxai-deploy status
+```
+
+**Releases with database migrations need an additional operator procedure.**
+Pending or failed migrations stop the update before the runtime switch. Review
+the migration/preflight requirements, coordinate writers, take and verify a
+private database backup, explicitly apply the reviewed migrations from the
+tested candidate and validate the resulting schema before activation. The CLI
+does not apply migrations or seeds, and runtime rollback does not undo schema or
+data changes. See the [CLI migration policy](Docs/deployment-cli.md#database-and-in-flight-work-policy)
+and the [0.2.x rollout example](Docs/release-0.2.0-rollout.md).
+
+The long baseline-copy, systemd, sudoers and tool-cache commands belong to the
+[one-time app2 setup](Docs/deployment-app2.md). Routine code updates use the
+single command above. The root-owned operator CLI is installed separately from
+the source checkout; changes to the CLI itself require a reviewed update of
+`/srv/proboxai/operator/deploy.sh`.
+
+To stop and start the selected runtime without fetching or building an update:
+
+```bash
+runuser -u proboxai -- /srv/proboxai/operator/proboxai-deploy stop &&
+runuser -u proboxai -- /srv/proboxai/operator/proboxai-deploy resume
+```
+
+See the [CLI reference](Docs/deployment-cli.md) for configuration, logs, exit codes,
+health checks and recovery behavior.
+
 ## VPS configuration
+
+This section describes first-time installation on a new VPS. The configured app2
+host uses the [routine deployment workflow](#routine-production-deployments-app2)
+above.
 
 Run the API as a dedicated, unprivileged `proboxai` user. The user must own the
 application checkout, the permitted workspaces, and the session archive:
@@ -178,7 +239,8 @@ Likewise, expose only the reverse proxy on ports 80/443; keep PostgreSQL and
 the application port (`3000`) bound to the VPS loopback interface or private
 network. Do not commit this file or reuse the development Docker credentials.
 
-Deploy application dependencies and migrations as the service user:
+For the first installation, install dependencies and apply migrations as the
+service user:
 
 ```bash
 sudo -u proboxai corepack pnpm install --frozen-lockfile
@@ -213,7 +275,7 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-Enable it after each deployment:
+Enable the service after its initial installation:
 
 ```bash
 sudo systemctl daemon-reload
@@ -495,4 +557,4 @@ Project member discovery: [permitted active-workspace candidates, filters and bo
 
 Backend releases: [versioning and commit provenance](Docs/backend-release-versioning.md), [Available since by feature](Docs/backend-feature-availability.md) and [changelog](CHANGELOG.md). Dev prereleases are progress snapshots, not deployments; API compatibility remains /api/v1.
 
-Production CLI artifact: [systemd setup, stop/resume/update, health verification and rollback policy](Docs/deployment-cli.md). The script was sandbox-tested; no production deployment or automatic migration is implied.
+Deployment operations: [CLI configuration, commands, health verification and rollback policy](Docs/deployment-cli.md), [one-time app2 setup](Docs/deployment-app2.md), and [database migration rollout](Docs/release-0.2.0-rollout.md).

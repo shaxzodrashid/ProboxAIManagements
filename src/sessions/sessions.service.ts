@@ -1034,7 +1034,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   }
   private async renewLease(sessionId: string, turnId: string) {
     await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "ProboxAiSession" WHERE id = ${sessionId} FOR UPDATE`;
+      await this.lockRun(tx, sessionId);
       const now = await this.databaseNow(tx);
       const s = await tx.proboxAiSession.findUnique({
         where: { id: sessionId },
@@ -1178,7 +1178,9 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   ) {
     const projected = safeRunnerEvent(event);
     await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "ProboxAiSession" WHERE id = ${sessionId} FOR UPDATE`;
+      // Admission/interruption take workspace and task before session. Runner
+      // writes must share that order rather than hold session ahead of them.
+      await this.lockRun(tx, sessionId);
       const now = await this.databaseNow(tx);
       const s = await tx.proboxAiSession.findUniqueOrThrow({
         where: { id: sessionId },

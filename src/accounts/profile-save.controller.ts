@@ -20,6 +20,7 @@ import { CurrentUser } from "../auth/auth.decorator";
 import { JwtAuthGuard } from "../auth/auth.guards";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
+  ApiErrorResponseDto,
   ApiAccessToken,
   ApiAuthenticationErrors,
   ApiResourceErrors,
@@ -41,6 +42,7 @@ import { ProfileSaveService } from "./profile-save.service";
 @ApiResourceErrors()
 @ApiValidationErrors()
 @ApiServiceUnavailableResponse({
+  type: ApiErrorResponseDto,
   description:
     "PROFILE_SAVE_UNAVAILABLE: uncertain writes require same-identity reconciliation; this does not prove rollback.",
 })
@@ -52,7 +54,7 @@ export class ProfileSaveController {
   @ApiOperation({
     summary: "Read one coherent self profile edit baseline",
     description:
-      "OPEN human self, including zero permissions. One snapshot of profile, policies, shared availability and aggregate revision. Contacts remain separate explicit operations. No actor history.",
+      "OPEN human self, including zero permissions. One snapshot of profile, stored custom status with active flag, current avatar metadata, policies, shared availability and aggregate revision. Contacts remain separate explicit operations. No actor history.",
   })
   edit(
     @CurrentUser() actor: AuthenticatedUser,
@@ -64,13 +66,14 @@ export class ProfileSaveController {
   @Header("Cache-Control", "no-store")
   @ApiOkResponse({ type: ProfileSaveReceiptDto })
   @ApiConflictResponse({
+    type: ApiErrorResponseDto,
     description:
       "PROFILE_SAVE_REVISION_CONFLICT or PROFILE_SAVE_REQUEST_CONFLICT. Preserve draft; no automatic stale retry.",
   })
   @ApiOperation({
     summary: "Commit the complete staged Profile Save atomically",
     description:
-      "Use the edit revision and a UUIDv4 requestId. Supported profile fields, supplied audiences and optional availability commit together with one private receipt. Omitted fields retain values; null clears supported fields. Availability is shared with everyone regardless of legacy STATUS policy. Receipt is historical acknowledgment only; reread edit state for current values. Exact retries do not reapply. Existing PUT /users/me/profile and standalone status contracts remain compatible. Done stages locally; pre-submit Cancel sends nothing. No contacts, avatar uploads, role edits or agent execution.",
+      "Use the edit revision and a UUIDv4 requestId. Supported profile fields, customStatus, staged avatarAssetId, supplied audiences and optional availability commit together with one private receipt. Omitted fields retain values; null clears supported fields. Availability is shared with everyone; STATUS audiences govern custom text/emoji only. Receipt is historical acknowledgment only; reread edit state for current values. Exact retries do not reapply. Existing PUT /users/me/profile and standalone status contracts remain compatible. Upload image bytes separately, then publish the owned staged asset in this main Save. Done stages locally; pre-submit Cancel sends no Profile Save. No contacts, role edits or agent execution.",
   })
   commit(
     @CurrentUser() actor: AuthenticatedUser,
