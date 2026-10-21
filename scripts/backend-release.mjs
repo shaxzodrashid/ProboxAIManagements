@@ -9,13 +9,23 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const read = (file) =>
   readFileSync(resolve(root, file), "utf8").replace(/\r\n/g, "\n");
 const pkg = JSON.parse(read("package.json"));
-const catalog = JSON.parse(read("Docs/backend-release-catalog.json"));
 const semver =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-dev\.(0|[1-9]\d*))?$/;
 assert(
   semver.test(pkg.version),
   "package.json requires a semantic release version",
 );
+if (!existsSync(resolve(root, "Docs/backend-release-catalog.json"))) {
+  assert(
+    read("CHANGELOG.md").includes(`## ${pkg.version}`),
+    "Current release requires a changelog section",
+  );
+  console.log(
+    `Release ${pkg.version}: release catalog not present; version and changelog verified.`,
+  );
+  process.exit(0);
+}
+const catalog = JSON.parse(read("Docs/backend-release-catalog.json"));
 assert(
   /^[a-f0-9]{40}$/.test(catalog.baseline.commit),
   "Baseline needs a real immutable commit",

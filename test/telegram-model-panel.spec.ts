@@ -55,6 +55,24 @@ function setup() {
 }
 
 describe("Telegram editable model panel", () => {
+  it("binds drafts to the verified sender and replaces a previous sender's nonce", async () => {
+    const h = setup();
+    await h.panel.open(h.actor, 42n, h.base, undefined, 700n);
+    const previous = h.button("Confirm");
+    await h.panel.handle(h.actor, 42n, 10, previous, 701n);
+    expect(h.save).not.toHaveBeenCalled();
+    expect(h.panel.feedback(h.actor, 42n, 10, previous, 701n)).toContain(
+      "old or closed",
+    );
+    await h.panel.open(h.actor, 42n, h.base, 10, 701n);
+    const current = h.button("Confirm");
+    expect(current).not.toBe(previous);
+    await h.panel.handle(h.actor, 42n, 10, previous, 700n);
+    expect(h.save).not.toHaveBeenCalled();
+    await h.panel.handle(h.actor, 42n, 10, current, 701n);
+    expect(h.save).toHaveBeenCalledTimes(1);
+    expect(h.save.mock.calls[0][4]).toBe(701n);
+  });
   it("uses one message, shows direct catalog choices and pages without persisting drafts", async () => {
     const h = setup();
     await h.panel.open(h.actor, 42n, h.base);
@@ -86,6 +104,7 @@ describe("Telegram editable model panel", () => {
         effectiveModel: "gpt-6-astra",
         effectiveReasoningEffort: "high",
       }),
+      undefined,
     );
     expect(h.telegram.sendMessage).toHaveBeenCalledTimes(1);
     expect(

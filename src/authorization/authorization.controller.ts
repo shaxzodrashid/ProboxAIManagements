@@ -30,6 +30,7 @@ import {
   ApiAuthenticationErrors,
   ApiOperationErrors,
   ApiValidationErrors,
+  ApiReadAvailability,
 } from "../openapi/api-docs";
 import {
   CreateRoleDto,
@@ -76,6 +77,7 @@ export class AuthorizationController {
   }
 
   @Get("revision")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_MANAGE)
   @ApiOkResponse({ type: RevisionResponseDto })
@@ -84,6 +86,7 @@ export class AuthorizationController {
   }
 
   @Get("roles/:id/edit")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_MANAGE)
   @ApiOperation({
@@ -96,6 +99,7 @@ export class AuthorizationController {
   }
 
   @Get("users/:userId/roles")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_MANAGE)
   @ApiOperation({
@@ -110,6 +114,7 @@ export class AuthorizationController {
   }
 
   @Get("permissions")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_READ)
   @ApiOperation({ summary: "List the assignable permission catalog" })
@@ -119,6 +124,7 @@ export class AuthorizationController {
   }
 
   @Get("roles")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.AUTHORIZATION_READ)
   @ApiOperation({ summary: "List workspace roles with permissions" })

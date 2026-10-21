@@ -1,4 +1,5 @@
 import { lockWorkspace } from "../prisma/workspace-lock";
+import { readDependency } from "../prisma/read-dependency";
 import { assertCurrentManagement } from "../prisma/current-management";
 import { Permissions } from "../authorization/permission.catalog";
 import {
@@ -120,19 +121,23 @@ export class AccountsService {
     }
   }
   async list(workspaceId: string) {
-    const users = await this.prisma.user.findMany({
-      where: { workspaceId },
-      orderBy: { createdAt: "desc" },
-      select: userResponseSelect,
-    });
+    const users = await readDependency("listUsers", () =>
+      this.prisma.user.findMany({
+        where: { workspaceId },
+        orderBy: { createdAt: "desc" },
+        select: userResponseSelect,
+      }),
+    );
     return users.map(toUserResponse);
   }
 
   async self(workspaceId: string, id: string) {
-    const user = await this.prisma.user.findFirst({
-      where: { id, workspaceId, status: UserStatus.OPEN },
-      select: selfProfileSelect,
-    });
+    const user = await readDependency("readSelfProfile", () =>
+      this.prisma.user.findFirst({
+        where: { id, workspaceId, status: UserStatus.OPEN },
+        select: selfProfileSelect,
+      }),
+    );
     if (!user) throw new NotFoundException("User not found");
     return toSelfProfile(user);
   }
@@ -141,10 +146,16 @@ export class AccountsService {
     workspaceId: string,
     id: string,
   ): Promise<SelfTelegramLinkResponseDto> {
-    const user = await this.prisma.user.findFirst({
-      where: { id, workspaceId, status: UserStatus.OPEN },
-      select: { telegramUserId: true, telegramChatId: true, verifiedAt: true },
-    });
+    const user = await readDependency("readSelfTelegramLink", () =>
+      this.prisma.user.findFirst({
+        where: { id, workspaceId, status: UserStatus.OPEN },
+        select: {
+          telegramUserId: true,
+          telegramChatId: true,
+          verifiedAt: true,
+        },
+      }),
+    );
     if (!user) throw new NotFoundException("User not found");
     const presence = [
       user.telegramUserId,

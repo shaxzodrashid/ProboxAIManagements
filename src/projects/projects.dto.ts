@@ -71,6 +71,35 @@ export class ProjectTrashRestoredResponseDto {
   @ApiProperty() path!: string;
 }
 
+export class ProjectTrashExecutionResponseDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({ enum: ["RESTORE", "PURGE"] }) action!: string;
+  @ApiProperty({
+    enum: ["STARTED", "UNKNOWN", "REJECTED", "RESTORED", "PURGED"],
+  })
+  state!: string;
+  @ApiProperty({ type: String, nullable: true }) errorCode!: string | null;
+  @ApiProperty({ type: String, format: "date-time" }) createdAt!: string;
+  @ApiProperty({ type: String, format: "date-time", nullable: true })
+  finishedAt!: string | null;
+}
+
+export class ProjectTrashOutcomeResponseDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({ format: "uuid" }) projectId!: string;
+  @ApiProperty() originalPath!: string;
+  @ApiProperty({ enum: ProjectFileTrashStatus })
+  status!: ProjectFileTrashStatus;
+  @ApiProperty({ type: String, format: "date-time" }) expiresAt!: string;
+  @ApiProperty({ type: String, format: "date-time", nullable: true })
+  restoredAt!: string | null;
+  @ApiProperty({ type: String, format: "date-time", nullable: true })
+  purgedAt!: string | null;
+  @ApiProperty({ enum: ["NONE", "REVIEW_OUTCOME"] }) nextAction!: string;
+  @ApiProperty({ type: ProjectTrashExecutionResponseDto, isArray: true })
+  executions!: ProjectTrashExecutionResponseDto[];
+}
+
 const PROJECT_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,119}$/;
 
 export const EXISTING_PROJECT_DIRECTORY_ACTIONS = ["KEEP", "CLEAR"] as const;

@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { ArticlesModule } from "./articles/articles.module";
 import { ConfigModule } from "@nestjs/config";
 import { PrismaModule } from "./prisma/prisma.module";
 import { SessionsModule } from "./sessions/sessions.module";
@@ -17,6 +18,7 @@ import { BrowserSessionModule } from "./browser-sessions/browser-session.module"
 
 @Module({
   imports: [
+    ArticlesModule,
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     StorageModule,

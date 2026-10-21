@@ -537,7 +537,9 @@ if (databaseUrl) {
         "completedById",
         "deadline",
         "id",
+        "parentId",
         "position",
+        "sectionId",
         "title",
       ]);
       expect(

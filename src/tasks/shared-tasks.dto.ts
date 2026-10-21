@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { IsUUID } from "class-validator";
 import { BoardMutationDto } from "./task-boards.dto";
+import { HumanTaskLifecycleDto } from "./human-tasks.dto";
 
 export class ShareTaskDto extends BoardMutationDto {
   @ApiProperty({
@@ -60,6 +61,8 @@ export class TaskSharingEditDto {
   shares!: OwnedTaskShareDto[];
 }
 export class SharedTaskStateDto {
+  @ApiProperty({ type: HumanTaskLifecycleDto })
+  lifecycle!: HumanTaskLifecycleDto;
   @ApiProperty({ format: "uuid" }) taskId!: string;
   @ApiProperty({
     format: "uuid",

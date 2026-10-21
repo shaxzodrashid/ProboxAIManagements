@@ -1,5 +1,19 @@
 # Private Postman documentation refresh — 18 October 2026
 
+**19 October continuation:** a new direct chat approval was received. Fresh reads
+confirmed the same personal workspace, team null and ten collections. The exact
+description-only update for `GET /users/me` was rejected by automatic approval
+review because the generic approval did not explicitly identify its nonpublic
+payload and personal-workspace destination. **Zero new writes succeeded.** A
+request readback confirms its previous description is unchanged. No workaround
+or further write was attempted. The exact proposed payload is retained in
+[the review file](postman-exact-profile-update-20261019.json). A subsequent parent
+instruction holds all further Postman writes, retries and approval requests;
+the previously displayed question is no longer active work. Keep this payload
+local. Current local export covers175
+operations, including three browser routes, and six updated read-availability
+contracts. Historical remote counts below are not a new complete readback.
+
 **Authoritative status correction:** exact upload approval was explicitly given
 on18 October at14:23; the subsequent exact retry was still denied. This is an
 automatic tool-review blocker, **not an unanswered user approval**. Any later

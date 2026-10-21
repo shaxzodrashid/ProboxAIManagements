@@ -1,4 +1,5 @@
 import { ProboxAiSession, ProboxAiTurn } from "@prisma/client";
+import { historyText } from "./session-history";
 
 export function sessionResponse(s: ProboxAiSession) {
   return {
@@ -36,7 +37,7 @@ export function turnResponse(t: ProboxAiTurn) {
     sessionId: t.sessionId,
     requestId: t.requestId,
     codexTurnId: t.codexTurnId,
-    prompt: t.prompt,
+    prompt: historyText(t.prompt),
     status: t.status,
     inputTokens: t.inputTokens,
     cachedTokens: t.cachedTokens,

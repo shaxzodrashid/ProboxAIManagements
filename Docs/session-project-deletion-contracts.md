@@ -1,5 +1,10 @@
 # SESSION02 acceptance and PROJECT02 deletion readback
 
+The acceptance shape remains compatible. See the later
+[REST follow-up recovery contract](rest-followup-recovery-contracts.md) for the
+new explicit opt-in and never-started crash recovery. Legacy rows and ambiguous
+external execution retain the conservative behavior documented below.
+
 Local, uncommitted implementation on main, based on 31fdd5a9d9a9bf19d6268c24504496bb54b75e2a. Previous batches are preserved. No live runner was launched, and no production migration, push or deployment occurred.
 
 ## Follow-up acceptance

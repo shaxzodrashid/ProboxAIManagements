@@ -393,7 +393,7 @@ export class ProjectInitializationService
     );
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_INITIALIZATIONS_MANAGE)
   async cancel(
     actor: AuthenticatedUser,
     projectId: string,
@@ -440,7 +440,7 @@ export class ProjectInitializationService
     return { cancelled: true };
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_INITIALIZATIONS_MANAGE)
   async retry(actor: AuthenticatedUser, projectId: string) {
     await this.assertWriteAccess(actor, projectId);
     const project = await this.prisma.project.findUnique({

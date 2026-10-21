@@ -22,6 +22,7 @@ type Draft = {
   userId: string;
   workspaceId: string;
   chatId: bigint;
+  telegramUserId?: bigint;
   messageId: number;
   nonce: string;
   revision: number;
@@ -48,6 +49,7 @@ export class TelegramModelPanel {
       chatId: bigint,
       base: SavedModelSettings,
       selection: ResolvedModelSelection,
+      telegramUserId?: bigint,
     ) => Promise<number>,
     private readonly now = () => Date.now(),
   ) {}
@@ -57,8 +59,9 @@ export class TelegramModelPanel {
     chatId: bigint,
     messageId: number,
     data: string,
+    telegramUserId?: bigint,
   ) {
-    return this.match(actor, chatId, messageId, data)
+    return this.match(actor, chatId, messageId, data, telegramUserId)
       ? "Updating model settings…"
       : "These buttons are old or closed. Use the latest panel or /model.";
   }
@@ -68,6 +71,7 @@ export class TelegramModelPanel {
     chatId: bigint,
     base: SavedModelSettings,
     messageId?: number,
+    telegramUserId?: bigint,
   ) {
     for (const [key, value] of this.drafts)
       if (value.expiresAt <= this.now()) this.drafts.delete(key);
@@ -76,6 +80,7 @@ export class TelegramModelPanel {
       current &&
       current.workspaceId === actor.workspaceId &&
       current.chatId === chatId &&
+      current.telegramUserId === telegramUserId &&
       (messageId === undefined || messageId === current.messageId)
     ) {
       const rendered = this.render(current);
@@ -109,6 +114,7 @@ export class TelegramModelPanel {
       userId: actor.id,
       workspaceId: actor.workspaceId,
       chatId,
+      ...(telegramUserId === undefined ? {} : { telegramUserId }),
       messageId: messageId ?? 0,
       nonce: randomBytes(6).toString("base64url"),
       revision: 0,
@@ -163,8 +169,9 @@ export class TelegramModelPanel {
     chatId: bigint,
     messageId: number,
     data: string,
+    telegramUserId?: bigint,
   ) {
-    const matched = this.match(actor, chatId, messageId, data);
+    const matched = this.match(actor, chatId, messageId, data, telegramUserId);
     if (!matched) return;
     const { draft, parts } = matched,
       action = parts[3],
@@ -195,7 +202,13 @@ export class TelegramModelPanel {
       this.drafts.delete(actor.id);
       let count: number;
       try {
-        count = await this.save(actor, chatId, draft.base, selection);
+        count = await this.save(
+          actor,
+          chatId,
+          draft.base,
+          selection,
+          draft.telegramUserId,
+        );
       } catch {
         await this.closed(
           draft,
@@ -267,6 +280,7 @@ export class TelegramModelPanel {
     chatId: bigint,
     messageId: number,
     data: string,
+    telegramUserId?: bigint,
   ) {
     const parts = data.match(pattern),
       draft = this.drafts.get(actor.id);
@@ -275,6 +289,7 @@ export class TelegramModelPanel {
       !draft ||
       draft.workspaceId !== actor.workspaceId ||
       draft.chatId !== chatId ||
+      draft.telegramUserId !== telegramUserId ||
       draft.messageId !== messageId ||
       draft.expiresAt <= this.now() ||
       parts[1] !== draft.nonce ||

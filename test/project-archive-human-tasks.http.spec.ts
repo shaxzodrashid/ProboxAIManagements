@@ -291,6 +291,8 @@ if (url) {
           "assigneeIds",
           "assigneeIdentities",
           "checklist",
+          "checklistSections",
+          "lifecycle",
           "deadline",
           "projectArchivedAt",
           "createdAt",

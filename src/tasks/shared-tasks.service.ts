@@ -95,11 +95,27 @@ export class SharedTasksService {
       select: {
         id: true,
         creatorId: true,
-        humanState: { select: { revision: true, completed: true } },
+        humanState: {
+          select: {
+            revision: true,
+            completed: true,
+            archivedAt: true,
+            deletedAt: true,
+          },
+        },
         boardEntry: {
           select: {
             boardId: true,
-            status: { select: { board: { select: { projectId: true } } } },
+            status: {
+              select: {
+                board: {
+                  select: {
+                    projectId: true,
+                    project: { select: { archivedAt: true, status: true } },
+                  },
+                },
+              },
+            },
           },
         },
         assignees: { select: { userId: true } },
@@ -162,8 +178,27 @@ export class SharedTasksService {
       const task = await tx.task.findFirst({
         where: { id: taskId, workspaceId: actor.workspaceId },
         select: {
-          humanState: { select: { revision: true, completed: true } },
-          boardEntry: { select: { boardId: true, statusId: true } },
+          humanState: {
+            select: {
+              revision: true,
+              completed: true,
+              archivedAt: true,
+              deletedAt: true,
+            },
+          },
+          boardEntry: {
+            select: {
+              boardId: true,
+              statusId: true,
+              status: {
+                select: {
+                  board: {
+                    select: { project: { select: { archivedAt: true } } },
+                  },
+                },
+              },
+            },
+          },
         },
       });
       if (!task?.humanState || !task.boardEntry)
@@ -184,6 +219,18 @@ export class SharedTasksService {
         statusId: entry.statusId,
         revision: task.humanState.revision,
         completed: task.humanState.completed,
+        lifecycle: {
+          state: task.humanState.deletedAt
+            ? "DELETED"
+            : task.humanState.archivedAt ||
+                task.boardEntry.status.board.project.archivedAt
+              ? "ARCHIVED"
+              : "ACTIVE",
+          archivedAt: task.humanState.archivedAt,
+          deletedAt: task.humanState.deletedAt,
+          sourceProjectArchivedAt:
+            task.boardEntry.status.board.project.archivedAt,
+        },
       };
     });
   }
@@ -298,6 +345,16 @@ export class SharedTasksService {
         throw fail(
           409,
           "Archived or deleting projects cannot accept sharing changes",
+        );
+      if (
+        task.humanState!.archivedAt ||
+        task.humanState!.deletedAt ||
+        task.boardEntry!.status.board.project.archivedAt ||
+        task.boardEntry!.status.board.project.status === "DELETING"
+      )
+        throw fail(
+          409,
+          "Archived or deleted tasks cannot accept sharing changes",
         );
       if (task.humanState!.revision !== revision)
         throw fail(409, "Human task changed; reread before retrying");

@@ -78,6 +78,14 @@ export const ApiTemplateErrors = () =>
 /** Documents the bearer token required by authenticated endpoints. */
 export const ApiAccessToken = () => ApiBearerAuth("access-token");
 
+/** Authentication and post-authentication content failures remain distinct. */
+export const ApiReadAvailability = () =>
+  ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
+    description:
+      "Authentication or content-read dependency is temporarily unavailable. Content reads use READ_DEPENDENCY_UNAVAILABLE with an operation action. No empty-data success, identity invalidation or automatic retry is implied; mutation outcomes have separate recovery contracts.",
+  });
+
 export const ApiUploadSizeError = () =>
   ApiPayloadTooLargeResponse({
     type: ApiErrorResponseDto,

@@ -1,6 +1,7 @@
 import { parseRevision } from "../openapi/revision";
 import { lockWorkspace } from "../prisma/workspace-lock";
 import { assertCurrentManagement } from "../prisma/current-management";
+import { readDependency } from "../prisma/read-dependency";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -26,21 +27,25 @@ export class AuthorizationService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listPermissions() {
-    const permissions = await this.prisma.permission.findMany({
-      orderBy: [{ category: "asc" }, { name: "asc" }],
-    });
+    const permissions = await readDependency("listPermissions", () =>
+      this.prisma.permission.findMany({
+        orderBy: [{ category: "asc" }, { name: "asc" }],
+      }),
+    );
     return permissions.map(toPermissionResponse);
   }
 
   async listRoles(workspaceId: string) {
-    const roles = await this.prisma.$transaction(
-      (tx) =>
-        tx.role.findMany({
-          where: { workspaceId },
-          include: roleDetails,
-          orderBy: [{ isSystem: "desc" }, { name: "asc" }],
-        }),
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    const roles = await readDependency("listRoles", () =>
+      this.prisma.$transaction(
+        (tx) =>
+          tx.role.findMany({
+            where: { workspaceId },
+            include: roleDetails,
+            orderBy: [{ isSystem: "desc" }, { name: "asc" }],
+          }),
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
     );
     return roles.map(toRoleResponse);
   }
@@ -120,10 +125,12 @@ export class AuthorizationService {
   }
 
   async revision(workspaceId: string) {
-    const workspace = await this.prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { authorizationRevision: true },
-    });
+    const workspace = await readDependency("readAuthorization", () =>
+      this.prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { authorizationRevision: true },
+      }),
+    );
     if (!workspace)
       throw operationError(
         404,
@@ -308,7 +315,9 @@ export class AuthorizationService {
   }
 
   async getUserRoles(workspaceId: string, userId: string) {
-    return this.userRoles(workspaceId, userId);
+    return readDependency("readUserRoles", () =>
+      this.userRoles(workspaceId, userId),
+    );
   }
 
   async resolveRoleIds(
@@ -340,9 +349,11 @@ export class AuthorizationService {
     db?: Prisma.TransactionClient,
   ): Promise<ReturnType<typeof toRoleResponse>> {
     if (!db)
-      return this.prisma.$transaction(
-        (tx) => this.getRole(workspaceId, roleId, tx),
-        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      return readDependency("readRole", () =>
+        this.prisma.$transaction(
+          (tx) => this.getRole(workspaceId, roleId, tx),
+          { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+        ),
       );
     const role = await db.role.findFirst({
       where: { id: roleId, workspaceId },

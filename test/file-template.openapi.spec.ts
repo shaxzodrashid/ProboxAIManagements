@@ -94,6 +94,24 @@ describe("file/template operation-specific OpenAPI", () => {
   });
   it("requires operation identity and explicitly describes scoped journal readback", () => {
     const s = doc.components.schemas;
+    expect(
+      schema("/projects/{id}/trash/{trashId}", "get", "200").$ref,
+    ).toContain("ProjectTrashOutcomeResponseDto");
+    expect(
+      schema("/projects/{id}/trash/{trashId}/restore", "post", "503").$ref,
+    ).toContain("ApiErrorResponseDto");
+    for (const field of [
+      "recoveryToken",
+      "sourceIdentity",
+      "contentHash",
+      "trashPath",
+    ])
+      expect(s.ProjectTrashOutcomeResponseDto.properties).not.toHaveProperty(
+        field,
+      );
+    expect(s.ProjectTrashExecutionResponseDto.properties.state.enum).toContain(
+      "UNKNOWN",
+    );
     expect(s.DeleteProjectFileDto.required).toContain("operationId");
     expect(
       schema("/projects/{id}/file-operations/{operationId}", "get", "200").$ref,

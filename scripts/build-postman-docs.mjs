@@ -56,6 +56,7 @@ function template(schema, property = "value", depth = 0) {
 }
 function group(path) {
   if (path.startsWith("/auth/")) return "Auth";
+  if (path.startsWith("/browser/")) return "Auth";
   if (path.startsWith("/authorization/")) return "Authorization";
   if (path.startsWith("/configuration-templates"))
     return "Configuration Templates";
@@ -65,10 +66,11 @@ function group(path) {
   if (path.startsWith("/sessions")) return "Sessions";
   if (
     path.startsWith("/tasks") ||
-    /^\/projects\/[^/]+\/(tasks|task-board)(\/|$)/.test(path)
+    /^\/projects\/[^/]+\/(tasks|task-board|shared-tasks)(\/|$)/.test(path)
   )
     return "Tasks";
   if (/^\/(users|profiles|chat-groups)(\/|$)/.test(path)) return "Users";
+  if (path.startsWith("/direct-conversations")) return "Users";
   if (/^\/(projects|settings)(\/|$)/.test(path)) return "Projects";
   throw new Error("Unmapped runtime route: " + path);
 }

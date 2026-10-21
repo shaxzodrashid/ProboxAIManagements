@@ -59,10 +59,14 @@ function setup() {
     task: { create: jest.fn().mockResolvedValue({ id: "task" }) },
     proboxAiSession: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     sessionEvent: { findUnique: jest.fn() },
-    $transaction: jest.fn(async (operations: Promise<unknown>[]) =>
-      Promise.all(operations),
-    ),
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    $transaction: jest.fn(),
   };
+  prisma.$transaction.mockImplementation(async (operation: any) =>
+    typeof operation === "function"
+      ? operation(prisma)
+      : Promise.all(operation),
+  );
   const projects = {
     taskDirectory: jest.fn().mockResolvedValue({
       project: { id: "project", name: "Existing project" },

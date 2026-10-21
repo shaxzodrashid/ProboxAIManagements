@@ -49,6 +49,7 @@ import {
   ApiValidationErrors,
 } from "../openapi/api-docs";
 import { Permissions } from "../authorization/permission.catalog";
+import { ApiReadAvailability } from "../openapi/api-docs";
 
 @Controller()
 @ApiTags("Users")
@@ -59,6 +60,7 @@ export class AccountsController {
     private readonly bot: TelegramBotService,
   ) {}
   @Get("users/me")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @UseGuards(JwtAuthGuard)
   @ApiAccessToken()
@@ -79,6 +81,7 @@ export class AccountsController {
   }
 
   @Get("users/me/telegram-link")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @UseGuards(JwtAuthGuard)
   @ApiAccessToken()
@@ -123,6 +126,7 @@ export class AccountsController {
     return this.accounts.updateSelf(user.workspaceId, user.id, dto);
   }
   @Get("users")
+  @ApiReadAvailability()
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions(Permissions.USERS_READ)
   @ApiAccessToken()

@@ -24,6 +24,7 @@ import { AuthenticatedUser } from "../auth/auth.types";
 import { Permissions as P } from "../authorization/permission.catalog";
 import { fileReferences, record } from "./telegram-rendering";
 import { TelegramModelPanel } from "./telegram-model-panel";
+import { lockWorkspace } from "../prisma/workspace-lock";
 
 @Injectable()
 export class TelegramBotService {
@@ -42,25 +43,32 @@ export class TelegramBotService {
     this.modelPanels = new TelegramModelPanel(
       catalog,
       telegram,
-      async (actor, chatId, base, selection) => {
-        const fresh = await this.identities.actor(chatId);
-        if (
-          !fresh ||
-          fresh.id !== actor.id ||
-          fresh.workspaceId !== actor.workspaceId ||
-          !fresh.permissions.includes(P.SESSIONS_CREATE)
-        )
-          return 0;
-        const result = await this.prisma.telegramConversation.updateMany({
-          where: { userId: actor.id, ...base },
-          data: {
-            providerId: selection.providerId,
-            model: selection.effectiveModel,
-            reasoningEffort: selection.effectiveReasoningEffort,
-          },
-        });
-        return result.count;
-      },
+      async (actor, chatId, base, selection, telegramUserId) =>
+        this.prisma.$transaction(async (tx) => {
+          if (telegramUserId === undefined) return 0;
+          // Serialize the final authority read and save with participating grant/lifecycle writers.
+          await lockWorkspace(tx, actor.workspaceId);
+          // Identity writers also include the contact-registration path; protect
+          // this account row even when such a writer has no workspace fence.
+          await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${actor.id} AND "workspaceId" = ${actor.workspaceId} FOR UPDATE`;
+          const fresh = await this.identities.actor(chatId, telegramUserId, tx);
+          if (
+            !fresh ||
+            fresh.id !== actor.id ||
+            fresh.workspaceId !== actor.workspaceId ||
+            !fresh.permissions.includes(P.SESSIONS_CREATE)
+          )
+            return 0;
+          const result = await tx.telegramConversation.updateMany({
+            where: { userId: actor.id, ...base },
+            data: {
+              providerId: selection.providerId,
+              model: selection.effectiveModel,
+              reasoningEffort: selection.effectiveReasoningEffort,
+            },
+          });
+          return result.count;
+        }),
     );
   }
 
@@ -92,6 +100,7 @@ export class TelegramBotService {
             chatId,
             message.message_id,
             callback.data,
+            BigInt(from.id),
           ),
         );
       else await this.telegram.answerCallback(callback.id);
@@ -125,6 +134,7 @@ export class TelegramBotService {
             chatId,
             text,
             update.update_id,
+            BigInt(from.id),
             callback?.data,
             callback ? message.message_id : undefined,
           );
@@ -166,6 +176,7 @@ export class TelegramBotService {
     chatId: bigint,
     text: string,
     updateId: number,
+    telegramUserId: bigint,
     callback?: string,
     callbackMessageId?: number,
   ) {
@@ -208,7 +219,13 @@ export class TelegramBotService {
     }
     if (command === "/model" || action === "models") {
       requirePermissions(actor, P.SESSIONS_CREATE);
-      await this.modelPanels.open(actor, chatId, state, callbackMessageId);
+      await this.modelPanels.open(
+        actor,
+        chatId,
+        state,
+        callbackMessageId,
+        telegramUserId,
+      );
       return;
     }
     if (action === "mp") {
@@ -219,6 +236,7 @@ export class TelegramBotService {
           chatId,
           callbackMessageId,
           callback!,
+          telegramUserId,
         );
       return;
     }

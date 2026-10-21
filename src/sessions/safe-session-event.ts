@@ -1,4 +1,17 @@
-import { SessionEvent } from "@prisma/client";
+import { Prisma, SessionEvent } from "@prisma/client";
+export const publicSessionEventSelect = {
+  projectionVersion: true,
+  id: true,
+  sessionId: true,
+  turnId: true,
+  sequence: true,
+  type: true,
+  itemType: true,
+  rawPayload: true,
+  payloadHash: true,
+  previousHash: true,
+  createdAt: true,
+} satisfies Prisma.SessionEventSelect;
 import { RunnerEvent } from "./proboxai-runner.service";
 import { commandDisclosure } from "./command-disclosure";
 
@@ -103,7 +116,12 @@ export function safeRunnerEvent(event: RunnerEvent) {
     },
   };
 }
-export function eventResponse(e: SessionEvent) {
+export function eventResponse(
+  e: Omit<
+    SessionEvent,
+    "archivePayload" | "archiveHash" | "archivePolicyVersion"
+  >,
+) {
   const legacy = ![1, 2, 3].includes(e.projectionVersion);
   // Historical partial text has no verified update semantics. Preserve its
   // bounded display frame without upgrading it to a completed snapshot.

@@ -1,5 +1,11 @@
 # FILE03 durable deletion increment (partial)
 
+20 October follow-up: restore/expiry coordination and regular-file no-overwrite
+publication are implemented in [the recovery contract](file-trash-recovery-contracts.md).
+The statements below that restore is unchanged describe the earlier increment.
+Directory publication, external-writer exclusion and safe terminal-alias
+reclamation remain explicit limits; FILE03 remains partial.
+
 FILE03 remains partial. This increment journals file/folder deletion and supports scoped readback and database-only reconciliation. Restore and restore/expiry coordination are unchanged and remain open. Project purge is outside this increment. Previous batches and user changes remain uncommitted and preserved.
 
 ## Contract

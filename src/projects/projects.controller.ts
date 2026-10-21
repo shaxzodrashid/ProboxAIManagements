@@ -1,3 +1,4 @@
+import { ApiReadAvailability } from "../openapi/api-docs";
 import {
   ProjectDeletionHistoryResponseDto,
   ProjectDeletionStateResponseDto,
@@ -52,6 +53,7 @@ import {
   ProjectFileOperationResponseDto,
   ProjectTrashItemResponseDto,
   ProjectTrashRestoredResponseDto,
+  ProjectTrashOutcomeResponseDto,
   AddProjectMemberDto,
   CreateProjectDto,
   CreateProjectFolderDto,
@@ -152,6 +154,7 @@ export class ProjectsController {
   }
 
   @Get()
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @ApiOperation({
     summary: "List accessible projects",
@@ -199,6 +202,7 @@ export class ProjectsController {
   }
 
   @Get(":id")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @ApiOperation({
     summary: "Get project details",
@@ -619,10 +623,36 @@ export class ProjectsController {
     return this.projects.listTrash(user, id);
   }
 
+  @Get(":id/trash/:trashId")
+  @Header("Cache-Control", "no-store")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
+  @ApiOperation({
+    summary: "Read a retained trash item restore or expiry outcome",
+  })
+  @ApiOkResponse({ type: ProjectTrashOutcomeResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  trashItemOutcome(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("trashId") trashId: string,
+  ) {
+    return this.projects.trashItemOutcome(user, id, trashId);
+  }
+
   @Post(":id/trash/:trashId/restore")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
-  @ApiOperation({ summary: "Restore a recoverable project trash item" })
+  @ApiOperation({
+    summary: "Restore a recoverable project trash item",
+    description:
+      "Atomic no-overwrite restore for regular files and supported local same-volume Windows NTFS directories. Unsupported runtimes, volumes and reparse paths fail closed. FILE_TRASH_OUTCOME_UNKNOWN requires GET trash item readback and review; no timeout replay. Completed retries return historical success.",
+  })
   @ApiCreatedResponse({ type: ProjectTrashRestoredResponseDto })
+  @ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
+    description:
+      "FILE_TRASH_OUTCOME_UNKNOWN. Claim, publication or completion could not be confirmed. Read GET /projects/:id/trash/:trashId and review; do not replay uncertain filesystem work.",
+  })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
   @ApiValidationErrors()

@@ -64,7 +64,8 @@ export class CreateSessionDto {
 
   @ApiPropertyOptional({
     example: "gpt-5.4",
-    description: "Optional runner model identifier.",
+    description:
+      "Optional runner model identifier. If no provider/model/effort field is supplied, a new session uses the authenticated manager's shared personal selection. Any explicit selection field retains the existing managed-catalog resolution rules.",
   })
   @IsOptional()
   @IsString()
@@ -78,9 +79,8 @@ export class CreateSessionDto {
       "anthropic",
       "deepmind",
     ],
-    default: "openai",
     description:
-      "Managed provider ID. The provider/model/effort combination is validated against the runtime catalog.",
+      "Managed provider ID. Explicit selection uses the runtime catalog and overrides personal defaults; an entirely omitted selection inherits shared personal preferences. Existing sessions and project context are unchanged.",
   })
   @IsOptional()
   @IsString()

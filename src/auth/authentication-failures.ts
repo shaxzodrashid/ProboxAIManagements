@@ -1,5 +1,5 @@
 import { ServiceUnavailableException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { isPrismaAvailabilityFailure } from "../prisma/dependency-errors";
 import {
   JsonWebTokenError,
   NotBeforeError,
@@ -65,21 +65,6 @@ export async function authenticationDependency<T>(
   }
 }
 
-// Prisma 6 connection/configuration, timeout and pool failures only. Constraint,
-// schema/query validation and unknown errors retain their existing semantics.
-const loginUnavailableCodes = new Set([
-  "P1000",
-  "P1001",
-  "P1002",
-  "P1003",
-  "P1008",
-  "P1010",
-  "P1011",
-  "P1017",
-  "P2024",
-  "P2037",
-]);
-
 /** Narrow login DB boundary: never wrap credential checks or token signing. */
 export async function loginDependency<T>(
   operation: () => PromiseLike<T> | T,
@@ -89,9 +74,7 @@ export async function loginDependency<T>(
   } catch (error) {
     if (
       error instanceof ServiceUnavailableException ||
-      error instanceof Prisma.PrismaClientInitializationError ||
-      (error instanceof Prisma.PrismaClientKnownRequestError &&
-        loginUnavailableCodes.has(error.code))
+      isPrismaAvailabilityFailure(error)
     )
       throw authenticationUnavailable();
     throw error;

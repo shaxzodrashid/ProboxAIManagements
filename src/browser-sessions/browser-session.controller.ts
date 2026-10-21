@@ -62,6 +62,23 @@ const writes = new RegExp(
   `^sessions(?:/directory-preflight|/${id}/(?:turns|interrupt))?$`,
 );
 export function browserProxyAllowed(method: string, path: string) {
+  if (method === "POST" && path === "sessions/creations") return true;
+  if (
+    method === "GET" &&
+    new RegExp(`^sessions/(?:creations/${id}|${id}/(?:archive|turns))$`).test(
+      path,
+    )
+  )
+    return true;
+  if (path === "users/me/model-preferences")
+    return method === "GET" || method === "PUT";
+  if (
+    method === "GET" &&
+    new RegExp(
+      `^projects/${id}/(?:shared-tasks|tasks/${id}/shared-(?:content|comments|history))$`,
+    ).test(path)
+  )
+    return true;
   return method === "GET"
     ? reads.test(path)
     : method === "POST" && writes.test(path);
@@ -137,7 +154,7 @@ export class BrowserSessionController {
       : "";
     if (!browserProxyAllowed(req.method, path)) throw new NotFoundException();
     const streaming = path.endsWith("/stream");
-    const identity = await this.sessions.authorize(req, req.method === "POST");
+    const identity = await this.sessions.authorize(req, req.method !== "GET");
     const stop = new AbortController();
     res.on("close", () => stop.abort());
     const deadline = setTimeout(
@@ -179,7 +196,7 @@ export class BrowserSessionController {
         if (typeof value === "string" && value.length < 1024)
           headers[key] = value;
       }
-      if (req.method === "POST") headers["Content-Type"] = "application/json";
+      if (req.method !== "GET") headers["Content-Type"] = "application/json";
       const query = req.originalUrl.includes("?")
         ? req.originalUrl.slice(req.originalUrl.indexOf("?"))
         : "";
@@ -191,7 +208,7 @@ export class BrowserSessionController {
           headers,
           redirect: "error",
           signal: stop.signal,
-          ...(req.method === "POST"
+          ...(req.method !== "GET"
             ? { body: JSON.stringify(req.body ?? {}) }
             : {}),
         },

@@ -9,7 +9,9 @@ import {
   findFileOperation,
 } from "./durable-file-deletion";
 import { assertCurrentManagement } from "../prisma/current-management";
+import { DurableTrashRecovery } from "./durable-trash-recovery";
 import { lockWorkspace } from "../prisma/workspace-lock";
+import { readDependency } from "../prisma/read-dependency";
 import {
   ActiveProjectMutation,
   lockProjectLifecycle,
@@ -172,41 +174,46 @@ export class ProjectsService {
     actor: AuthenticatedUser,
     lifecycle: "active" | "archived" = "active",
   ) {
-    return this.prisma.$transaction(
-      async (tx) => {
-        actor = await this.currentProjectReader(actor, tx);
-        const projects = await tx.project.findMany({
-          where: {
-            workspaceId: actor.workspaceId,
-            archivedAt: lifecycle === "archived" ? { not: null } : null,
-            ...(hasPermission(actor, Permissions.PROJECTS_READ_ALL)
-              ? {}
-              : {
-                  OR: [
-                    { readAccessEnabled: true },
-                    { members: { some: { userId: actor.id } } },
-                  ],
-                }),
-          },
-          include: {
-            creator: { select: { id: true, fullName: true } },
-            department: { select: { id: true, name: true, slug: true } },
-            initializations: {
-              orderBy: { attempt: "desc" },
-              take: 1,
-              select: projectInitializationSummarySelect,
+    return readDependency("listProjects", () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          actor = await this.currentProjectReader(actor, tx);
+          const projects = await tx.project.findMany({
+            where: {
+              workspaceId: actor.workspaceId,
+              archivedAt: lifecycle === "archived" ? { not: null } : null,
+              ...(hasPermission(actor, Permissions.PROJECTS_READ_ALL)
+                ? {}
+                : {
+                    OR: [
+                      { readAccessEnabled: true },
+                      { members: { some: { userId: actor.id } } },
+                    ],
+                  }),
             },
-            _count: { select: { members: true } },
-            members: { where: { userId: actor.id }, select: { userId: true } },
-          },
-          orderBy: { updatedAt: "desc" },
-        });
-        return projects.map(({ members, ...project }) => ({
-          ...project,
-          isMember: members.length > 0,
-        }));
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+            include: {
+              creator: { select: { id: true, fullName: true } },
+              department: { select: { id: true, name: true, slug: true } },
+              initializations: {
+                orderBy: { attempt: "desc" },
+                take: 1,
+                select: projectInitializationSummarySelect,
+              },
+              _count: { select: { members: true } },
+              members: {
+                where: { userId: actor.id },
+                select: { userId: true },
+              },
+            },
+            orderBy: { updatedAt: "desc" },
+          });
+          return projects.map(({ members, ...project }) => ({
+            ...project,
+            isMember: members.length > 0,
+          }));
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
     );
   }
 
@@ -510,44 +517,46 @@ export class ProjectsService {
   }
 
   async get(actor: AuthenticatedUser, projectId: string) {
-    return this.prisma.$transaction(
-      async (tx) => {
-        actor = await this.currentProjectReader(actor, tx);
-        const project = await tx.project.findFirst({
-          where: { id: projectId, workspaceId: actor.workspaceId },
-          include: {
-            creator: { select: { id: true, fullName: true } },
-            department: { select: { id: true, name: true, slug: true } },
-            initializations: {
-              orderBy: { attempt: "desc" },
-              take: 1,
-              select: projectInitializationSummarySelect,
-            },
-            members: {
-              include: {
-                user: { select: projectMemberUserSelect },
+    return readDependency("readProject", () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          actor = await this.currentProjectReader(actor, tx);
+          const project = await tx.project.findFirst({
+            where: { id: projectId, workspaceId: actor.workspaceId },
+            include: {
+              creator: { select: { id: true, fullName: true } },
+              department: { select: { id: true, name: true, slug: true } },
+              initializations: {
+                orderBy: { attempt: "desc" },
+                take: 1,
+                select: projectInitializationSummarySelect,
               },
-              orderBy: { createdAt: "asc" },
+              members: {
+                include: {
+                  user: { select: projectMemberUserSelect },
+                },
+                orderBy: { createdAt: "asc" },
+              },
             },
-          },
-        });
-        if (!project) throw new NotFoundException("Project not found");
-        const isMember = project.members.some(
-          (member) => member.userId === actor.id,
-        );
-        const sensitive =
-          isMember || hasPermission(actor, Permissions.PROJECTS_READ_ALL);
-        if (!sensitive && !project.readAccessEnabled)
-          throw new ForbiddenException(
-            "You do not have access to this project",
+          });
+          if (!project) throw new NotFoundException("Project not found");
+          const isMember = project.members.some(
+            (member) => member.userId === actor.id,
           );
-        if (!sensitive) {
-          const { members: _members, ...publicProject } = project;
-          return { ...publicProject, isMember };
-        }
-        return { ...mapProjectMembers(project), isMember };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+          const sensitive =
+            isMember || hasPermission(actor, Permissions.PROJECTS_READ_ALL);
+          if (!sensitive && !project.readAccessEnabled)
+            throw new ForbiddenException(
+              "You do not have access to this project",
+            );
+          if (!sensitive) {
+            const { members: _members, ...publicProject } = project;
+            return { ...publicProject, isMember };
+          }
+          return { ...mapProjectMembers(project), isMember };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
     );
   }
 
@@ -580,7 +589,7 @@ export class ProjectsService {
     return { ...actor, permissions };
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECTS_UPDATE)
   async update(
     actor: AuthenticatedUser,
     projectId: string,
@@ -600,7 +609,7 @@ export class ProjectsService {
     });
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_MEMBERS_MANAGE)
   async addMember(actor: AuthenticatedUser, projectId: string, userId: string) {
     return this.prisma.$transaction(async (tx) => {
       const project = await this.currentMembershipWriter(tx, actor, projectId);
@@ -631,7 +640,7 @@ export class ProjectsService {
     });
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_MEMBERS_MANAGE)
   async removeMember(
     actor: AuthenticatedUser,
     projectId: string,
@@ -697,7 +706,7 @@ export class ProjectsService {
     return project;
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_WRITE)
   async createFolder(
     actor: AuthenticatedUser,
     projectId: string,
@@ -763,7 +772,7 @@ export class ProjectsService {
     return { path: toApiPath(relativePath ?? ""), files };
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_WRITE)
   async uploadFile(
     actor: AuthenticatedUser,
     projectId: string,
@@ -809,7 +818,7 @@ export class ProjectsService {
     };
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_WRITE)
   async moveFile(
     actor: AuthenticatedUser,
     projectId: string,
@@ -882,7 +891,7 @@ export class ProjectsService {
     });
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_DELETE)
   async addProtectedFileType(
     actor: AuthenticatedUser,
     projectId: string,
@@ -897,7 +906,7 @@ export class ProjectsService {
     });
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_DELETE)
   async updateProtectedFileType(
     actor: AuthenticatedUser,
     projectId: string,
@@ -915,7 +924,7 @@ export class ProjectsService {
     });
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_DELETE)
   async removeProtectedFileType(
     actor: AuthenticatedUser,
     projectId: string,
@@ -951,7 +960,7 @@ export class ProjectsService {
       },
     };
   }
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_DELETE)
   async deleteFile(
     actor: AuthenticatedUser,
     projectId: string,
@@ -982,7 +991,7 @@ export class ProjectsService {
       return journal.result(prepared.op);
     return journal.execute(prepared.op, paths);
   }
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_DELETE)
   async confirmFileDeletion(
     actor: AuthenticatedUser,
     projectId: string,
@@ -1052,7 +1061,7 @@ export class ProjectsService {
     if (!op) throw new NotFoundException("File operation not found");
     return fileOperationResponse(op);
   }
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_DELETE)
   async reconcileFileOperation(
     actor: AuthenticatedUser,
     projectId: string,
@@ -1088,7 +1097,7 @@ export class ProjectsService {
     }));
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECT_FILES_DELETE)
   async restoreTrash(
     actor: AuthenticatedUser,
     projectId: string,
@@ -1097,37 +1106,35 @@ export class ProjectsService {
     const project = await this.assertSensitiveAccess(actor, projectId);
     this.assertProjectReady(project);
     const item = await this.prisma.projectFileTrashItem.findFirst({
-      where: { id: trashId, projectId, status: ProjectFileTrashStatus.ACTIVE },
+      where: { id: trashId, projectId },
     });
-    if (!item || item.expiresAt <= new Date())
+    if (!item) throw new NotFoundException("Recoverable trash item not found");
+    if (item.status === "RESTORED")
+      return { restored: true, path: item.originalPath };
+    if (
+      item.status !== "ACTIVE" ||
+      (!item.recoveryToken && item.expiresAt <= new Date())
+    )
       throw new NotFoundException("Recoverable trash item not found");
     const target = await this.resolveProjectPath(
       project,
       item.originalPath,
       false,
     );
-    if (await exists(target))
-      throw new ConflictException(
-        "A file or folder already exists at the restore path",
-      );
     const source = path.join(
       await this.projectTrashDirectory(project),
       safeTrashKey(item.trashPath),
     );
-    await safeLstat(source, "Recoverable trash item not found");
-    try {
-      await fs.rename(source, target);
-      await this.prisma.projectFileTrashItem.update({
-        where: { id: item.id },
-        data: {
-          status: ProjectFileTrashStatus.RESTORED,
-          restoredAt: new Date(),
-        },
-      });
-    } catch (error) {
-      throw filesystemError(error, "Unable to restore project item");
-    }
-    return { restored: true, path: item.originalPath };
+    return new DurableTrashRecovery(this.prisma).restore(item, source, target);
+  }
+
+  async trashItemOutcome(
+    actor: AuthenticatedUser,
+    projectId: string,
+    trashId: string,
+  ) {
+    await this.assertSensitiveAccess(actor, projectId);
+    return new DurableTrashRecovery(this.prisma).read(projectId, trashId);
   }
 
   /** Metadata only: never attempts cleanup, issues tokens or signals a runner. */
@@ -1221,7 +1228,7 @@ export class ProjectsService {
     );
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECTS_DELETE)
   async requestProjectDeletion(actor: AuthenticatedUser, projectId: string) {
     const project = await this.projectForWorkspace(
       actor.workspaceId,
@@ -1280,7 +1287,7 @@ export class ProjectsService {
     return deletionRequestResponse(request);
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECTS_DELETE)
   async approveProjectDeletion(
     actor: AuthenticatedUser,
     projectId: string,
@@ -1328,7 +1335,7 @@ export class ProjectsService {
     return this.issueProjectDeletionToken(project, request);
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECTS_DELETE)
   async resolveProjectDeletionSessions(
     actor: AuthenticatedUser,
     projectId: string,
@@ -1440,7 +1447,7 @@ export class ProjectsService {
     };
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECTS_DELETE)
   async cancelProjectDeletion(
     actor: AuthenticatedUser,
     projectId: string,
@@ -1474,7 +1481,7 @@ export class ProjectsService {
       .then(deletionRequestResponse);
   }
 
-  @ActiveProjectMutation()
+  @ActiveProjectMutation(Permissions.PROJECTS_DELETE)
   async confirmProjectDeletion(
     actor: AuthenticatedUser,
     projectId: string,
@@ -1583,7 +1590,10 @@ export class ProjectsService {
   async cleanupExpiredTrash() {
     const due = await this.prisma.projectFileTrashItem.findMany({
       where: {
-        status: { in: ["ACTIVE", "PURGE_FAILED"] },
+        status: "ACTIVE",
+        recoveryToken: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
         expiresAt: { lte: new Date() },
         project: { archivedAt: null },
       },
@@ -1605,51 +1615,14 @@ export class ProjectsService {
             this.prisma,
             item.projectId,
             async () => {
-              const claimed = await this.prisma.projectFileTrashItem.updateMany(
-                {
-                  where: {
-                    id: item.id,
-                    status: { in: ["ACTIVE", "PURGE_FAILED"] },
-                    OR: [
-                      { leaseExpiresAt: null },
-                      { leaseExpiresAt: { lt: new Date() } },
-                    ],
-                  },
-                  data: {
-                    leaseOwner: process.pid.toString(),
-                    leaseExpiresAt: new Date(Date.now() + 5 * 60_000),
-                  },
-                },
-              );
-              if (!claimed.count) return;
-              try {
-                await fs.rm(
+              await new DurableTrashRecovery(this.prisma).purge(
+                item,
+                async () =>
                   path.join(
                     await this.projectTrashDirectory(item.project),
                     safeTrashKey(item.trashPath),
                   ),
-                  { recursive: true, force: true },
-                );
-                await this.prisma.projectFileTrashItem.update({
-                  where: { id: item.id },
-                  data: {
-                    status: ProjectFileTrashStatus.PURGED,
-                    purgedAt: new Date(),
-                    leaseOwner: null,
-                    leaseExpiresAt: null,
-                  },
-                });
-              } catch (error) {
-                await this.prisma.projectFileTrashItem.update({
-                  where: { id: item.id },
-                  data: {
-                    status: ProjectFileTrashStatus.PURGE_FAILED,
-                    lastError: String(error),
-                    leaseOwner: null,
-                    leaseExpiresAt: null,
-                  },
-                });
-              }
+              );
             },
           );
         },

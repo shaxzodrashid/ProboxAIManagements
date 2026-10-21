@@ -10,10 +10,12 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { StringDecoder } from "node:string_decoder";
 import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
+import { archiveRunnerEvent, historyText } from "./session-history";
 
 const execFileAsync = promisify(execFile);
 
 export interface RunnerOptions {
+  archiveToDatabase?: boolean;
   sessionId: string;
   turnId?: string;
   beforeSpawn?: () => Promise<boolean>;
@@ -84,7 +86,9 @@ export class ProboxAiRunner {
       );
     if (options.threadId) args.push("resume", options.threadId);
     args.push("--", options.prompt);
-    const archivePath = await this.archivePath(options.sessionId);
+    const archivePath = options.archiveToDatabase
+      ? undefined
+      : await this.archivePath(options.sessionId);
     if (options.beforeSpawn && !(await options.beforeSpawn())) return -1;
     const directory = await this.paths.executionDirectory(
       options.cwd,
@@ -118,7 +122,7 @@ export class ProboxAiRunner {
         this.processes.delete(options.sessionId);
     });
     const consume = this.consumeJsonLines(child, archivePath, onEvent);
-    const stderr = this.consumeStderr(child, archivePath);
+    const stderr = this.consumeStderr(child, archivePath, onEvent);
     const exit = new Promise<number>((resolveExit, reject) => {
       child.once("error", reject);
       child.once("close", (code) => resolveExit(code ?? -1));
@@ -157,7 +161,7 @@ export class ProboxAiRunner {
 
   private async consumeJsonLines(
     child: ChildProcessWithoutNullStreams,
-    archivePath: string,
+    archivePath: string | undefined,
     onEvent: (event: RunnerEvent) => Promise<void>,
   ) {
     let remainder = "";
@@ -175,11 +179,10 @@ export class ProboxAiRunner {
 
   private async consumeLine(
     line: string,
-    archivePath: string,
+    archivePath: string | undefined,
     onEvent: (event: RunnerEvent) => Promise<void>,
   ) {
     if (!line.trim()) return;
-    await appendFile(archivePath, `${line}\n`, "utf8");
     let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(line) as Record<string, unknown>;
@@ -194,41 +197,86 @@ export class ProboxAiRunner {
       return;
     }
     const type = typeof payload.type === "string" ? payload.type : "unknown";
+    if (archivePath)
+      await appendFile(
+        archivePath,
+        JSON.stringify(archiveRunnerEvent({ type, payload, rawLine: "" })) +
+          "\n",
+        "utf8",
+      );
     await onEvent({ type, payload, rawLine: line });
   }
 
   private async consumeStderr(
     child: ChildProcessWithoutNullStreams,
-    archivePath: string,
+    archivePath: string | undefined,
+    onEvent: (event: RunnerEvent) => Promise<void>,
   ) {
-    for await (const chunk of child.stderr) {
-      const text = chunk.toString("utf8");
-      await appendFile(
-        archivePath.replace(/\.jsonl$/, ".stderr.log"),
-        text,
-        "utf8",
-      );
-    }
+    const decoder = new StringDecoder("utf8");
+    let remainder = "",
+      privateKey = false,
+      oversized = false;
+    const emit = async (line: string) => {
+      if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(line)) privateKey = true;
+      const hidden = privateKey;
+      if (/-----END [A-Z ]*PRIVATE KEY-----/.test(line)) privateKey = false;
+      const text = hidden ? "[REDACTED PRIVATE KEY]\n" : historyText(line);
+      if (archivePath)
+        await appendFile(
+          archivePath.replace(/\.jsonl$/, ".stderr.log"),
+          text,
+          "utf8",
+        );
+      await onEvent({
+        type: "runner.stderr",
+        payload: { text, source: "RUNNER_STDERR" },
+        rawLine: "",
+      });
+    };
+    const consume = async (text: string) => {
+      for (const fragment of text.split(/(?<=\n)/)) {
+        if (!fragment) continue;
+        if (!oversized) remainder += fragment;
+        if (remainder.length > 65536) {
+          remainder = "";
+          oversized = true;
+        }
+        if (fragment.endsWith("\n")) {
+          await emit(
+            oversized ? "[OVERSIZED STDERR LINE OMITTED]\n" : remainder,
+          );
+          remainder = "";
+          oversized = false;
+        }
+      }
+    };
+    for await (const chunk of child.stderr) await consume(decoder.write(chunk));
+    await consume(decoder.end());
+    if (oversized || remainder)
+      await emit(oversized ? "[OVERSIZED STDERR LINE OMITTED]\n" : remainder);
   }
 
   private async captureFinalDiff(
     options: RunnerOptions,
-    archivePath: string,
+    archivePath: string | undefined,
     onEvent: (event: RunnerEvent) => Promise<void>,
   ) {
     try {
       const { stdout } = await execFileAsync(
         "git",
-        ["diff", "--binary", "--no-ext-diff"],
+        ["diff", "--binary", "--no-ext-diff", "--", "."],
         { cwd: options.cwd, maxBuffer: 64 * 1024 * 1024 },
       );
-      const path = archivePath.replace(/\.jsonl$/, ".final.diff");
-      await appendFile(path, stdout, "utf8");
+      const text = historyText(stdout.toString());
+      const path = archivePath?.replace(/\.jsonl$/, ".final.diff");
+      if (path) await appendFile(path, text, "utf8");
       const payload = {
         path,
-        sha256: createHash("sha256").update(stdout).digest("hex"),
-        bytes: Buffer.byteLength(stdout),
+        sha256: createHash("sha256").update(text).digest("hex"),
+        bytes: Buffer.byteLength(text),
         stage: "final",
+        diff: text,
+        redactionPolicy: "BEST_EFFORT_V1",
       };
       await onEvent({
         type: "workspace.diff",

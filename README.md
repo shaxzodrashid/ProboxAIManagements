@@ -2,6 +2,12 @@
 
 Session directory preflight and selected-project context: [contract](Docs/session-directory-context-contracts.md).
 
+Durable REST follow-up recovery and session read availability:
+[contract](Docs/rest-followup-recovery-contracts.md).
+
+Current persisted authority at project mutation admission:
+[contract](Docs/project-mutation-authority-contracts.md).
+
 Persisted project initial-enqueue recovery: [contract](Docs/project-enqueue-recovery-contracts.md).
 
 Original project-creation readback and keyed CLEAR: [contract](Docs/project-creation-readback-contracts.md).
@@ -17,9 +23,13 @@ shape is intentionally identical to the operator-facing contract:
 proboxai exec --json --sandbox read-only -C /opt/apps/Test 'Reply with exactly: PROBOXAI_PROGRAMMATIC_CONTROL_OK'
 ```
 
-Every JSONL frame is written to the session archive before it is published over
-SSE and persisted in PostgreSQL with a hash-chain. The runner also records the
-final binary Git diff and stderr stream.
+Runner events persist bounded public projections and separately sanitized retained
+detail with integrity metadata. Keyed initial runs use database archives; legacy
+new archive files are sanitized. Existing old raw files are not rewritten. Final
+Git diff and stderr capture are separate from their disclosure policy: detailed
+tool/diff/stderr retrieval remains STRICT_METADATA. See
+[retained history](Docs/session-intent-history-contracts.md) for exact limits,
+protected execution input, retention, omissions and production prerequisites.
 
 ## Local setup
 
@@ -453,8 +463,14 @@ project creator) may change or remove one. Deleting an unprotected file or
 folder moves it into the private project trash for 30 days. A protected file,
 or a folder containing one, first creates a five-minute confirmation request;
 the separate confirmation endpoint rechecks the target before moving it to
-trash. Trash is intentionally hidden from normal file APIs and can be listed
-and restored by members or administrators.
+trash. Trash is intentionally hidden from normal file APIs. Authorized members
+or administrators can list it and restore regular files through atomic
+no-overwrite publication. Restore and expiry share a durable per-item claim;
+uncertain executions never replay automatically. Directories fail safely with
+`FILE_RESTORE_UNSUPPORTED`. `GET /projects/:id/trash/:trashId` provides scoped
+outcome evidence, including after restoration or purge. Private hard-link aliases
+remain retained; external-writer exclusion and their safe reclamation remain
+FILE03 limits. See [the restore/expiry contract](Docs/file-trash-recovery-contracts.md).
 
 Permanent project deletion is intentionally owner-controlled. A member may
 create a deletion request, but the owner must approve it. The service checks
@@ -566,8 +582,18 @@ Exact deadline ordering: [timed instants first, date-only next and unchanged sto
 
 Group metadata foundations: [active human creation, creator-only readback and durable retries](Docs/chat-group-metadata-contracts.md).
 
+Group text sending: [admitted members by default, explicit owner restrictions and durable send receipts](Docs/group-text-sending-contracts.md).
+
 Project member discovery: [permitted active-workspace candidates, filters and bounded pages](Docs/project-member-picker-contracts.md).
 
 Backend releases: [versioning and commit provenance](Docs/backend-release-versioning.md), [Available since by feature](Docs/backend-feature-availability.md) and [changelog](CHANGELOG.md). Dev prereleases are progress snapshots, not deployments; API compatibility remains /api/v1.
 
 Deployment operations: [CLI configuration, commands, health verification and rollback policy](Docs/deployment-cli.md), [one-time app2 setup](Docs/deployment-app2.md), and [database migration rollout](Docs/release-0.2.0-rollout.md).
+
+## Session detail retrieval increment
+
+Authorized current session managers can use the separate bounded, versioned
+`GET /api/v1/sessions/:id/events/:eventId/details` projection for redacted retained
+commands, combined output and file changes. See
+[the contract and local handoff](Docs/session-detail-retrieval-contracts.md).
+Existing live/archive metadata policy and long-lived retention remain unchanged.

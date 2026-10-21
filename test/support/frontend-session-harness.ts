@@ -1,4 +1,14 @@
 import "reflect-metadata";
+import { ArticlesController } from "../../src/articles/articles.controller";
+import { ArticlesService } from "../../src/articles/articles.service";
+import { ArticleReviewsController } from "../../src/articles/article-reviews.controller";
+import { ArticleReviewsService } from "../../src/articles/article-reviews.service";
+import { ArticleProposalsController } from "../../src/articles/article-proposals.controller";
+import { ArticleProposalsService } from "../../src/articles/article-proposals.service";
+import { ArticleResolutionController } from "../../src/articles/article-resolution.controller";
+import { ArticleResolutionService } from "../../src/articles/article-resolution.service";
+import { ArticleCanonicalService } from "../../src/articles/article-canonical.service";
+import { ArticleCanonicalController } from "../../src/articles/article-canonical.controller";
 import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { JwtService } from "@nestjs/jwt";
@@ -19,6 +29,8 @@ import { ProjectsService } from "../../src/projects/projects.service";
 import { TasksController } from "../../src/tasks/tasks.controller";
 import { TasksService } from "../../src/tasks/tasks.service";
 import { SessionsController } from "../../src/sessions/sessions.controller";
+import { PersonalModelPreferencesController } from "../../src/sessions/personal-model-preferences.controller";
+import { PersonalModelPreferencesService } from "../../src/sessions/personal-model-preferences.service";
 import { SessionsService } from "../../src/sessions/sessions.service";
 import { SessionEventsService } from "../../src/sessions/session-events.service";
 import { ModelCatalogService } from "../../src/sessions/model-catalog.service";
@@ -353,6 +365,11 @@ export async function createFrontendSessionHarness(
     projects.onModuleInit = () => {};
     const module = await Test.createTestingModule({
       controllers: [
+        ArticleReviewsController,
+        ArticleProposalsController,
+        ArticleResolutionController,
+        ArticleCanonicalController,
+        ArticlesController,
         BrowserSessionController,
         AuthController,
         AccountsController,
@@ -360,8 +377,16 @@ export async function createFrontendSessionHarness(
         ProjectsController,
         TasksController,
         SessionsController,
+        PersonalModelPreferencesController,
       ],
       providers: [
+        ArticleReviewsService,
+        ArticleProposalsService,
+        ArticleResolutionService,
+        ArticleCanonicalService,
+        ArticlesService,
+        PersonalModelPreferencesService,
+        ModelCatalogService,
         BrowserSessionService,
         { provide: BROWSER_SESSION_CONFIG, useValue: browserConfig },
         { provide: PrismaService, useValue: prisma },

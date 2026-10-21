@@ -654,6 +654,31 @@ if (databaseUrl) {
     });
     it("blocks linked-task project purge before quarantine or lifecycle mutation", async () => {
       await linkedTask();
+      // This assertion targets the context conflict after authorized admission.
+      // The controller's existing delete capability must also exist in storage.
+      await prisma.permission.upsert({
+        where: { key: Permissions.PROJECTS_DELETE },
+        create: {
+          key: Permissions.PROJECTS_DELETE,
+          name: "Fixture purge",
+          description: "Controlled fixture",
+          category: "Projects",
+        },
+        update: {},
+      });
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionKey: {
+            roleId: managerRole,
+            permissionKey: Permissions.PROJECTS_DELETE,
+          },
+        },
+        create: {
+          roleId: managerRole,
+          permissionKey: Permissions.PROJECTS_DELETE,
+        },
+        update: {},
+      });
       const token = "isolated-test-purge-token";
       const deletion = await prisma.projectDeletionRequest.create({
         data: {
@@ -700,6 +725,12 @@ if (databaseUrl) {
         ).toBe(0);
       } finally {
         directory.mockRestore();
+        await prisma.rolePermission.deleteMany({
+          where: {
+            roleId: managerRole,
+            permissionKey: Permissions.PROJECTS_DELETE,
+          },
+        });
       }
     });
     it("rejects foreign task associations during status removal without moving data", async () => {

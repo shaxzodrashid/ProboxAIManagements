@@ -1,3 +1,4 @@
+import { ApiReadAvailability } from "../openapi/api-docs";
 import {
   Body,
   Controller,
@@ -104,6 +105,7 @@ export class TasksController {
     return this.tasks.creation(user, requestId, query);
   }
   @Get()
+  @ApiReadAvailability()
   @RequirePermissions(Permissions.TASKS_READ)
   @ApiOperation({
     summary: "List visible tasks",
@@ -124,6 +126,7 @@ export class TasksController {
     );
   }
   @Get(":id")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @RequirePermissions(Permissions.TASKS_READ)
   @ApiOperation({

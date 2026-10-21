@@ -1,5 +1,26 @@
 # Backend changes and UI handoff — 16 October 2026
 
+## Current checkpoint
+
+FILE03 restore/expiry now uses durable per-item claims. For restore409/503
+FILE_TRASH_OUTCOME_UNKNOWN, retain trashId and read
+`GET /projects/:id/trash/:trashId`; REVIEW_OUTCOME requires review, not a timed
+retry. STARTED is uncertain execution evidence, not proof of a live worker.
+Successful repeated restore returns its historical result without touching a
+replacement. Regular files use no-overwrite publication; directory restore now
+returns409 FILE_RESTORE_UNSUPPORTED. The existing ACTIVE list is unchanged, so
+ACTIVE alone never proves restorability. See the
+[restore/expiry contract](file-trash-recovery-contracts.md), including retained
+private hard-link names and external-writer limits. No client integration is
+claimed by this backend increment.
+
+The 20 October [backend recovery contract](rest-followup-recovery-contracts.md)
+adds durable recovery for newly accepted never-started REST follow-ups and four
+sanitized session read-availability boundaries. The latest full verification and
+current approved/partial scope are recorded in `backend-checkpoint-20261020.md`.
+Older dated sections below remain history. All Postman actions, approval requests
+and retries are stopped; historical continuation language is superseded.
+
 This is the ongoing UI-impact record for the local backend work. It records
 required behavior and integration boundaries; it does not redesign screens or
 claim that frontend wiring, Figma updates, runtime accessibility or deployment
@@ -377,9 +398,87 @@ last ten minutes in process memory; restart/another replica requires reopening.
 See [Telegram behavior and test evidence](telegram-bot-ui-batch.md). No live bot
 messages or deployment are claimed.
 
-[Browser-session/BFF](browser-session-bff-proposal.md) and
-[initial-create receipts](initial-session-create-receipt-proposal.md) remain
-review-only. Their new storage, cookie/CSRF, revocation, namespace, receipt-read and
-retention choices require owner agreement before implementation. Postman approval
-does not approve these proposals. Existing frontend live-auth and initial-create
-retry restrictions remain in force.
+The [browser-session/BFF local implementation](browser-session-local-implementation.md)
+is implemented and tested under the separately approved local contract. Production
+enablement, managed keys/TLS/rotation/retention and activation/recovery transport
+remain unverified or unselected. The original BFF proposal is historical.
+[Initial-create receipts](initial-session-create-receipt-proposal.md) remain
+review-only pending the specific retention/retired-key choice. No initial-create
+retry guarantee follows from the browser login implementation or Postman approval.
+
+### Later approved local feature batches — 19 October
+
+The later user approvals supersede earlier pending-proposal language in this file.
+[Shared-task destination content](shared-task-content-contracts.md),
+[one personal web/Telegram model preference](personal-model-preferences-contracts.md)
+and [owner-granted group admission](group-admission-contracts.md) are implemented.
+The latest completed full checkpoint before session changes passed1,382 tests in76
+suites; see `group-admission-verification-20261019.json`. Group messages/topics and
+history retrieval are separate from the recorded admission-history selection.
+The [actual invitation card contract](group-invitation-card-contract.md) supports
+the DM design handoff. Agents are explicitly deferred.
+
+[Session intent, durable dispatch and retained history](session-intent-history-contracts.md)
+were subsequently approved and locally verified. See
+`session-intent-history-verification-20261019.json`: full1,401 tests/78 suites plus
+final24 focused tests/3 suites (including one later archive integration case), and
+all static/build/release checks. They add separate keyed
+creation/receipt and bounded archive/turn routes; the legacy create route has no
+initial retry guarantee. No30-day cleanup or per-task rerun lock. Detailed tool
+text retrieval remains strict metadata pending the specific disclosure choice.
+Production keys, rollout and old raw-file handling are operational prerequisites.
+
+The user directly approved Postman updates in the local task. The cloud refresh
+preserves execution settings and examples, uses placeholders for new templates,
+and executes no application requests. Publication progress is recorded separately;
+approval alone is not evidence that every operation is synchronized. A later
+automatic review rejected disclosure of a specific internal-contract payload;
+remaining writes are held pending destination/payload-specific approval.
+
+### Content-read availability and whole-backend scope — 19 October
+
+The [whole-backend reconciliation](backend-gap-reconciliation-20261019.md) separates
+implemented subsets from remaining task-sharing, account, Telegram, session,
+conversation/agent/article and deployment decisions. It does not change shared
+checklist status or treat optional proposals as approved.
+
+Nine existing GET routes now distinguish post-authentication database availability
+from invalid credentials, missing resources and empty data. See the exact
+[content-read contract](content-read-availability-contracts.md):503 responses use
+READ_DEPENDENCY_UNAVAILABLE with a static operation action. Retain authorized
+context and offer a deliberate GET retry. Mutation outcomes/recovery, grants,
+visibility, success DTOs and all other read routes keep their existing contracts.
+The follow-up adds project detail and creator-only group metadata/creation reads.
+[Remaining contract boundaries](remaining-backend-contract-boundaries-20261019.md)
+separates these verified corrections from pending feature decisions.
+
+### Telegram model confirmation authority — 19 October
+
+The [model-save authority contract](telegram-model-authority-contracts.md) records
+physical PostgreSQL reproductions and the Workspace→User→conversation fence.
+Model selection remains a personal Telegram setting under sessions.create;
+project/session selectors survive concurrent changes. A later permission, lifecycle
+or identity revocation that wins admission prevents persistence. No new REST
+model-preference API or unlink/recovery policy is introduced by this correction.
+
+## Approved session detail increment — 20 October 2026
+
+Use `GET /api/v1/sessions/:id/events/:eventId/details` for the separate version1
+redacted retained command/output/file-change/diff projection. The existing live and
+archive policies remain restrictive. See [the exact contract and sanitized local
+handoff](session-detail-retrieval-contracts.md) for bounds, revision continuation,
+authorization, unavailable states and plain-text rendering. This supersedes earlier
+pending-disclosure notes only for that endpoint. Verification is local/synthetic;
+no frontend deployment or external disclosure occurred.
+
+## Shared checklist tree and lifecycle — 20 October
+
+Use [the canonical tree/lifecycle contract](shared-checklist-tree-contracts.md)
+for additive `checklistSections`, `parentId`/`sectionId`, sibling insertion and
+subtree reparenting, and explicit ACTIVE/ARCHIVED/DELETED state. The flat checklist
+is retained for compatibility. Every sharing side reads the same canonical item
+content; destination membership never grants definition editing. Use existing
+original-owner and individual-assignee editors, current quoted revisions and
+request IDs. Deleted tasks remain visibly marked; comments/history retain their
+approved shared audience. No all-sides completion or private discussion split is
+introduced. Production migration/frontend wiring remain separate.

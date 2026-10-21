@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { SharedTaskContentController } from "./shared-task-content.controller";
+import { SharedTaskContentService } from "./shared-task-content.service";
 import { SharedTasksController } from "./shared-tasks.controller";
 import { SharedTasksService } from "./shared-tasks.service";
 import { HumanTasksController } from "./human-tasks.controller";
@@ -15,6 +17,7 @@ import { TaskDeadlinesService } from "./task-deadlines.service";
 @Module({
   imports: [AuthModule],
   controllers: [
+    SharedTaskContentController,
     SharedTasksController,
     HumanTaskActionsController,
     TasksController,
@@ -23,6 +26,7 @@ import { TaskDeadlinesService } from "./task-deadlines.service";
     HumanTasksController,
   ],
   providers: [
+    SharedTaskContentService,
     SharedTasksService,
     HumanTaskActionsService,
     TasksService,

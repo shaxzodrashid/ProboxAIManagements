@@ -2043,13 +2043,18 @@ async function until(fn: () => Promise<boolean>) {
         "INTERRUPTED",
       );
     });
-    it("recovers accepted-but-unlaunched work without replay and permits a new deliberate request", async () => {
+    it("keeps legacy accepted-but-unlaunched work interrupted without replay", async () => {
       const launch = jest
         .spyOn(sessions as any, "launchAccepted")
         .mockImplementationOnce(() => undefined);
       const key = randomUUID();
       const accepted = (await postTurn(key).expect(202)).body;
       launch.mockRestore();
+      // Simulate an existing pre-protocol row: migration defaults do not opt it in.
+      await prisma.proboxAiTurn.update({
+        where: { id: accepted.turnId },
+        data: { durableDispatch: false },
+      });
       await prisma.proboxAiSession.update({
         where: { id: sessionId },
         data: { runLeaseExpiresAt: new Date(0) },

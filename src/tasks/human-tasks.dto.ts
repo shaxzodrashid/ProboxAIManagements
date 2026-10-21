@@ -26,7 +26,20 @@ import {
   TASK_DESCRIPTION_MAX_LENGTH,
 } from "./task-text-limits";
 
+export class HumanTaskLifecycleDto {
+  @ApiProperty({ enum: ["ACTIVE", "ARCHIVED", "DELETED"] }) state!: string;
+  @ApiProperty({ type: String, nullable: true, format: "date-time" })
+  archivedAt!: string | null;
+  @ApiProperty({ type: String, nullable: true, format: "date-time" })
+  deletedAt!: string | null;
+  @ApiProperty({ type: String, nullable: true, format: "date-time" })
+  sourceProjectArchivedAt!: string | null;
+}
 export class HumanTaskResponseDto {
+  @ApiProperty({ type: () => HumanTaskLifecycleDto })
+  lifecycle!: HumanTaskLifecycleDto;
+  @ApiProperty({ type: () => HumanChecklistSectionDto, isArray: true })
+  checklistSections!: HumanChecklistSectionDto[];
   @ApiProperty({
     enum: TaskPriority,
     nullable: true,
@@ -78,6 +91,14 @@ export class HumanTaskReadResponseDto extends HumanTaskResponseDto {
 }
 
 export class HumanChecklistItemDto {
+  @ApiProperty({
+    format: "uuid",
+    description:
+      "Stable opaque side section identity, never an authorization token.",
+  })
+  sectionId!: string;
+  @ApiProperty({ type: String, format: "uuid", nullable: true }) parentId!:
+    string | null;
   @ApiProperty({ type: DeadlineValueDto, nullable: true })
   deadline!: DeadlineValueDto | null;
   @ApiProperty({ format: "uuid" }) id!: string;
@@ -89,6 +110,44 @@ export class HumanChecklistItemDto {
   completedById!: string | null;
   @ApiProperty({ type: String, format: "date-time", nullable: true })
   completedAt!: string | null;
+}
+export class HumanChecklistNodeDto extends HumanChecklistItemDto {
+  @ApiProperty({ type: () => HumanChecklistNodeDto, isArray: true })
+  children!: HumanChecklistNodeDto[];
+}
+export class HumanChecklistSectionDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty() original!: boolean;
+  @ApiProperty() currentSide!: boolean;
+  @ApiProperty({
+    description:
+      "False for retained items of a removed share; this does not grant access to that side.",
+  })
+  active!: boolean;
+  @ApiProperty({ type: HumanChecklistNodeDto, isArray: true })
+  items!: HumanChecklistNodeDto[];
+}
+export class HumanChecklistPlacementDto extends BoardMutationDto {
+  @ApiPropertyOptional({
+    type: String,
+    format: "uuid",
+    nullable: true,
+    description:
+      "Same-section parent; null selects a root. Maximum depth 8; cycles are rejected.",
+  })
+  @ValidateIf((_o, v) => v !== undefined && v !== null)
+  @IsUUID("4")
+  parentId?: string | null;
+  @ApiPropertyOptional({
+    type: String,
+    format: "uuid",
+    nullable: true,
+    description:
+      "Insert before this sibling; null appends. Omission preserves order on definition-only updates, or appends on create/reparent.",
+  })
+  @ValidateIf((_o, v) => v !== undefined && v !== null)
+  @IsUUID("4")
+  beforeItemId?: string | null;
 }
 export class HumanTaskLinkDto extends BoardMutationDto {
   @ApiProperty({
@@ -140,7 +199,15 @@ export class HumanTaskAssigneesDto extends BoardMutationDto {
 export class HumanTaskMoveDto extends BoardMutationDto {
   @ApiProperty({ format: "uuid" }) @IsUUID("4") statusId!: string;
 }
-export class HumanChecklistCreateDto extends BoardMutationDto {
+export class HumanChecklistCreateDto extends HumanChecklistPlacementDto {
+  @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "Current side section; defaults to original. Requires existing owner authority plus membership in this side.",
+  })
+  @ValidateIf((_o, v) => v !== undefined)
+  @IsUUID("4")
+  sectionId?: string;
   @ApiPropertyOptional({
     type: DeadlineInputDto,
     nullable: true,
@@ -165,7 +232,7 @@ export class HumanChecklistCreateDto extends BoardMutationDto {
   title!: string;
   @ApiProperty({ format: "uuid" }) @IsUUID("4") assigneeId!: string;
 }
-export class HumanChecklistUpdateDto extends BoardMutationDto {
+export class HumanChecklistUpdateDto extends HumanChecklistPlacementDto {
   @ApiPropertyOptional({
     type: DeadlineInputDto,
     nullable: true,
