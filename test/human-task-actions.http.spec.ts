@@ -10,6 +10,8 @@ import { HumanTaskActionsController } from "../src/tasks/human-task-actions.cont
 import { HumanTaskActionsService } from "../src/tasks/human-task-actions.service";
 import { TaskBoardsController } from "../src/tasks/task-boards.controller";
 import { TaskBoardsService } from "../src/tasks/task-boards.service";
+import { TasksController } from "../src/tasks/tasks.controller";
+import { TasksService } from "../src/tasks/tasks.service";
 import { TaskDeadlinesService } from "../src/tasks/task-deadlines.service";
 import { parseTaskDeadline } from "../src/tasks/task-deadline-value";
 import { ProjectArchiveService } from "../src/projects/project-archive.service";
@@ -217,11 +219,13 @@ if (databaseUrl) {
           HumanTasksController,
           HumanTaskActionsController,
           TaskBoardsController,
+          TasksController,
         ],
         providers: [
           HumanTasksService,
           HumanTaskActionsService,
           TaskBoardsService,
+          TasksService,
           { provide: PrismaService, useValue: db },
           {
             provide: JwtService,
@@ -248,7 +252,13 @@ if (databaseUrl) {
       });
       await db.user.updateMany({
         where: { id: { in: [owner, employee, peer] } },
-        data: { status: "OPEN" },
+        data: {
+          status: "OPEN",
+          firstName: null,
+          lastName: null,
+          username: null,
+          fullName: "Human staff",
+        },
       });
       projectId = (
         await db.project.create({
@@ -315,6 +325,594 @@ if (databaseUrl) {
         await db.workspace.deleteMany({ where: { id: { in: [w, foreignW] } } });
       }
       await db.$disconnect();
+    });
+    it.each([
+      ["ASCII", "a".repeat(240), "d".repeat(16000)],
+      ["astral", "🚀".repeat(240), "🚀".repeat(16000)],
+      ["variation selectors", "✈️".repeat(240), "✈️".repeat(16000)],
+    ])(
+      "round-trips legacy task text limits through human edit/read/replay: %s",
+      async (_label, title, description) => {
+        // Keep the independent 100 KiB JSON body cap: this description is 96 KiB.
+        const criteria =
+          _label === "variation selectors" ? "c" : "c".repeat(8000);
+        const created = await http()
+          .post("/tasks")
+          .set("Authorization", "Bearer " + owner)
+          .send({ title, description, criteria });
+        expect(created.status).toBe(201);
+        taskId = created.body.id;
+        expect(
+          (
+            await mutation(
+              "post",
+              "/link",
+              owner,
+              { statusId: board.statuses[0].id },
+              0,
+            )
+          ).status,
+        ).toBe(200);
+        const rev = await revision();
+        const data = { requestId: randomUUID(), title, description };
+        const saved = await mutation("patch", "/details", owner, data, rev);
+        expect(saved.status).toBe(200);
+        expect(saved.body.after).toMatchObject({
+          title,
+          description,
+          revision: rev + 1,
+        });
+        expect((await read()).body).toMatchObject({
+          title,
+          description,
+          revision: rev + 1,
+        });
+        expect(
+          (await mutation("patch", "/details", owner, data, rev)).body,
+        ).toEqual(saved.body);
+        const stored = await db.task.findUniqueOrThrow({
+          where: { id: taskId },
+        });
+        expect(stored).toMatchObject({
+          title,
+          description,
+          criteria,
+          status: "QUEUED",
+          managerId: owner,
+        });
+        expect(await revision()).toBe(rev + 1);
+        expect(
+          await db.taskHumanAudit.count({
+            where: { taskId, requestId: data.requestId },
+          }),
+        ).toBe(1);
+        expect(
+          (
+            await mutation("patch", "/details", owner, {
+              criteria: "Unwritable",
+            })
+          ).status,
+        ).toBe(400);
+      },
+    );
+    it.each([
+      ["title", "a".repeat(241)],
+      ["description", "d".repeat(16001)],
+      ["title", "🚀".repeat(241)],
+      ["description", "🚀".repeat(16001)],
+    ])(
+      "rejects oversized %s before changing task, revision or audit",
+      async (field, value) => {
+        const before = await db.task.findUniqueOrThrow({
+          where: { id: taskId },
+        });
+        const rev = await revision();
+        const count = await db.taskHumanAudit.count({ where: { taskId } });
+        expect(
+          (await mutation("patch", "/details", owner, { [field]: value }))
+            .status,
+        ).toBe(400);
+        await expect(
+          app
+            .get(HumanTaskActionsService)
+            .mutate(actor(), projectId, taskId, rev, "DETAILS", {
+              requestId: randomUUID(),
+              [field]: value,
+            }),
+        ).rejects.toMatchObject({ status: 400 });
+        expect(
+          await db.task.findUniqueOrThrow({ where: { id: taskId } }),
+        ).toEqual(before);
+        expect(await revision()).toBe(rev);
+        expect(await db.taskHumanAudit.count({ where: { taskId } })).toBe(
+          count,
+        );
+      },
+    );
+    it("uses the creation validator's Unicode semantics for direct human edits", async () => {
+      const title = "✈️".repeat(240),
+        description = "🚀".repeat(16000);
+      const saved = await app
+        .get(HumanTaskActionsService)
+        .mutate(actor(), projectId, taskId, await revision(), "DETAILS", {
+          requestId: randomUUID(),
+          title,
+          description,
+        });
+      expect(saved.after).toMatchObject({ title, description });
+      expect(
+        (
+          await mutation("post", "/checklist", owner, {
+            itemId: randomUUID(),
+            assigneeId: owner,
+            title: "a".repeat(201),
+          })
+        ).status,
+      ).toBe(400);
+    });
+    it("documents shared task limits while keeping checklist and execution criteria separate", () => {
+      const schemas: any = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      ).components!.schemas!;
+      for (const name of ["CreateTaskDto", "HumanTaskDetailsDto"]) {
+        expect(schemas[name].properties.title.maxLength).toBe(240);
+        expect(schemas[name].properties.description.maxLength).toBe(16000);
+      }
+      expect(schemas.CreateTaskDto.properties.criteria.maxLength).toBe(8000);
+      expect(schemas.HumanTaskDetailsDto.properties).not.toHaveProperty(
+        "criteria",
+      );
+      expect(schemas.HumanChecklistCreateDto.properties.title.maxLength).toBe(
+        200,
+      );
+      expect(schemas.HumanChecklistUpdateDto.properties.title.maxLength).toBe(
+        200,
+      );
+    });
+    it("returns exact public assignee identities for detail, list and query with shared checklist lookup", async () => {
+      await db.user.update({
+        where: { id: employee },
+        data: {
+          firstName: "Nodira",
+          lastName: "",
+          username: "nodira_staff",
+          fullName: "LEGACY MUST NOT REPLACE STRUCTURED NAME",
+          bio: "PRIVATE BIO",
+        },
+      });
+      await db.user.update({
+        where: { id: peer },
+        data: {
+          firstName: null,
+          lastName: null,
+          fullName: "Legacy Name With Several Words",
+        },
+      });
+      await db.profileContact.upsert({
+        where: {
+          ownerId_contactAccountId: {
+            ownerId: viewer,
+            contactAccountId: employee,
+          },
+        },
+        create: {
+          ownerId: viewer,
+          contactAccountId: employee,
+          alias: "PRIVATE CONTACT ALIAS",
+        },
+        update: { alias: "PRIVATE CONTACT ALIAS" },
+      });
+      const saved = await assign();
+      expect(saved.status).toBe(200);
+      expect(saved.body.after).not.toHaveProperty("assigneeIdentities");
+      const itemId = await item();
+      const expected = [
+        {
+          id: employee,
+          displayName: "Nodira",
+          firstName: "Nodira",
+          lastName: "",
+          username: "nodira_staff",
+        },
+        {
+          id: peer,
+          displayName: "Legacy Name With Several Words",
+          firstName: null,
+          lastName: null,
+          username: null,
+        },
+      ].sort((a, b) => a.id.localeCompare(b.id));
+      const detail = (await read().expect(200)).body;
+      expect(detail.assigneeIdentities).toEqual(expected);
+      expect(detail.assigneeIds).toEqual(expected.map((u) => u.id));
+      expect(detail.checklist[0]).toMatchObject({
+        id: itemId,
+        assigneeId: employee,
+      });
+      expect(Object.keys(detail.checklist[0]).sort()).toEqual([
+        "assigneeId",
+        "completed",
+        "completedAt",
+        "completedById",
+        "deadline",
+        "id",
+        "parentId",
+        "position",
+        "sectionId",
+        "title",
+      ]);
+      expect(
+        (
+          await http()
+            .get(`/projects/${projectId}/tasks`)
+            .set("Authorization", "Bearer " + viewer)
+            .expect(200)
+        ).body[0].assigneeIdentities,
+      ).toEqual(expected);
+      expect(
+        (await queryTasks().expect(200)).body.items[0].assigneeIdentities,
+      ).toEqual(expected);
+      expect(JSON.stringify(detail)).not.toContain("PRIVATE");
+      expect(JSON.stringify(detail)).not.toContain("roleAssignments");
+      expect((await read()).headers["cache-control"]).toBe("no-store");
+      expect(
+        (
+          await mutation("patch", "/details", owner, {
+            assigneeIdentities: expected,
+          })
+        ).status,
+      ).toBe(400);
+    });
+    it.each(["PENDING", "BANNED", "DELETED"] as const)(
+      "omits %s assignee identities while preserving retained task/checklist IDs",
+      async (status) => {
+        await assign();
+        const itemId = await item();
+        await db.user.update({
+          where: { id: employee },
+          data: { status, fullName: "INACTIVE SECRET" },
+        });
+        const detail = (await read().expect(200)).body;
+        expect(detail.assigneeIds).toContain(employee);
+        expect(detail.checklist[0]).toMatchObject({
+          id: itemId,
+          assigneeId: employee,
+        });
+        expect(detail.assigneeIdentities.map((u: any) => u.id)).toEqual([peer]);
+        expect(JSON.stringify(detail)).not.toContain("INACTIVE SECRET");
+        expect(
+          (await queryTasks().expect(200)).body.items[0].assigneeIdentities,
+        ).toEqual(detail.assigneeIdentities);
+      },
+    );
+    it("omits foreign-workspace assignee identity from legacy inconsistent rows", async () => {
+      const before = (await read().expect(200)).body;
+      await db.taskAssignee.create({ data: { taskId, userId: foreign } });
+      const detail = (await read().expect(200)).body;
+      expect(detail.assigneeIds).toEqual(
+        [...before.assigneeIds, foreign].sort(),
+      );
+      expect(detail.assigneeIdentities).toEqual(before.assigneeIdentities);
+      expect(
+        (await queryTasks().expect(200)).body.items[0].assigneeIdentities,
+      ).toEqual(before.assigneeIdentities);
+    });
+    it("retains public identity for an OPEN former project member without implying action eligibility", async () => {
+      await assign([employee]);
+      await item();
+      await db.projectMember.delete({
+        where: { projectId_userId: { projectId, userId: employee } },
+      });
+      const detail = (await read().expect(200)).body;
+      expect(detail.assigneeIdentities).toEqual([
+        {
+          id: employee,
+          displayName: "Human staff",
+          firstName: null,
+          lastName: null,
+          username: null,
+        },
+      ]);
+      expect((await read(employee)).status).toBe(404);
+      expect(
+        (
+          await mutation(
+            "put",
+            `/checklist/${detail.checklist[0].id}/completion`,
+            employee,
+            { completed: true },
+          )
+        ).status,
+      ).toBe(404);
+    });
+    it("refreshes assignee names without rewriting frozen assignment responses or audits", async () => {
+      const requestId = randomUUID(),
+        rev = await revision(),
+        data = { requestId, assigneeIds: [employee] };
+      const saved = await mutation("put", "/assignees", owner, data, rev);
+      expect(saved.status).toBe(200);
+      const before = (await read().expect(200)).body;
+      await db.user.update({
+        where: { id: employee },
+        data: { firstName: "New Public Name", lastName: null },
+      });
+      const current = (await read().expect(200)).body;
+      expect(current.assigneeIdentities[0].displayName).toBe("New Public Name");
+      expect(current.revision).toBe(before.revision);
+      expect(current.updatedAt).toBe(before.updatedAt);
+      expect(
+        (await mutation("put", "/assignees", owner, data, rev)).body,
+      ).toEqual(saved.body);
+      const audit = await db.taskHumanAudit.findUniqueOrThrow({
+        where: { taskId_requestId: { taskId, requestId } },
+      });
+      expect(audit.before).toEqual(saved.body.before);
+      expect(audit.after).toEqual(saved.body.after);
+      expect(saved.body.before).not.toHaveProperty("assigneeIdentities");
+      expect(saved.body.after).not.toHaveProperty("assigneeIdentities");
+    });
+    it("hydrates current assignee identities on query continuation without changing task generation", async () => {
+      await assign([employee]);
+      await queryRow(0);
+      const first = await queryTasks({ limit: 1 }).expect(200);
+      expect(first.body.hasMore).toBe(true);
+      await db.user.update({
+        where: { id: employee },
+        data: { firstName: "Current Page Name", lastName: null },
+      });
+      const next = await queryTasks({
+        limit: 1,
+        cursor: first.body.nextCursor,
+      }).expect(200);
+      expect(next.body.items[0].assigneeIdentities[0].displayName).toBe(
+        "Current Page Name",
+      );
+      expect(next.body.asOf).toBe(first.body.asOf);
+      expect(next.body.total).toBe(first.body.total);
+      expect(next.body.items[0].id).not.toBe(first.body.items[0].id);
+    });
+    it("declares public assignee identities only on fresh read DTOs", () => {
+      const s: any = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      ).components!.schemas!;
+      expect(
+        s.HumanTaskReadResponseDto.properties.assigneeIdentities.items.$ref,
+      ).toBe("#/components/schemas/PublicIdentityResponseDto");
+      expect(s.HumanTaskReadResponseDto.required).toContain(
+        "assigneeIdentities",
+      );
+      expect(
+        s.HumanTaskReadResponseDto.properties.assigneeIdentities.maxItems,
+      ).toBe(100);
+      expect(s.HumanTaskResponseDto.properties).not.toHaveProperty(
+        "assigneeIdentities",
+      );
+      expect(
+        Object.keys(s.PublicIdentityResponseDto.properties).sort(),
+      ).toEqual(["displayName", "firstName", "id", "lastName", "username"]);
+    });
+    const editWorkflowStatus = (statusId: string, input: object) =>
+      http()
+        .patch(`/projects/${projectId}/task-board/statuses/${statusId}`)
+        .set("Authorization", "Bearer " + owner)
+        .set("If-Match", `"${board.revision}"`)
+        .send({ requestId: randomUUID(), ...input });
+    const boardEdit = () =>
+      http()
+        .get(`/projects/${projectId}/task-board/edit`)
+        .set("Authorization", "Bearer " + owner);
+    it("resolves workflow display metadata consistently for member-only detail, list and query without board grants", async () => {
+      const expected = (await boardEdit().expect(200)).body.statuses[0];
+      expect(Object.keys(expected).sort()).toEqual([
+        "color",
+        "id",
+        "name",
+        "palette",
+        "position",
+      ]);
+      expect((await read().expect(200)).body.workflowStatus).toEqual(expected);
+      expect(
+        (
+          await http()
+            .get(`/projects/${projectId}/tasks`)
+            .set("Authorization", "Bearer " + viewer)
+            .expect(200)
+        ).body[0].workflowStatus,
+      ).toEqual(expected);
+      expect(
+        (await queryTasks().expect(200)).body.items[0].workflowStatus,
+      ).toEqual(expected);
+      await http()
+        .get(`/projects/${projectId}/task-board`)
+        .set("Authorization", "Bearer " + viewer)
+        .expect(403);
+      await http()
+        .get(`/projects/${projectId}/task-board/edit`)
+        .set("Authorization", "Bearer " + viewer)
+        .expect(403);
+      expect((await read()).headers["cache-control"]).toBe("no-store");
+      expect(
+        (
+          await mutation("patch", "/details", owner, {
+            workflowStatus: expected,
+          })
+        ).status,
+      ).toBe(400);
+    });
+    it.each(["NEUTRAL", "TEAL", "PURPLE", "GREEN"])(
+      "refreshes resolved workflow name/%s palette without changing task revision or runner state",
+      async (color) => {
+        const before = await db.task.findUniqueOrThrow({
+          where: { id: taskId },
+        });
+        const humanRevision = await revision();
+        await editWorkflowStatus(board.statuses[0].id, {
+          name: "Custom " + color,
+          color,
+        }).expect(200);
+        const expected = (await boardEdit().expect(200)).body.statuses[0];
+        expect(expected).toMatchObject({ color, name: "Custom " + color });
+        expect((await read().expect(200)).body.workflowStatus).toEqual(
+          expected,
+        );
+        expect(
+          (await queryTasks().expect(200)).body.items[0].workflowStatus,
+        ).toEqual(expected);
+        expect(await revision()).toBe(humanRevision);
+        expect(
+          await db.task.findUniqueOrThrow({ where: { id: taskId } }),
+        ).toEqual(before);
+      },
+    );
+    it("refreshes moved task display while preserving frozen mutation and audit outcomes after a later rename", async () => {
+      const previousRevision = await revision();
+      const requestId = randomUUID();
+      const data = { requestId, statusId: board.statuses[1].id };
+      const moved = await mutation(
+        "put",
+        "/workflow-status",
+        owner,
+        data,
+        previousRevision,
+      );
+      expect(moved.status).toBe(200);
+      expect(moved.body.after.statusId).toBe(board.statuses[1].id);
+      expect(moved.body.after).not.toHaveProperty("workflowStatus");
+      await editWorkflowStatus(board.statuses[1].id, {
+        name: "New current label",
+        color: "PURPLE",
+      }).expect(200);
+      const expected = (await boardEdit().expect(200)).body.statuses[1];
+      expect((await read().expect(200)).body.workflowStatus).toEqual(expected);
+      const replayed = await mutation(
+        "put",
+        "/workflow-status",
+        owner,
+        data,
+        previousRevision,
+      );
+      expect(replayed.status).toBe(200);
+      expect(replayed.body).toEqual(moved.body);
+      const audit = await db.taskHumanAudit.findUniqueOrThrow({
+        where: { taskId_requestId: { taskId, requestId } },
+      });
+      expect(audit.after).toEqual(moved.body.after);
+      expect(
+        (await db.task.findUniqueOrThrow({ where: { id: taskId } })).status,
+      ).toBe("RUNNING");
+    });
+    it("invalidates query continuation after workflow display metadata changes", async () => {
+      await queryRow(0);
+      const first = await queryTasks({ limit: 1 });
+      expect(first.status).toBe(200);
+      expect(first.body.hasMore).toBe(true);
+      await editWorkflowStatus(board.statuses[0].id, {
+        name: "Updated metadata",
+        color: "GREEN",
+      }).expect(200);
+      expect(
+        (await queryTasks({ limit: 1, cursor: first.body.nextCursor })).status,
+      ).toBe(409);
+      const fresh = await queryTasks({ limit: 1 });
+      expect(fresh.status).toBe(200);
+      expect(fresh.body.items[0].workflowStatus).toMatchObject({
+        name: "Updated metadata",
+        color: "GREEN",
+      });
+      expect(fresh.body.statusCounts).toEqual([
+        { statusId: board.statuses[0].id, count: 2 },
+      ]);
+    });
+    it("removes workflow display data after current membership is revoked", async () => {
+      expect((await read().expect(200)).body.workflowStatus.id).toBe(
+        board.statuses[0].id,
+      );
+      await db.projectMember.delete({
+        where: { projectId_userId: { projectId, userId: viewer } },
+      });
+      const denied = await read().expect(404);
+      expect(denied.body).not.toHaveProperty("workflowStatus");
+      expect(denied.body).not.toHaveProperty("assigneeIdentities");
+      expect((await queryTasks()).status).toBe(404);
+      await http()
+        .get(`/projects/${projectId}/tasks`)
+        .set("Authorization", "Bearer " + viewer)
+        .expect(404);
+    });
+    it("declares resolved workflow metadata only on fresh read DTOs with the shared board schema", () => {
+      const doc = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      );
+      const s: any = doc.components!.schemas!;
+      expect(
+        s.HumanTaskReadResponseDto.properties.workflowStatus.allOf[0].$ref,
+      ).toBe("#/components/schemas/BoardStatusResponseDto");
+      expect(s.HumanTaskReadResponseDto.required).toContain("workflowStatus");
+      expect(s.HumanTaskResponseDto.properties).not.toHaveProperty(
+        "workflowStatus",
+      );
+      expect(s.HumanTaskQueryResponseDto.properties.items.items.$ref).toBe(
+        "#/components/schemas/HumanTaskReadResponseDto",
+      );
+      expect(Object.keys(s.BoardStatusResponseDto.properties).sort()).toEqual([
+        "color",
+        "id",
+        "name",
+        "palette",
+        "position",
+      ]);
+    });
+    it("round-trips Unicode status create/rename at the database boundary and rejects oversized presentation sequences", async () => {
+      const initialName = "😀".repeat(61);
+      await editWorkflowStatus(board.statuses[0].id, {
+        name: initialName,
+      }).expect(200);
+      expect((await read().expect(200)).body.workflowStatus.name).toBe(
+        initialName,
+      );
+      const fullName = "🧪".repeat(120);
+      const created = await http()
+        .post(`/projects/${projectId}/task-board/statuses`)
+        .set("Authorization", "Bearer " + owner)
+        .set("If-Match", '"1"')
+        .send({ requestId: randomUUID(), name: fullName, color: "TEAL" })
+        .expect(201);
+      const createdStatus = created.body.after.statuses.at(-1);
+      expect(createdStatus.name).toBe(fullName);
+      for (const name of ["🧪".repeat(121), "❤️".repeat(61)])
+        await http()
+          .patch(
+            `/projects/${projectId}/task-board/statuses/${createdStatus.id}`,
+          )
+          .set("Authorization", "Bearer " + owner)
+          .set("If-Match", '"2"')
+          .send({ requestId: randomUUID(), name })
+          .expect(400);
+      expect((await boardEdit().expect(200)).body.revision).toBe(2);
+      expect(
+        (
+          await mutation("put", "/workflow-status", owner, {
+            statusId: createdStatus.id,
+          })
+        ).status,
+      ).toBe(200);
+      expect((await read().expect(200)).body.workflowStatus.name).toBe(
+        fullName,
+      );
+      const renamed = "🚀".repeat(120);
+      await http()
+        .patch(`/projects/${projectId}/task-board/statuses/${createdStatus.id}`)
+        .set("Authorization", "Bearer " + owner)
+        .set("If-Match", '"2"')
+        .send({ requestId: randomUUID(), name: renamed })
+        .expect(200);
+      expect((await read().expect(200)).body.workflowStatus.name).toBe(renamed);
+      expect(
+        (await queryTasks().expect(200)).body.items[0].workflowStatus.name,
+      ).toBe(renamed);
     });
     it("links deliberately with owner assignment while preserving every legacy task scalar", async () => {
       const legacy = await db.task.create({
@@ -1674,7 +2272,9 @@ if (databaseUrl) {
       expect(saved.status).toBe(200);
       expect(saved.headers["cache-control"]).toBe("no-store");
       expect(saved.body.action).toBe("CHECKLIST_REORDER");
-      expect(saved.body.before).toEqual(before);
+      const { workflowStatus, assigneeIdentities, ...frozenBefore } = before;
+      expect(saved.body.before).toEqual(frozenBefore);
+      expect(saved.body.after).not.toHaveProperty("workflowStatus");
       expect(saved.body.after.checklist.map((i: any) => i.id)).toEqual([
         c,
         a,
@@ -1685,7 +2285,11 @@ if (databaseUrl) {
           ...before.checklist.find((i: any) => i.id === id),
           position,
         });
-      expect((await read()).body).toEqual(saved.body.after);
+      expect((await read()).body).toEqual({
+        ...saved.body.after,
+        workflowStatus,
+        assigneeIdentities,
+      });
       expect(await db.task.findUnique({ where: { id: taskId } })).toEqual(
         scalar,
       );

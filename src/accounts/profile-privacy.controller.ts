@@ -122,7 +122,8 @@ export class ProfilePrivacyController {
   @Header("Cache-Control", "no-store")
   @ApiOperation({
     summary: "Remove a known account from your Contacts",
-    description: "Idempotent; takes effect on the next projection read.",
+    description:
+      "Idempotently removes your directed Contact grant and its private alias. UUID matching is case-insensitive, including historical text spellings; all matching grants owned by you are removed. Other owners' grants and independent audience policies remain unchanged. Contacts-only disclosure stops on the next profile read.",
   })
   @ApiParam({ name: "accountId", format: "uuid" })
   @ApiOkResponse({ type: ProfileContactRemovedDto })

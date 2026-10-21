@@ -45,6 +45,26 @@ describe("ProjectsService filesystem permissions", () => {
     delete process.env.PROBOXAI_ALLOWED_WORKSPACE_ROOTS;
     process.env.PROBOXAI_PROJECTS_HOME = root;
     prisma = {
+      user: {
+        findFirst: jest.fn(async ({ where }: any) => {
+          const current = [member, reader].find(
+            (account) => account.id === where.id,
+          );
+          return current
+            ? {
+                id: current.id,
+                roleAssignments: current.roles.map((role) => ({
+                  role: {
+                    ...role,
+                    permissions: current.permissions.map((permissionKey) => ({
+                      permissionKey,
+                    })),
+                  },
+                })),
+              }
+            : null;
+        }),
+      },
       department: {
         findUnique: jest.fn().mockResolvedValue({ homePath: root }),
       },

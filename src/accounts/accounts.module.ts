@@ -9,15 +9,41 @@ import { AccountsController } from "./accounts.controller";
 import { AccountsService } from "./accounts.service";
 import { AuthorizationModule } from "../authorization/authorization.module";
 import { TelegramBotModule } from "../telegram/telegram-bot.module";
+import {
+  ManualStatusController,
+  PublicManualStatusController,
+} from "./manual-status.controller";
+import { ManualStatusService } from "./manual-status.service";
+import { ProfileSaveController } from "./profile-save.controller";
+import { ProfileSaveService } from "./profile-save.service";
+import {
+  ProfileAvatarController,
+  PublicProfileAvatarController,
+} from "./profile-avatar.controller";
+import { ProfileAvatarService } from "./profile-avatar.service";
+import { ProfileAvatarStorage } from "./profile-avatar-storage";
 @Module({
   imports: [AuthModule, AuthorizationModule, TelegramBotModule],
   controllers: [
+    ProfileAvatarController,
+    PublicProfileAvatarController,
+    ProfileSaveController,
+    ManualStatusController,
+    PublicManualStatusController,
     AccountsController,
     ProfilePrivacyController,
     ProfilePickerController,
     PublicProfileController,
   ],
-  providers: [AccountsService, ProfilePrivacyService, ProfilePickerService],
+  providers: [
+    ProfileAvatarService,
+    ProfileAvatarStorage,
+    ProfileSaveService,
+    AccountsService,
+    ProfilePrivacyService,
+    ProfilePickerService,
+    ManualStatusService,
+  ],
   exports: [AccountsService, ProfilePrivacyService],
 })
 export class AccountsModule {}

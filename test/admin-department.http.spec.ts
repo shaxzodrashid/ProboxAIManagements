@@ -298,6 +298,60 @@ if (databaseUrl) {
       };
       return req;
     };
+    it("does not cache any authorization read and reloads self grants after a real role edit", async () => {
+      for (const route of [
+        "/authorization/me",
+        "/authorization/revision",
+        `/authorization/roles/${adminRoleId}/edit`,
+        `/authorization/users/${memberId}/roles`,
+        "/authorization/permissions",
+        "/authorization/roles",
+      ]) {
+        expect(
+          (await call("get", route).expect(200)).headers["cache-control"],
+        ).toBe("no-store");
+      }
+      const before = (
+        await call("get", "/authorization/me", memberId).expect(200)
+      ).body;
+      expect(before.permissions).toEqual([]);
+      const memberRole = before.roles[0];
+      try {
+        await prisma.rolePermission.create({
+          data: { roleId: memberRole.id, permissionKey: "authorization.read" },
+        });
+        await prisma.role.update({
+          where: { id: memberRole.id },
+          data: { name: "Current role display" },
+        });
+        const current = (
+          await call("get", "/authorization/me", memberId).expect(200)
+        ).body;
+        expect(current.permissions).toEqual(["authorization.read"]);
+        expect(current.roles).toEqual([
+          { ...memberRole, name: "Current role display" },
+        ]);
+        expect(Object.keys(current).sort()).toEqual([
+          "id",
+          "permissions",
+          "roles",
+          "workspaceId",
+        ]);
+        await call("get", "/authorization/permissions", memberId).expect(200);
+      } finally {
+        await prisma.rolePermission.deleteMany({
+          where: { roleId: memberRole.id, permissionKey: "authorization.read" },
+        });
+        await prisma.role.update({
+          where: { id: memberRole.id },
+          data: { name: memberRole.name },
+        });
+      }
+      expect(
+        (await call("get", "/authorization/me", memberId).expect(200)).body,
+      ).toEqual(before);
+      await call("get", "/authorization/permissions", memberId).expect(403);
+    });
     it("lets manage-only callers read narrow revisions and preserves stale protection", async () => {
       const read = (id = defaultId, actor = manageOnlyId) =>
         request(app.getHttpServer())

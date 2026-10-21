@@ -1,5 +1,11 @@
 # SESSION01/03 durability and SESSION05 recovery foundations
 
+The recovery policy below remains the legacy-row contract. Later approved
+[initial intent/history](session-intent-history-contracts.md) and
+[20 October REST follow-up recovery](rest-followup-recovery-contracts.md)
+supersede it for explicitly supported never-started work. Started/ambiguous runs
+remain blocked; migration does not opt historical pending turns into dispatch.
+
 Local, uncommitted implementation in the existing ProboxAI checkout. Prior batches remain preserved. No live AI runner, external spending, deployment, push or production migration was performed.
 
 ## Persisted history and SSE

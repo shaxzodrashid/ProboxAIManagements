@@ -1,3 +1,4 @@
+import { ApiReadAvailability } from "../openapi/api-docs";
 import {
   ProjectDeletionHistoryResponseDto,
   ProjectDeletionStateResponseDto,
@@ -39,7 +40,6 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
-  ApiProduces,
   ApiQuery,
   ApiTags,
 } from "@nestjs/swagger";
@@ -53,6 +53,7 @@ import {
   ProjectFileOperationResponseDto,
   ProjectTrashItemResponseDto,
   ProjectTrashRestoredResponseDto,
+  ProjectTrashOutcomeResponseDto,
   AddProjectMemberDto,
   CreateProjectDto,
   CreateProjectFolderDto,
@@ -78,10 +79,15 @@ import {
 } from "./projects.dto";
 import { ProjectsService } from "./projects.service";
 import {
+  ProtectedFileTypeResponseDto,
+  ProtectedFileTypeRemovedResponseDto,
+} from "./protected-file-types.dto";
+import {
   SubmitProjectCreationDto,
   ProjectCreationOutcomeDto,
 } from "./project-creation-submission.dto";
 import {
+  ApiErrorResponseDto,
   ApiUploadSizeError,
   ApiAccessToken,
   ApiAuthenticationErrors,
@@ -110,9 +116,11 @@ export class ProjectsController {
   })
   @ApiAcceptedResponse({ type: ProjectCreationOutcomeDto })
   @ApiConflictResponse({
+    type: ApiErrorResponseDto,
     description: "Identity reuse or overlapping unresolved creation.",
   })
   @ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
     description: "PROJECT_CREATION_OUTCOME_UNKNOWN; read the same identity.",
   })
   @ApiAuthenticationErrors()
@@ -146,6 +154,7 @@ export class ProjectsController {
   }
 
   @Get()
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @ApiOperation({
     summary: "List accessible projects",
@@ -177,6 +186,7 @@ export class ProjectsController {
     type: ProjectCreatedResponseDto,
   })
   @ApiResponse({
+    type: ApiErrorResponseDto,
     status: 428,
     description:
       "PROJECT_CREATION_ID_REQUIRED: CLEAR must use keyed creation-submissions.",
@@ -192,6 +202,7 @@ export class ProjectsController {
   }
 
   @Get(":id")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @ApiOperation({
     summary: "Get project details",
@@ -435,6 +446,15 @@ export class ProjectsController {
   @Get(":id/protected-file-types")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "List protected file extensions" })
+  @ApiOkResponse({
+    type: ProtectedFileTypeResponseDto,
+    isArray: true,
+    description:
+      "Existing project-scoped rules ordered by extension; sensitive access and projects.files.delete remain required.",
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   listProtectedFileTypes(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -445,6 +465,14 @@ export class ProjectsController {
   @Post(":id/protected-file-types")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Append a protected file extension" })
+  @ApiCreatedResponse({
+    type: ProtectedFileTypeResponseDto,
+    description:
+      "Created or existing normalized rule; repeated normalized extensions preserve the original record and creation attribution.",
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   addProtectedFileType(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -456,6 +484,10 @@ export class ProjectsController {
   @Put(":id/protected-file-types/:typeId")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Update a protected file extension (owner only)" })
+  @ApiOkResponse({ type: ProtectedFileTypeResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   updateProtectedFileType(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -473,6 +505,10 @@ export class ProjectsController {
   @Delete(":id/protected-file-types/:typeId")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOperation({ summary: "Remove a protected file extension (owner only)" })
+  @ApiOkResponse({ type: ProtectedFileTypeRemovedResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   removeProtectedFileType(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -529,6 +565,9 @@ export class ProjectsController {
   @Get(":id/file-operations")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOkResponse({ type: ProjectFileOperationResponseDto, isArray: true })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   fileOperations(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -539,6 +578,9 @@ export class ProjectsController {
   @Get(":id/file-operations/:operationId")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
   @ApiOkResponse({ type: ProjectFileOperationResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   fileOperation(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -554,6 +596,9 @@ export class ProjectsController {
       "Inspect a deletion outcome and repair its database state without moving bytes",
   })
   @ApiCreatedResponse({ type: ProjectFileOperationResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   reconcileFileOperation(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -578,10 +623,36 @@ export class ProjectsController {
     return this.projects.listTrash(user, id);
   }
 
+  @Get(":id/trash/:trashId")
+  @Header("Cache-Control", "no-store")
+  @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
+  @ApiOperation({
+    summary: "Read a retained trash item restore or expiry outcome",
+  })
+  @ApiOkResponse({ type: ProjectTrashOutcomeResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  trashItemOutcome(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Param("trashId") trashId: string,
+  ) {
+    return this.projects.trashItemOutcome(user, id, trashId);
+  }
+
   @Post(":id/trash/:trashId/restore")
   @RequirePermissions(Permissions.PROJECT_FILES_DELETE)
-  @ApiOperation({ summary: "Restore a recoverable project trash item" })
+  @ApiOperation({
+    summary: "Restore a recoverable project trash item",
+    description:
+      "Atomic no-overwrite restore for regular files and supported local same-volume Windows NTFS directories. Unsupported runtimes, volumes and reparse paths fail closed. FILE_TRASH_OUTCOME_UNKNOWN requires GET trash item readback and review; no timeout replay. Completed retries return historical success.",
+  })
   @ApiCreatedResponse({ type: ProjectTrashRestoredResponseDto })
+  @ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
+    description:
+      "FILE_TRASH_OUTCOME_UNKNOWN. Claim, publication or completion could not be confirmed. Read GET /projects/:id/trash/:trashId and review; do not replay uncertain filesystem work.",
+  })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
   @ApiValidationErrors()
@@ -735,11 +806,14 @@ export class ProjectsController {
     example: "docs/README.md",
     description: "Project-relative file path.",
   })
-  @ApiProduces("application/octet-stream")
   @ApiOkResponse({
     description:
       "Binary file stream. The response includes an attachment Content-Disposition header.",
-    schema: { type: "string", format: "binary" },
+    content: {
+      "application/octet-stream": {
+        schema: { type: "string", format: "binary" },
+      },
+    },
   })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()

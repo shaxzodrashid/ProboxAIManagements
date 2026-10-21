@@ -16,8 +16,10 @@ import {
 } from "@nestjs/common";
 import {
   ApiOkResponse,
+  ApiCreatedResponse,
   ApiOperation,
-  ApiProduces,
+  ApiExtraModels,
+  getSchemaPath,
   ApiTags,
   ApiConflictResponse,
   ApiServiceUnavailableResponse,
@@ -29,12 +31,18 @@ import { JwtAuthGuard, PermissionsGuard } from "../auth/auth.guards";
 import { Permissions } from "../authorization/permission.catalog";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
+  ApiErrorResponseDto,
   ApiAccessToken,
   ApiAuthenticationErrors,
   ApiResourceErrors,
   ApiValidationErrors,
 } from "../openapi/api-docs";
 import { ProjectInitializationService } from "./project-initialization.service";
+import {
+  InitializationAttemptResponseDto,
+  InitializationDetailResponseDto,
+  InitializationCancelledResponseDto,
+} from "./initialization-response.dto";
 import {
   InitializationEventsQueryDto,
   InitializationPersistedEventDto,
@@ -84,9 +92,11 @@ export class ProjectInitializationsController {
   })
   @ApiOkResponse({ type: ProjectEnqueueRecoveryResponseDto })
   @ApiConflictResponse({
+    type: ApiErrorResponseDto,
     description: "Pinned template, lifecycle, readiness or history mismatch.",
   })
   @ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
     description:
       "PROJECT_ENQUEUE_OUTCOME_UNKNOWN; reconcile the same project/template.",
   })
@@ -107,7 +117,15 @@ export class ProjectInitializationsController {
 
   @Get()
   @ApiOperation({ summary: "List project initialization attempts" })
-  @ApiOkResponse({ description: "Newest attempt first, including step logs." })
+  @ApiOkResponse({
+    description:
+      "Newest attempt first, including position-ordered stored steps/logs under existing initialization read scope.",
+    type: InitializationDetailResponseDto,
+    isArray: true,
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   list(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
@@ -117,6 +135,10 @@ export class ProjectInitializationsController {
 
   @Get(":initializationId")
   @ApiOperation({ summary: "Get initialization status and bounded step logs" })
+  @ApiOkResponse({ type: InitializationDetailResponseDto })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   get(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,
@@ -159,8 +181,15 @@ export class ProjectInitializationsController {
     description:
       "Persisted polling eliminates the replay-to-live handoff gap. Use after or Last-Event-ID (must agree if both supplied), then deduplicate by initialization/sequence. Each batch rechecks current account, workspace, grants and project scope. Stream ends at token expiry, access loss or transport error; reconcile with REST. No worker launch or cancellation is performed by subscribing.",
   })
-  @ApiProduces("text/event-stream")
-  @ApiResponse({ status: 200, type: InitializationStreamEventDto })
+  @ApiExtraModels(InitializationStreamEventDto)
+  @ApiResponse({
+    status: 200,
+    content: {
+      "text/event-stream": {
+        schema: { $ref: getSchemaPath(InitializationStreamEventDto) },
+      },
+    },
+  })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
   @ApiValidationErrors()
@@ -199,7 +228,11 @@ export class ProjectInitializationsController {
   @RequirePermissions(Permissions.PROJECT_INITIALIZATIONS_MANAGE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Cancel a queued or running initialization" })
-  @ApiOkResponse({ description: "Processes stopped and staging quarantined." })
+  @ApiOkResponse({
+    description:
+      "Cancellation transition completed; local signal attempts do not prove all descendants stopped or staging quarantined. Reconcile current attempt state after uncertain responses.",
+    type: InitializationCancelledResponseDto,
+  })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
   cancel(
@@ -215,6 +248,14 @@ export class ProjectInitializationsController {
   @ApiOperation({
     summary: "Retry the latest failed initialization from clean staging",
   })
+  @ApiCreatedResponse({
+    type: InitializationAttemptResponseDto,
+    description:
+      "New persisted attempt registration snapshot, without steps. Background execution may advance after registration; read its detail/history for current progress. An unknown response is not proof no attempt was created.",
+  })
+  @ApiAuthenticationErrors()
+  @ApiResourceErrors()
+  @ApiValidationErrors()
   retry(
     @CurrentUser() user: AuthenticatedUser,
     @Param("projectId") projectId: string,

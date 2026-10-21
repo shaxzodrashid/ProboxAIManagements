@@ -246,10 +246,18 @@ isolated("isolated PostgreSQL profile persistence", () => {
       authorization as unknown as AuthorizationService,
     );
     const results = await Promise.allSettled([
-      racingService.updateSelf(workspaceId, user.id, {
-        firstName: "Augusta Ada",
-      }),
-      racingService.updateSelf(workspaceId, user.id, { lastName: "Lovelace" }),
+      // Exercise the helper's CAS defense for callers without workspace admission.
+      // The public wrapper now serializes workspace writers before these reads.
+      racingPrisma.$transaction((tx: any) =>
+        racingService.updateSelfInTransaction(tx, workspaceId, user.id, {
+          firstName: "Augusta Ada",
+        }),
+      ),
+      racingPrisma.$transaction((tx: any) =>
+        racingService.updateSelfInTransaction(tx, workspaceId, user.id, {
+          lastName: "Lovelace",
+        }),
+      ),
     ]);
     expect(
       results.filter((result) => result.status === "fulfilled"),

@@ -1,5 +1,10 @@
 # MAIN01 assigned-session index
 
+The subsequent [project-task query increment](project-session-query-contracts.md)
+adds `projectId` through the explicit task-board relationship, with current
+membership and the same assigned-session read authority. References below to
+project queries being absent describe the original October 12 checkpoint.
+
 Local implementation, 12 October 2026. This delivers a complete bounded session-index endpoint using the already established session-detail read authority. It closes the missing global/assigned-task session-list capability, including older sessions hidden by latest-per-task summaries. MAIN01 remains partial because project-task boards, discussion feeds and broader Home composition are separate dependencies. No task/project association, active-count aggregation, presence or stop-containment policy is introduced.
 
 ## Endpoint and response
@@ -8,10 +13,13 @@ Local implementation, 12 October 2026. This delivers a complete bounded session-
 
 - statuses: optional explicit SessionStatus values, comma-separated or repeated. QUEUED, RUNNING, PAUSED, COMPLETED, FAILED, INTERRUPTED, ARCHIVED. Empty, duplicate or unsupported values return 400. Omit for all statuses; no inferred Active category.
 - taskId: optional UUIDv4 assigned-task filter. Unknown, foreign or unassigned task filters return the same empty scoped list.
+- projectId: optional UUIDv4 explicit task-board project filter; current same-workspace project membership is required. Intersects taskId/statuses. Unknown/inaccessible projects return the same empty scope. See the subsequent contract above.
 - limit: canonical decimal integer 1–100, default 100.
 - cursor: optional opaque continuation, maximum 2048 characters. Treat it as opaque; it is pagination input, never an access credential.
 
-Unknown query fields, including projectId, return 400. Project scope needs TASK02/04 relationship contracts; a session's cwd or saved execution context is not silently converted into task-board membership.
+Unknown query fields return 400. The later project filter uses the implemented
+TASK02/04 relationship; a session's cwd or saved execution context is never
+converted into task-board membership. `selectedProjectId` is not a supported filter.
 
 ```text
 {

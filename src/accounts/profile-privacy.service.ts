@@ -1,3 +1,4 @@
+import { lockWorkspace } from "../prisma/workspace-lock";
 import { USERNAME_PATTERN } from "../auth/auth.dto";
 import { publicIdentity, publicIdentitySelect } from "./public-identity";
 import {
@@ -19,6 +20,9 @@ import { AccountsService } from "./accounts.service";
 import { SaveSelfProfileDto } from "./profile-privacy.dto";
 import { ReplaceProfileAudienceDto } from "./profile-privacy.dto";
 import { audienceAllows } from "./profile-audience";
+import { resolveProfileAccountId } from "./profile-account-lookup";
+import { customStatusSelect, storedCustomStatus } from "./custom-status";
+import { avatarMetadata, avatarSelect } from "./profile-avatar-domain";
 
 const recipients = {
   accountRecipients: true,
@@ -83,6 +87,18 @@ export class ProfilePrivacyService {
       );
     });
   }
+  responses(
+    rows: Prisma.ProfileAudiencePolicyGetPayload<{
+      include: typeof recipients;
+    }>[],
+  ) {
+    return fields.map((field) =>
+      this.response(
+        field,
+        rows.find((row) => row.field === field),
+      ),
+    );
+  }
   private response(
     field: ProfileAudienceField,
     row?: {
@@ -114,12 +130,12 @@ export class ProfilePrivacyService {
     dto: ReplaceProfileAudienceDto,
   ) {
     this.validateAudience(field, dto);
-    return this.transaction(
-      (tx) => this.replaceInTransaction(tx, workspaceId, ownerId, field, dto),
-      true,
-    );
+    return this.transaction(async (tx) => {
+      await lockWorkspace(tx, workspaceId);
+      return this.replaceInTransaction(tx, workspaceId, ownerId, field, dto);
+    }, true);
   }
-  private validateAudience(
+  validateAudience(
     field: ProfileAudienceField,
     dto: ReplaceProfileAudienceDto,
   ) {
@@ -140,7 +156,7 @@ export class ProfilePrivacyService {
     )
       throw new BadRequestException("Recipient sets require CUSTOM");
   }
-  private async replaceInTransaction(
+  async replaceInTransaction(
     tx: Prisma.TransactionClient,
     workspaceId: string,
     ownerId: string,
@@ -216,6 +232,7 @@ export class ProfilePrivacyService {
         throw new BadRequestException("Recipient sets require CUSTOM");
     }
     return this.transaction(async (tx) => {
+      await lockWorkspace(tx, workspaceId);
       const profile = await this.accounts.updateSelfInTransaction(
         tx,
         workspaceId,
@@ -287,7 +304,12 @@ export class ProfilePrivacyService {
     return this.transaction(async (tx) => {
       await this.owner(tx, workspaceId, ownerId);
       await tx.profileContact.deleteMany({
-        where: { ownerId, contactAccountId },
+        // UUID text is case-insensitive even though the legacy FK is TEXT.
+        // Revoke every matching caller-owned spelling; never rewrite identities.
+        where: {
+          ownerId,
+          contactAccountId: { equals: contactAccountId, mode: "insensitive" },
+        },
       });
       return { removed: true };
     }, true);
@@ -300,9 +322,21 @@ export class ProfilePrivacyService {
       where = { username };
     }
     return this.transaction(async (tx) => {
+      let lookup = where;
+      if (where.id !== undefined) {
+        const id = await resolveProfileAccountId(tx, where.id);
+        if (!id) throw new NotFoundException("Profile not found");
+        lookup = { id };
+      }
       const owner = await tx.user.findFirst({
-        where: { ...where, status: UserStatus.OPEN },
-        select: { ...publicIdentitySelect, bio: true, birthDate: true },
+        where: { ...lookup, status: UserStatus.OPEN },
+        select: {
+          ...publicIdentitySelect,
+          ...customStatusSelect,
+          avatarAsset: { select: avatarSelect },
+          bio: true,
+          birthDate: true,
+        },
       });
       if (!owner) throw new NotFoundException("Profile not found");
       const viewer = viewerId
@@ -332,8 +366,16 @@ export class ProfilePrivacyService {
           viewer,
           contact,
         );
+      const customStatus = storedCustomStatus(owner);
       return {
         ...publicIdentity(owner),
+        customStatus:
+          allows(ProfileAudienceField.STATUS) && customStatus?.active
+            ? customStatus
+            : null,
+        avatar: allows(ProfileAudienceField.AVATAR)
+          ? avatarMetadata(owner.avatarAsset, owner.id)
+          : null,
         bio: allows(ProfileAudienceField.BIO) ? owner.bio : null,
         birthdayDayMonth:
           owner.birthDate && allows(ProfileAudienceField.BIRTHDAY_DAY_MONTH)

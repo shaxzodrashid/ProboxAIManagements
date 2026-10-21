@@ -536,6 +536,58 @@ if (databaseUrl) {
       expect(
         await fs.readFile(path.join(projectPath, "direct.bin"), "utf8"),
       ).toBe("direct");
+      const outcomePath = `/projects/${projectId}/trash/${direct.body.trashId}`;
+      const outcome = await call("get", outcomePath).expect(200);
+      clean(outcome.body);
+      expect(outcome.body).toMatchObject({
+        status: "RESTORED",
+        nextAction: "NONE",
+        executions: [{ action: "RESTORE", state: "RESTORED", errorCode: null }],
+      });
+      for (const privateKey of [
+        "recoveryToken",
+        "sourceIdentity",
+        "contentHash",
+        "trashPath",
+      ])
+        expect(JSON.stringify(outcome.body)).not.toContain(privateKey);
+      await call("get", outcomePath, readerId).expect(403);
+      await call("get", outcomePath, outsiderId).expect(404);
+      await call("get", outcomePath, emptyId).expect(403);
+      await fs.writeFile(path.join(projectPath, "direct.bin"), "replacement");
+      await call("post", `${outcomePath}/restore`).expect(201);
+      expect(
+        await fs.readFile(path.join(projectPath, "direct.bin"), "utf8"),
+      ).toBe("replacement");
+    });
+    it("exposes sanitized unknown restore outcomes without replay or expanded access", async () => {
+      await fs.writeFile(path.join(projectPath, "uncertain.bin"), "retained");
+      const deleted = await call("post", `/projects/${projectId}/files/delete`)
+        .send({ path: "uncertain.bin", operationId: randomUUID() })
+        .expect(201);
+      const url = `/projects/${projectId}/trash/${deleted.body.trashId}`;
+      const publish = jest
+        .spyOn(fs, "link")
+        .mockRejectedValue(new Error("private host path must never leak"));
+      try {
+        const failure = await call("post", `${url}/restore`).expect(503);
+        expect(failure.body.code).toBe("FILE_TRASH_OUTCOME_UNKNOWN");
+        expect(JSON.stringify(failure.body)).not.toContain("private host");
+        const result = await call("get", url).expect(200);
+        expect(result.body).toMatchObject({
+          status: "ACTIVE",
+          nextAction: "REVIEW_OUTCOME",
+          executions: [{ state: "UNKNOWN" }],
+        });
+        expect(result.headers["cache-control"]).toBe("no-store");
+        clean(result.body);
+        await call("post", `${url}/restore`).expect(409);
+        expect(publish).toHaveBeenCalledTimes(1);
+        await call("get", url, outsiderId).expect(404);
+        await call("get", url, readerId).expect(403);
+      } finally {
+        publish.mockRestore();
+      }
     });
     it("scopes operation readback and repair to the existing delete grant and project access", async () => {
       await fs.writeFile(path.join(projectPath, "journal.bin"), "journal");
@@ -600,10 +652,20 @@ if (databaseUrl) {
         `/projects/${projectId}/trash/${directory.body.trashId}/restore`,
       ).expect(409);
       await fs.rmdir(path.join(projectPath, "folder"));
-      await call(
+      const restoredDirectory = await call(
         "post",
         `/projects/${projectId}/trash/${directory.body.trashId}/restore`,
-      ).expect(201);
+      ).expect(process.platform === "win32" ? 201 : 409);
+      if (process.platform === "win32") {
+        expect(restoredDirectory.body).toEqual({
+          restored: true,
+          path: "folder",
+        });
+        expect(
+          (await fs.stat(path.join(projectPath, "folder"))).isDirectory(),
+        ).toBe(true);
+      } else
+        expect(restoredDirectory.body.code).toBe("FILE_RESTORE_UNSUPPORTED");
       await fs.writeFile(path.join(projectPath, "changed.txt"), "before");
       const confirmation = await call(
         "post",

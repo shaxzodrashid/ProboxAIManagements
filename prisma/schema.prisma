@@ -2,6 +2,222 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum ArticleReviewState {
+  WAITING_VOTERS
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Reserved identities and private staging do not create published content.
+model ArticleDocument {
+  resolutionReviews ArticleResolutionReview[]
+  id                String                        @id
+  projectId         String
+  creatorId         String
+  headVersionId     String?
+  createdAt         DateTime                      @default(now())
+  versions          ArticlePublishedVersion[]     @relation("documentVersions")
+  head              ArticlePublishedVersion?      @relation("documentHead", fields: [id, headVersionId], references: [documentId, id], onDelete: NoAction, onUpdate: NoAction)
+  contributions     ArticleProposalContribution[]
+  candidates        ArticleProposalCandidate[]
+
+  @@unique([id, headVersionId])
+  @@unique([projectId, id])
+  @@index([projectId, id])
+}
+
+model ArticlePublishedVersion {
+  id                 String                   @id
+  documentId         String
+  number             Int
+  reviewId           String?                  @unique
+  resolutionReviewId String?                  @unique
+  comparison         Json
+  provenance         Json
+  createdAt          DateTime                 @default(now())
+  document           ArticleDocument          @relation("documentVersions", fields: [documentId], references: [id], onDelete: Restrict)
+  headFor            ArticleDocument?         @relation("documentHead")
+  review             ArticleReview?           @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  resolutionReview   ArticleResolutionReview? @relation(fields: [documentId, resolutionReviewId], references: [documentId, id], onDelete: Restrict)
+
+  @@unique([documentId, id])
+  @@unique([documentId, resolutionReviewId])
+  @@unique([documentId, number])
+}
+
+model ArticlePublicationSpace {
+  projectId    String @id
+  revision     Int    @default(0)
+  nextSequence Int    @default(0)
+  forest       Json
+}
+
+// Immutable explicit source/provenance, independent of a future merged candidate.
+model ArticleProposalContribution {
+  id                 String                    @id
+  documentId         String
+  authorId           String
+  sourceArticleId    String
+  sourceRevision     Int
+  baseVersionId      String?
+  baseForestRevision Int
+  inputHash          String                    @db.VarChar(64)
+  comparison         Json
+  createdAt          DateTime                  @default(now())
+  document           ArticleDocument           @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  candidate          ArticleProposalCandidate?
+
+  @@unique([documentId, authorId, inputHash])
+}
+
+// FIFO reservations only. This slice exposes no merge, dispatch, vote or promotion mutation.
+model ArticleProposalCandidate {
+  submittedAt        DateTime?
+  submittedSequence  Int?
+  resolutionReviewId String?
+  resolutionReview   ArticleResolutionReview?    @relation(fields: [resolutionReviewId], references: [id], onDelete: Restrict)
+  id                 String                      @id
+  projectId          String
+  documentId         String
+  authorId           String
+  sequence           Int
+  revision           Int                         @default(0)
+  contributionId     String                      @unique
+  reachedReviewersAt DateTime?
+  document           ArticleDocument             @relation(fields: [projectId, documentId], references: [projectId, id], onDelete: Restrict)
+  contribution       ArticleProposalContribution @relation(fields: [contributionId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, sequence])
+  @@unique([projectId, submittedSequence])
+  @@index([documentId, sequence])
+}
+
+model ArticleResolutionReview {
+  baseVersionId      String?
+  baseForestRevision Int?
+  publishedVersion   ArticlePublishedVersion?
+  headSequence       Int
+  id                 String                      @id
+  projectId          String
+  documentId         String
+  selectedById       String
+  phase              String                      @default("RESOLVING")
+  before             Json
+  materialization    Json
+  createdAt          DateTime                    @default(now())
+  document           ArticleDocument             @relation(fields: [projectId, documentId], references: [projectId, id], onDelete: Restrict)
+  candidates         ArticleProposalCandidate[]
+  reviewers          ArticleResolutionReviewer[]
+
+  @@unique([projectId, headSequence])
+  @@unique([documentId, id])
+  @@index([projectId, documentId])
+}
+
+model ArticleResolutionReviewer {
+  reviewId      String
+  userId        String
+  choiceVersion Int                        @default(0)
+  review        ArticleResolutionReview    @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  choices       ArticleResolutionChoice[]
+  ballots       ArticleResolutionBallot[]
+  approval      ArticleResolutionApproval?
+
+  @@id([reviewId, userId])
+}
+
+model ArticleResolutionApproval {
+  reviewId  String
+  userId    String
+  approved  Boolean
+  createdAt DateTime                  @default(now())
+  reviewer  ArticleResolutionReviewer @relation(fields: [reviewId, userId], references: [reviewId, userId], onDelete: Restrict)
+
+  @@id([reviewId, userId])
+}
+
+model ArticleResolutionBallot {
+  reviewId  String
+  userId    String
+  option    String
+  round     Int                       @default(1)
+  createdAt DateTime                  @default(now())
+  reviewer  ArticleResolutionReviewer @relation(fields: [reviewId, userId], references: [reviewId, userId], onDelete: Restrict)
+
+  @@id([reviewId, userId, round])
+}
+
+model ArticleResolutionChoice {
+  reviewId  String
+  userId    String
+  version   Int
+  choices   Json
+  createdAt DateTime                  @default(now())
+  reviewer  ArticleResolutionReviewer @relation(fields: [reviewId, userId], references: [reviewId, userId], onDelete: Restrict)
+
+  @@id([reviewId, userId, version])
+}
+
+// Stable original keys and immutable submitted content survive live deletion.
+model ArticleReview {
+  publishedVersions ArticlePublishedVersion[]
+  id                String                    @id
+  projectId         String
+  projectRefId      String?
+  authorId          String
+  articleId         String
+  sourceRevision    Int
+  snapshot          Json
+  state             ArticleReviewState        @default(WAITING_VOTERS)
+  revision          Int                       @default(0)
+  selectedById      String?
+  createdAt         DateTime                  @default(now())
+  decidedAt         DateTime?
+  project           Project?                  @relation(fields: [projectRefId], references: [id], onDelete: SetNull)
+  voters            ArticleReviewVoter[]
+
+  @@unique([projectId, authorId, articleId, sourceRevision])
+  @@index([projectId, id])
+}
+
+model ArticleReviewVoter {
+  reviewId String
+  userId   String
+  approved Boolean?
+  votedAt  DateTime?
+  review   ArticleReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+
+  @@id([reviewId, userId])
+}
+
+// One individual private workspace per project; never stored in project files.
+model ArticleDraftSpace {
+  projectId    String
+  ownerId      String
+  projectRefId String?
+  ownerRefId   String?
+  revision     Int                    @default(0)
+  forest       Json
+  project      Project?               @relation(fields: [projectRefId], references: [id], onDelete: SetNull)
+  owner        User?                  @relation(fields: [ownerRefId], references: [id], onDelete: SetNull)
+  versions     ArticleDraftRevision[]
+
+  @@id([projectId, ownerId])
+}
+
+// Retained for preservation only; no history disclosure or restore API.
+model ArticleDraftRevision {
+  projectId String
+  ownerId   String
+  revision  Int
+  forest    Json
+  createdAt DateTime          @default(now())
+  space     ArticleDraftSpace @relation(fields: [projectId, ownerId], references: [projectId, ownerId], onDelete: Restrict)
+
+  @@id([projectId, ownerId, revision])
+}
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -169,6 +385,7 @@ enum TemplateObjectCleanupStatus {
 }
 
 model Workspace {
+  taskCreations              TaskCreationReceipt[]
   projectCreationSubmissions ProjectCreationSubmission[]
   authorizationRevision      Int                                 @default(0)
   id                         String                              @id @default(uuid())
@@ -242,8 +459,21 @@ model TelegramSession {
 }
 
 model User {
+  articleDraftSpaces        ArticleDraftSpace[]
+  customStatusText          String?                           @db.VarChar(300)
+  customStatusEmoji         String?                           @db.VarChar(32)
+  customStatusExpiresAt     DateTime?                         @db.Timestamptz(3)
+  avatarAssetId             String?                           @unique
+  avatarAsset               ProfileAvatarAsset?               @relation("activeProfileAvatar", fields: [avatarAssetId], references: [id], onDelete: SetNull)
+  avatarUploads             ProfileAvatarAsset[]              @relation("profileAvatarOwner")
+  profileRevision           Int                               @default(0)
+  profileSaves              ProfileSaveReceipt[]
+  manualProfileStatus       ManualProfileStatus?
+  taskCreations             TaskCreationReceipt[]
   chatGroupsCreated         ChatGroup[]                       @relation("chatGroupCreator")
   chatGroupsOwned           ChatGroup[]                       @relation("chatGroupOwner")
+  chatGroupMessages         ChatGroupMessage[]
+  chatGroupReactions        ChatGroupMessageReaction[]
   chatGroupCreations        ChatGroupCreation[]
   humanTaskAssignments      TaskAssignee[]
   humanChecklistAssignments TaskChecklistItem[]               @relation("humanChecklistAssignee")
@@ -287,19 +517,114 @@ model User {
   projectDeletionAudits     ProjectDeletionAudit[]            @relation("projectDeletionOwner")
   roleAssignments           UserRoleAssignment[]              @relation("userRoleAssignments")
   roleAssignmentsMade       UserRoleAssignment[]              @relation("roleAssignmentCreator")
+  chatGroupMemberships      ChatGroupMembership[]
+  groupInvitationsSent      ChatGroupInvitation[]             @relation("groupInvitationSender")
+  groupInvitationsReceived  ChatGroupInvitation[]             @relation("groupInvitationRecipient")
+  directConversationsLower  HumanDirectConversation[]         @relation("directConversationLower")
+  directConversationsUpper  HumanDirectConversation[]         @relation("directConversationUpper")
 
   @@unique([id, workspaceId])
 }
 
+enum ProfileAvatarState {
+  UPLOADING
+  STAGED
+  ACTIVE
+  DELETE_PENDING
+  DELETING
+  DELETED
+}
+
+model ProfileAvatarAsset {
+  id            String             @id @default(uuid())
+  ownerId       String
+  owner         User               @relation("profileAvatarOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  activeFor     User?              @relation("activeProfileAvatar")
+  requestId     String
+  inputHash     String
+  objectKey     String             @unique
+  sha256        String
+  size          Int
+  width         Int
+  height        Int
+  state         ProfileAvatarState @default(UPLOADING)
+  expiresAt     DateTime
+  uploadedAt    DateTime?
+  attempts      Int                @default(0)
+  nextAttemptAt DateTime           @default(now())
+  lastErrorCode String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@unique([ownerId, requestId])
+  @@index([state, nextAttemptAt, expiresAt])
+}
+
+// Private acknowledgments only: never a snapshot of historical profile content.
+model ProfileSaveReceipt {
+  ownerId          String
+  owner            User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  requestId        String
+  workspaceId      String
+  actorId          String
+  inputHash        String
+  expectedRevision Int
+  revision         Int
+  statusRequestId  String?  @unique
+  createdAt        DateTime @default(now())
+
+  @@id([ownerId, requestId])
+}
+
+enum ManualAvailability {
+  AVAILABLE
+  AWAY
+  BUSY
+}
+
+model ManualProfileStatus {
+  ownerId      String                        @id
+  owner        User                          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  availability ManualAvailability?
+  revision     Int                           @default(0)
+  mutations    ManualProfileStatusMutation[]
+}
+
+model ManualProfileStatusMutation {
+  ownerId          String
+  requestId        String
+  status           ManualProfileStatus @relation(fields: [ownerId], references: [ownerId], onDelete: Cascade)
+  workspaceId      String
+  actorId          String
+  expectedRevision Int
+  revision         Int
+  before           ManualAvailability?
+  availability     ManualAvailability?
+  createdAt        DateTime            @default(now())
+
+  @@id([ownerId, requestId])
+  @@unique([ownerId, revision])
+}
+
 model ChatGroup {
-  id        String             @id @default(uuid())
-  name      String             @db.VarChar(120)
-  creatorId String
-  ownerId   String
-  creator   User               @relation("chatGroupCreator", fields: [creatorId], references: [id], onDelete: Restrict)
-  owner     User               @relation("chatGroupOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  createdAt DateTime           @default(now())
-  creation  ChatGroupCreation?
+  id                    String                          @id @default(uuid())
+  name                  String                          @db.VarChar(120)
+  creatorId             String
+  ownerId               String
+  creator               User                            @relation("chatGroupCreator", fields: [creatorId], references: [id], onDelete: Restrict)
+  owner                 User                            @relation("chatGroupOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  createdAt             DateTime                        @default(now())
+  creation              ChatGroupCreation?
+  permissionRevision    Int                             @default(0)
+  membersCanSend        Boolean                         @default(true)
+  sendingRevision       Int                             @default(0)
+  lastMessageSequence   Int                             @default(0)
+  messages              ChatGroupMessage[]
+  sendingAudits         ChatGroupSendingAudit[]
+  memberships           ChatGroupMembership[]
+  invitationPermissions ChatGroupInvitationPermission[]
+  permissionAudits      ChatGroupPermissionAudit[]
+  invitations           ChatGroupInvitation[]
 
   @@index([creatorId, createdAt])
 }
@@ -316,6 +641,166 @@ model ChatGroupCreation {
   group          ChatGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
 
   @@id([creatorId, requestId])
+}
+
+model ChatGroupMessage {
+  reactions ChatGroupMessageReaction[]
+  // Null is the existing unthreaded partition. No topic-management API is implied.
+  topicId   String?                    @db.Uuid
+  id        String                     @id @default(uuid())
+  groupId   String
+  authorId  String
+  requestId String
+  text      String                     @db.VarChar(4000)
+  sequence  Int
+  createdAt DateTime                   @default(now())
+  group     ChatGroup                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  author    User                       @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, authorId, requestId])
+  @@unique([groupId, sequence])
+  @@index([groupId, topicId, sequence])
+}
+
+model ChatGroupMessageReaction {
+  messageId String
+  accountId String
+  emoji     String           @db.VarChar(64)
+  createdAt DateTime         @default(now())
+  message   ChatGroupMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  account   User             @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@id([messageId, accountId, emoji])
+  @@index([messageId, emoji])
+}
+
+model ChatGroupSendingAudit {
+  id             String    @id @default(uuid())
+  groupId        String
+  actorId        String
+  membersCanSend Boolean
+  revision       Int
+  createdAt      DateTime  @default(now())
+  group          ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, revision])
+}
+
+enum GroupHistoryAccess {
+  NONE
+  LAST_100
+  LAST_300
+  ALL
+}
+
+enum GroupInviteMode {
+  DIRECT
+  APPROVABLE
+}
+
+enum GroupInvitationStatus {
+  PENDING
+  ADDED
+  ACCEPTED
+  DECLINED
+}
+
+model ChatGroupMembership {
+  historyEpoch          String?
+  historyCutoffSequence Int?
+  historyBoundaries     ChatGroupHistoryBoundary[]
+  groupId               String
+  accountId             String
+  historyAccess         GroupHistoryAccess         @default(NONE)
+  joinedAt              DateTime                   @default(now())
+  invitationId          String?                    @unique
+  group                 ChatGroup                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  account               User                       @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@id([groupId, accountId])
+  @@index([accountId, groupId])
+}
+
+model ChatGroupHistoryBoundary {
+  groupId       String
+  accountId     String
+  // MAIN denotes null topicId; other keys are canonical topic UUIDs.
+  topicKey      String
+  firstSequence Int
+  membership    ChatGroupMembership @relation(fields: [groupId, accountId], references: [groupId, accountId], onDelete: Cascade)
+
+  @@id([groupId, accountId, topicKey])
+}
+
+model ChatGroupInvitationPermission {
+  groupId     String
+  accountId   String
+  canInvite   Boolean
+  grantedById String
+  updatedAt   DateTime  @updatedAt
+  group       ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, accountId])
+}
+
+model ChatGroupPermissionAudit {
+  id        String    @id @default(uuid())
+  groupId   String
+  actorId   String
+  accountId String
+  canInvite Boolean
+  revision  Int
+  createdAt DateTime  @default(now())
+  group     ChatGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, revision])
+}
+
+model ChatGroupInvitation {
+  id               String                @id @default(uuid())
+  groupId          String
+  initialGroupName String                @db.VarChar(120)
+  inviterId        String
+  recipientId      String
+  requestId        String
+  inputHash        String                @db.VarChar(64)
+  mode             GroupInviteMode
+  historyAccess    GroupHistoryAccess    @default(NONE)
+  status           GroupInvitationStatus
+  createdAt        DateTime              @default(now())
+  resolvedAt       DateTime?
+  group            ChatGroup             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviter          User                  @relation("groupInvitationSender", fields: [inviterId], references: [id], onDelete: Restrict)
+  recipient        User                  @relation("groupInvitationRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+  card             DirectInvitationCard?
+
+  @@unique([inviterId, requestId])
+  @@index([groupId, recipientId, status])
+}
+
+model HumanDirectConversation {
+  id             String                 @id @default(uuid())
+  lowerAccountId String
+  upperAccountId String
+  lastSequence   Int                    @default(0)
+  createdAt      DateTime               @default(now())
+  lowerAccount   User                   @relation("directConversationLower", fields: [lowerAccountId], references: [id], onDelete: Restrict)
+  upperAccount   User                   @relation("directConversationUpper", fields: [upperAccountId], references: [id], onDelete: Restrict)
+  cards          DirectInvitationCard[]
+
+  @@unique([lowerAccountId, upperAccountId])
+}
+
+model DirectInvitationCard {
+  id             String                  @id @default(uuid())
+  conversationId String
+  invitationId   String                  @unique
+  sequence       Int
+  createdAt      DateTime                @default(now())
+  conversation   HumanDirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  invitation     ChatGroupInvitation     @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, sequence])
 }
 
 model Permission {
@@ -409,52 +894,94 @@ model AuthOtp {
 }
 
 model SessionToken {
-  id         String              @id @default(uuid())
-  userId     String
-  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  purpose    SessionTokenPurpose
-  tokenHash  String              @unique
-  expiresAt  DateTime
-  revokedAt  DateTime?
-  consumedAt DateTime?
-  createdAt  DateTime            @default(now())
+  browserSessions BrowserSession[]
+  id              String              @id @default(uuid())
+  userId          String
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose         SessionTokenPurpose
+  tokenHash       String              @unique
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  consumedAt      DateTime?
+  createdAt       DateTime            @default(now())
 
   @@index([userId, purpose, expiresAt])
 }
 
+// Opaque browser IDs are hashed. Token/CSRF bundles use independent AEAD encryption.
+model BrowserSession {
+  id                String        @id
+  userId            String?
+  workspaceId       String?
+  refreshId         String?
+  refresh           SessionToken? @relation(fields: [refreshId], references: [id], onDelete: Cascade)
+  bundle            String
+  csrfHash          String
+  createdAt         DateTime      @default(now())
+  idleExpiresAt     DateTime
+  absoluteExpiresAt DateTime
+  revokedAt         DateTime?
+
+  @@index([absoluteExpiresAt])
+  @@index([refreshId])
+}
+
 model Task {
-  humanState  TaskHumanState?
-  assignees   TaskAssignee[]
-  checklist   TaskChecklistItem[]
-  comments    TaskComment[]
-  deadline    TaskDeadline?
-  boardEntry  TaskBoardEntry?
-  id          String              @id @default(uuid())
-  workspaceId String
-  workspace   Workspace           @relation(fields: [workspaceId], references: [id])
-  title       String
-  description String
-  criteria    String?
-  status      TaskStatus          @default(QUEUED)
-  creatorId   String
-  creator     User                @relation("taskCreator", fields: [creatorId], references: [id])
-  managerId   String
-  manager     User                @relation("taskManager", fields: [managerId], references: [id])
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  sessions    ProboxAiSession[]
+  creationReceipt TaskCreationReceipt?
+  humanState      TaskHumanState?
+  assignees       TaskAssignee[]
+  checklist       TaskChecklistItem[]
+  comments        TaskComment[]
+  deadline        TaskDeadline?
+  boardEntry      TaskBoardEntry?
+  sharedEntries   TaskSharedBoardEntry[]
+  id              String                 @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace              @relation(fields: [workspaceId], references: [id])
+  title           String
+  description     String
+  criteria        String?
+  status          TaskStatus             @default(QUEUED)
+  creatorId       String
+  creator         User                   @relation("taskCreator", fields: [creatorId], references: [id])
+  managerId       String
+  manager         User                   @relation("taskManager", fields: [managerId], references: [id])
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  sessions        ProboxAiSession[]
 
   @@index([workspaceId, status])
   @@index([managerId, status])
 }
 
+model TaskCreationReceipt {
+  workspaceId String
+  creatorId   String
+  requestId   String
+  taskId      String    @unique
+  inputHash   String    @db.VarChar(64)
+  outcome     Json
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  creator     User      @relation(fields: [creatorId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, creatorId, requestId])
+}
+
 model TaskHumanState {
-  priority  TaskPriority?
-  taskId    String           @id
-  task      Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  revision  Int              @default(0)
-  updatedAt DateTime         @default(now()) @updatedAt
-  audits    TaskHumanAudit[]
+  archivedAt        DateTime?
+  deletedAt         DateTime?
+  completed         Boolean?
+  completedById     String?
+  completedAt       DateTime?
+  priority          TaskPriority?
+  taskId            String                 @id
+  task              Task                   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  revision          Int                    @default(0)
+  updatedAt         DateTime               @default(now()) @updatedAt
+  audits            TaskHumanAudit[]
+  sharingOperations TaskSharingOperation[]
 }
 
 model TaskAssignee {
@@ -469,19 +996,24 @@ model TaskAssignee {
 }
 
 model TaskChecklistItem {
-  id            String    @id @default(uuid())
-  taskId        String
-  task          Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  assigneeId    String
-  assignee      User      @relation("humanChecklistAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
-  title         String
-  position      Int
-  completed     Boolean   @default(false)
-  completedById String?
-  completedAt   DateTime?
-  deadline      Json?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  // Null retains the original side for legacy writers/items. No project identity is public.
+  sectionBoardId String?
+  parentId       String?
+  parent         TaskChecklistItem?  @relation("checklistTree", fields: [parentId], references: [id], onDelete: NoAction)
+  children       TaskChecklistItem[] @relation("checklistTree")
+  id             String              @id @default(uuid())
+  taskId         String
+  task           Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  assigneeId     String
+  assignee       User                @relation("humanChecklistAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+  title          String
+  position       Int
+  completed      Boolean             @default(false)
+  completedById  String?
+  completedAt    DateTime?
+  deadline       Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
   @@unique([taskId, position])
 }
@@ -541,6 +1073,8 @@ model TaskDeadlineAudit {
 }
 
 model Project {
+  articleReviews            ArticleReview[]
+  articleDraftSpaces        ArticleDraftSpace[]
   archivedAt                DateTime?
   archiveRevision           Int                               @default(0)
   archiveOperations         ProjectArchiveOperation[]
@@ -609,13 +1143,14 @@ model TaskBoard {
 }
 
 model TaskBoardStatus {
-  id       String           @id @default(dbgenerated("(gen_random_uuid())::text"))
-  boardId  String
-  board    TaskBoard        @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  name     String
-  color    String
-  position Int
-  entries  TaskBoardEntry[]
+  id            String                 @id @default(dbgenerated("(gen_random_uuid())::text"))
+  boardId       String
+  board         TaskBoard              @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  name          String
+  color         String
+  position      Int
+  entries       TaskBoardEntry[]
+  sharedEntries TaskSharedBoardEntry[]
 
   @@unique([boardId, id])
   @@unique([boardId, position])
@@ -630,6 +1165,37 @@ model TaskBoardEntry {
   status   TaskBoardStatus @relation(fields: [boardId, statusId], references: [boardId, id], onDelete: Restrict)
 
   @@index([boardId, statusId])
+}
+
+// Additional explicit associations preserve the existing original board/execution context.
+model TaskSharedBoardEntry {
+  taskId      String
+  task        Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  boardId     String
+  statusId    String
+  status      TaskBoardStatus @relation(fields: [boardId, statusId], references: [boardId, id], onDelete: Restrict)
+  createdById String
+  createdAt   DateTime        @default(now())
+
+  @@id([taskId, boardId])
+  @@index([boardId, statusId])
+}
+
+model TaskSharingOperation {
+  taskId          String
+  state           TaskHumanState @relation(fields: [taskId], references: [taskId], onDelete: Cascade)
+  requestId       String
+  actorId         String
+  projectId       String
+  targetProjectId String?
+  action          String
+  revision        Int
+  inputHash       String
+  outcome         Json
+  createdAt       DateTime       @default(now())
+
+  @@id([taskId, requestId])
+  @@unique([taskId, revision])
 }
 
 model TaskBoardAudit {
@@ -665,25 +1231,42 @@ model ProjectProtectedFileType {
 }
 
 model ProjectFileTrashItem {
-  id             String                 @id @default(uuid())
+  id             String                     @id @default(uuid())
   projectId      String
-  project        Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project        Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   originalPath   String
   trashPath      String
   isDirectory    Boolean
   deletedById    String
-  deletedBy      User                   @relation("fileTrashCreator", fields: [deletedById], references: [id])
-  status         ProjectFileTrashStatus @default(ACTIVE)
+  deletedBy      User                       @relation("fileTrashCreator", fields: [deletedById], references: [id])
+  status         ProjectFileTrashStatus     @default(ACTIVE)
   expiresAt      DateTime
   leaseOwner     String?
   leaseExpiresAt DateTime?
   lastError      String?
-  createdAt      DateTime               @default(now())
+  createdAt      DateTime                   @default(now())
   restoredAt     DateTime?
   purgedAt       DateTime?
+  recoveryToken  String?
+  recoveries     ProjectFileTrashRecovery[]
 
   @@unique([projectId, trashPath])
   @@index([status, expiresAt])
+}
+
+model ProjectFileTrashRecovery {
+  id             String               @id @default(uuid())
+  trashId        String
+  trash          ProjectFileTrashItem @relation(fields: [trashId], references: [id], onDelete: Cascade)
+  action         String
+  state          String               @default("STARTED")
+  errorCode      String?
+  sourceIdentity String?
+  contentHash    String?
+  createdAt      DateTime             @default(now())
+  finishedAt     DateTime?
+
+  @@index([trashId, createdAt])
 }
 
 model ProjectFileDeletionConfirmation {
@@ -933,6 +1516,13 @@ model TemplateObjectCleanup {
 }
 
 model ProboxAiSession {
+  creationRequestId         String?
+  creationInputHash         String?           @db.VarChar(64)
+  creationInitialTurnId     String?
+  creationAcceptedAt        DateTime?
+  runtimeProvenance         Json?
+  dispatchAttempts          Int               @default(0)
+  lastDispatchAt            DateTime?
   selectedProjectId         String?
   interruptTurnId           String?
   runOwner                  String?
@@ -972,12 +1562,18 @@ model ProboxAiSession {
   approvals                 ApprovalRequest[]
   telegram                  TelegramSession?
 
+  @@unique([creatorId, creationRequestId])
   @@index([taskId, createdAt])
   @@index([status, createdAt])
   @@index([runLeaseExpiresAt])
+  @@index([status, runLeaseExpiresAt, createdAt])
 }
 
 model ProboxAiTurn {
+  durableDispatch     Boolean         @default(false)
+  encryptedPrompt     String?
+  inputHash           String?         @db.VarChar(64)
+  usageProvenance     Json?
   executionPermission String?
   requestId           String?
   requestedById       String?
@@ -997,21 +1593,26 @@ model ProboxAiTurn {
 
   @@unique([sessionId, requestId])
   @@index([sessionId, startedAt])
+  @@index([sessionId, startedAt, id])
+  @@index([durableDispatch, status, executionStartedAt, sessionId], map: "ProboxAiTurn_durableDispatch_status_executionStartedAt_session_")
 }
 
 model SessionEvent {
-  projectionVersion Int             @default(0)
-  id                String          @id @default(uuid())
-  sessionId         String
-  session           ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  turnId            String?
-  sequence          Int
-  type              String
-  itemType          String?
-  rawPayload        Json
-  payloadHash       String
-  previousHash      String?
-  createdAt         DateTime        @default(now())
+  archivePayload       Json?
+  archiveHash          String?         @db.VarChar(64)
+  archivePolicyVersion Int?
+  projectionVersion    Int             @default(0)
+  id                   String          @id @default(uuid())
+  sessionId            String
+  session              ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  turnId               String?
+  sequence             Int
+  type                 String
+  itemType             String?
+  rawPayload           Json
+  payloadHash          String
+  previousHash         String?
+  createdAt            DateTime        @default(now())
 
   @@unique([sessionId, sequence])
   @@index([sessionId, createdAt])

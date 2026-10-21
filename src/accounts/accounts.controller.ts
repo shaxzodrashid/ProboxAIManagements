@@ -33,6 +33,7 @@ import {
   UserResponseDto,
   SelfProfileResponseDto,
   UpdateSelfProfileDto,
+  ProfileQueryDto,
 } from "./accounts.dto";
 import { AccountsService } from "./accounts.service";
 import {
@@ -48,6 +49,7 @@ import {
   ApiValidationErrors,
 } from "../openapi/api-docs";
 import { Permissions } from "../authorization/permission.catalog";
+import { ApiReadAvailability } from "../openapi/api-docs";
 
 @Controller()
 @ApiTags("Users")
@@ -58,22 +60,28 @@ export class AccountsController {
     private readonly bot: TelegramBotService,
   ) {}
   @Get("users/me")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @UseGuards(JwtAuthGuard)
   @ApiAccessToken()
   @ApiOperation({
     summary: "Read your own profile",
     description:
-      "Available to every authenticated OPEN account, including accounts with no permissions. Identity and workspace come from current persisted authentication. No other user's profile is returned.",
+      "Available to every authenticated OPEN account, including accounts with no permissions. Identity and workspace come from current persisted authentication. No query parameters or other-owner selectors are accepted.",
   })
   @ApiOkResponse({ type: SelfProfileResponseDto })
   @ApiAuthenticationErrors()
   @ApiResourceErrors()
-  self(@CurrentUser() user: AuthenticatedUser) {
+  @ApiValidationErrors()
+  self(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() _query: ProfileQueryDto,
+  ) {
     return this.accounts.self(user.workspaceId, user.id);
   }
 
   @Get("users/me/telegram-link")
+  @ApiReadAvailability()
   @Header("Cache-Control", "no-store")
   @UseGuards(JwtAuthGuard)
   @ApiAccessToken()
@@ -100,7 +108,7 @@ export class AccountsController {
   @ApiOperation({
     summary: "Update your own names, bio and birth date",
     description:
-      "Allowlisted partial update; unknown fields are rejected. Omitted fields retain values, null clears individual components. Name changes must leave one nonempty component; bio-only and empty updates preserve legacy names. No phone, username, role, permissions, lifecycle or membership editing. Concurrent name changes may return 409; reread before retrying.",
+      "Allowlisted partial update; unknown body fields and all query parameters are rejected. Omitted fields retain values, null clears individual components. Name changes must leave one nonempty component; bio-only and empty updates preserve legacy names. No phone, username, role, permissions, lifecycle or membership editing. Concurrent name changes may return 409; reread before retrying.",
   })
   @ApiOkResponse({ type: SelfProfileResponseDto })
   @ApiConflictResponse({
@@ -113,10 +121,12 @@ export class AccountsController {
   updateSelf(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateSelfProfileDto,
+    @Query() _query: ProfileQueryDto,
   ) {
     return this.accounts.updateSelf(user.workspaceId, user.id, dto);
   }
   @Get("users")
+  @ApiReadAvailability()
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions(Permissions.USERS_READ)
   @ApiAccessToken()
@@ -230,7 +240,10 @@ export class AccountsController {
       },
     },
   })
-  @ApiOkResponse({ description: "Update accepted or safely ignored." })
+  @ApiOkResponse({
+    description:
+      "Empty HTTP200 response body, including safely ignored/irrelevant updates and invalid webhook secrets. This transport acknowledgment is not proof of dispatch, delivery or read state; no JSON acknowledgment object is returned.",
+  })
   async webhook(
     @Headers("x-telegram-bot-api-secret-token") secret: string | undefined,
     @Body() update: any,

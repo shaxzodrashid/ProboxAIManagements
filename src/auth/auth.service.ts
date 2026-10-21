@@ -29,6 +29,7 @@ import { TelegramService } from "../telegram/telegram.service";
 import {
   authenticationUnavailable,
   authenticationDependency,
+  loginDependency,
 } from "./authentication-failures";
 import {
   AuthLocale,
@@ -121,9 +122,11 @@ export class AuthService {
     return { message: "Registration completed successfully." };
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, db: Prisma.TransactionClient = this.prisma) {
     const username = normalizeUsername(dto.username);
-    const user = await this.prisma.user.findUnique({ where: { username } });
+    const user = await loginDependency(() =>
+      db.user.findUnique({ where: { username } }),
+    );
     const passwordMatches = user?.passwordHash
       ? await this.verifyPassword(dto.password, user.passwordHash)
       : await this.performDummyPasswordCheck(dto.password);
@@ -136,23 +139,28 @@ export class AuthService {
       throw new UnauthorizedException("Invalid username or password");
 
     const refreshToken = randomToken();
-    await this.prisma.sessionToken.create({
-      data: {
-        userId: user.id,
-        purpose: SessionTokenPurpose.REFRESH,
-        tokenHash: hashToken(refreshToken),
-        expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
-      },
-    });
+    await loginDependency(() =>
+      db.sessionToken.create({
+        data: {
+          userId: user.id,
+          purpose: SessionTokenPurpose.REFRESH,
+          tokenHash: hashToken(refreshToken),
+          expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+        },
+      }),
+    );
     return {
       accessToken: this.signAccessToken(user),
       refreshToken,
     };
   }
 
-  async refresh(refreshToken: string) {
+  async refresh(
+    refreshToken: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
     const token = await authenticationDependency(() =>
-      this.prisma.sessionToken.findUnique({
+      db.sessionToken.findUnique({
         where: { tokenHash: hashToken(refreshToken) },
         include: { user: true },
       }),

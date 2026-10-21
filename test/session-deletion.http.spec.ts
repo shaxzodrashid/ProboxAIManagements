@@ -4,7 +4,8 @@ import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { JwtService } from "@nestjs/jwt";
 import { PrismaClient } from "@prisma/client";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { listSessions } from "../src/sessions/session-list";
 import { request as httpRequest } from "node:http";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
@@ -244,7 +245,12 @@ async function until(fn: () => Promise<boolean>) {
       await prisma.projectDeletionAudit.deleteMany({
         where: { ownerId: owner },
       });
-      await prisma.project.deleteMany({ where: { workspaceId: w } });
+      await prisma.taskBoardEntry.deleteMany({
+        where: { task: { workspaceId: { in: [w, foreignW] } } },
+      });
+      await prisma.project.deleteMany({
+        where: { workspaceId: { in: [w, foreignW] } },
+      });
       await prisma.task.deleteMany({
         where: { workspaceId: { in: [w, foreignW] } },
       });
@@ -294,6 +300,431 @@ async function until(fn: () => Promise<boolean>) {
           ...input,
         },
       });
+    const linkListedTask = async (id = taskId, selectedProject = projectId) => {
+      const board = await prisma.taskBoard.findUniqueOrThrow({
+        where: { projectId: selectedProject },
+        include: { statuses: { orderBy: { position: "asc" } } },
+      });
+      const statusId = board.statuses[0]?.id;
+      if (!statusId)
+        throw new Error("Fixture project has no default board status");
+      return prisma.taskBoardEntry.create({
+        data: {
+          taskId: id,
+          boardId: board.id,
+          statusId,
+        },
+      });
+    };
+    it("returns narrow project task identity without task-read grants or global metadata expansion", async () => {
+      await linkListedTask();
+      await prisma.rolePermission.deleteMany({
+        where: { roleId, permissionKey: { not: "sessions.read" } },
+      });
+      await prisma.task.update({
+        where: { id: taskId },
+        data: {
+          title: "Task 😀 public title",
+          description: "PRIVATE DESCRIPTION",
+          criteria: "PRIVATE CRITERIA",
+        },
+      });
+      const result = await sessionList(
+        "?projectId=" + projectId.toUpperCase(),
+      ).expect(200);
+      expect(result.body.items[0].task).toEqual({
+        id: taskId,
+        title: "Task 😀 public title",
+        projectId,
+      });
+      expect(Object.keys(result.body.items[0].task).sort()).toEqual([
+        "id",
+        "projectId",
+        "title",
+      ]);
+      expect(JSON.stringify(result.body)).not.toContain("PRIVATE");
+      for (const q of ["", "?taskId=" + taskId]) {
+        const legacy = await sessionList(q).expect(200);
+        expect(Object.keys(legacy.body.items[0]).sort()).toEqual([
+          "createdAt",
+          "id",
+          "status",
+          "stopConfirmation",
+          "taskId",
+          "updatedAt",
+        ]);
+      }
+      expect(runner.start).not.toHaveBeenCalled();
+    });
+    it("refreshes project task titles between session pages without changing session order or saved execution context", async () => {
+      await linkListedTask();
+      const older = await addListedSession({
+        createdAt: new Date("2026-10-01T00:00:00Z"),
+      });
+      const before = await prisma.proboxAiSession.findUniqueOrThrow({
+        where: { id: older.id },
+      });
+      const first = (
+        await sessionList(`?projectId=${projectId}&limit=1`).expect(200)
+      ).body;
+      const title = "Renamed after first page";
+      await prisma.task.update({ where: { id: taskId }, data: { title } });
+      const next = (
+        await sessionList(
+          `?projectId=${projectId}&limit=1&cursor=${first.nextCursor}`,
+        ).expect(200)
+      ).body;
+      expect(next.items[0].id).toBe(older.id);
+      expect(next.items[0].task).toEqual({ id: taskId, title, projectId });
+      expect(next.asOf).toBe(first.asOf);
+      expect(next.hasMore).toBe(false);
+      expect(
+        await prisma.proboxAiSession.findUniqueOrThrow({
+          where: { id: older.id },
+        }),
+      ).toEqual(before);
+    });
+    it("maps each project session to its own task identity and excludes an unassigned task title", async () => {
+      await linkListedTask();
+      const title = "Second linked task";
+      const other = await prisma.task.create({
+        data: {
+          workspaceId: w,
+          creatorId: owner,
+          managerId: owner,
+          title,
+          description: "PRIVATE",
+        },
+      });
+      await linkListedTask(other.id);
+      const otherSession = await addListedSession({ taskId: other.id });
+      const excluded = await prisma.task.create({
+        data: {
+          workspaceId: w,
+          creatorId: owner,
+          managerId: member,
+          title: "UNASSIGNED PRIVATE TITLE",
+          description: "PRIVATE",
+        },
+      });
+      await linkListedTask(excluded.id);
+      await addListedSession({ taskId: excluded.id });
+      const result = (await sessionList("?projectId=" + projectId).expect(200))
+        .body;
+      expect(result.items).toHaveLength(2);
+      expect(
+        result.items.find((i: any) => i.id === otherSession.id).task,
+      ).toEqual({ id: other.id, title, projectId });
+      const original = await prisma.task.findUniqueOrThrow({
+        where: { id: taskId },
+      });
+      expect(result.items.find((i: any) => i.id === sessionId).task).toEqual({
+        id: taskId,
+        title: original.title,
+        projectId,
+      });
+      expect(JSON.stringify(result)).not.toContain("UNASSIGNED PRIVATE TITLE");
+    });
+    it.each(["dependency", "missing"])(
+      "fails project task hydration safely on %s failure",
+      async (failure) => {
+        await linkListedTask();
+        const client = prisma.$extends({
+          query: {
+            task: {
+              findMany: async () => {
+                if (failure === "dependency")
+                  throw new Error("PRIVATE DATABASE SECRET");
+                return [];
+              },
+            },
+          },
+        });
+        const response = await listSessions(
+          client as any,
+          { id: owner, workspaceId: w, roles: [], permissions: [] },
+          { projectId, limit: 1 },
+        ).catch((error) => error.getResponse());
+        expect(response).toEqual({
+          code: "SESSION_LIST_UNAVAILABLE",
+          message: "Session list unavailable; retry an authorized fresh read",
+        });
+      },
+    );
+    it("filters by explicit task-board project without confusing saved execution context or latest sessions", async () => {
+      await linkListedTask();
+      const older = await addListedSession({
+        createdAt: new Date("2026-10-01T00:00:00Z"),
+      });
+      const otherProject = await prisma.project.create({
+        data: {
+          workspaceId: w,
+          departmentId,
+          name: "Other project",
+          directoryName: randomUUID(),
+          creatorId: owner,
+          members: { create: { userId: owner } },
+        },
+      });
+      const otherTask = await prisma.task.create({
+        data: {
+          workspaceId: w,
+          title: "Other task",
+          description: "Private",
+          creatorId: owner,
+          managerId: owner,
+        },
+      });
+      await linkListedTask(otherTask.id, otherProject.id);
+      await addListedSession({
+        taskId: otherTask.id,
+        selectedProjectId: projectId,
+      });
+      const unlinkedTask = await prisma.task.create({
+        data: {
+          workspaceId: w,
+          title: "Unlinked",
+          description: "Private",
+          creatorId: owner,
+          managerId: owner,
+        },
+      });
+      await addListedSession({
+        taskId: unlinkedTask.id,
+        selectedProjectId: projectId,
+      });
+      await prisma.proboxAiSession.update({
+        where: { id: sessionId },
+        data: { selectedProjectId: otherProject.id },
+      });
+      const result = await sessionList("?projectId=" + projectId).expect(200);
+      expect(result.headers["cache-control"]).toBe("no-store");
+      expect(new Set(result.body.items.map((s: any) => s.id))).toEqual(
+        new Set([sessionId, older.id]),
+      );
+      for (const item of result.body.items)
+        expect(Object.keys(item).sort()).toEqual([
+          "createdAt",
+          "id",
+          "status",
+          "stopConfirmation",
+          "task",
+          "taskId",
+          "updatedAt",
+        ]);
+      expect(
+        (
+          await sessionList(`?projectId=${projectId}&statuses=RUNNING`).expect(
+            200,
+          )
+        ).body.items.map((s: any) => s.id),
+      ).toEqual([older.id]);
+      expect(
+        (
+          await sessionList(
+            `?projectId=${projectId}&taskId=${otherTask.id}`,
+          ).expect(200)
+        ).body.items,
+      ).toEqual([]);
+      expect(runner.start).not.toHaveBeenCalled();
+    });
+    it("requires project membership in addition to assignment and sessions.read, with no broad-grant bypass", async () => {
+      await linkListedTask();
+      const assignedElsewhere = await prisma.task.create({
+        data: {
+          workspaceId: w,
+          title: "Assigned elsewhere",
+          description: "Private",
+          creatorId: owner,
+          managerId: outsider,
+        },
+      });
+      await linkListedTask(assignedElsewhere.id);
+      const outsiderSession = await addListedSession({
+        taskId: assignedElsewhere.id,
+        creatorId: outsider,
+      });
+      expect(
+        (await sessionList("", outsider).expect(200)).body.items.map(
+          (s: any) => s.id,
+        ),
+      ).toContain(outsiderSession.id);
+      for (const key of [
+        "projects.read-all",
+        "projects.manage-all",
+        "tasks.read-all",
+      ]) {
+        await prisma.permission.upsert({
+          where: { key },
+          update: {},
+          create: { key, name: key, description: "Test", category: "test" },
+        });
+        await prisma.rolePermission.create({
+          data: { roleId, permissionKey: key },
+        });
+      }
+      expect(
+        (await sessionList("?projectId=" + projectId, outsider).expect(200))
+          .body.items,
+      ).toEqual([]);
+      expect(
+        (await sessionList("?projectId=" + projectId, member).expect(200)).body
+          .items,
+      ).toEqual([]);
+      expect(
+        (await sessionList("?projectId=" + randomUUID()).expect(200)).body
+          .items,
+      ).toEqual([]);
+      await sessionList("?projectId=" + projectId, denied).expect(403);
+      await http()
+        .get("/sessions?projectId=" + projectId)
+        .expect(401);
+    });
+    it.each([
+      "membership",
+      "assignment",
+      "project workspace",
+      "task workspace",
+      "session workspace",
+      "board association",
+    ])(
+      "rechecks %s on each project-scoped page without exposing stale rows",
+      async (change) => {
+        await linkListedTask();
+        await addListedSession({ createdAt: new Date("2026-10-01T00:00:00Z") });
+        const first = (
+          await sessionList(`?projectId=${projectId}&limit=1`).expect(200)
+        ).body;
+        expect(first.hasMore).toBe(true);
+        if (change === "membership")
+          await prisma.projectMember.delete({
+            where: { projectId_userId: { projectId, userId: owner } },
+          });
+        if (change === "assignment")
+          await prisma.task.update({
+            where: { id: taskId },
+            data: { managerId: member },
+          });
+        if (change === "project workspace")
+          await prisma.project.update({
+            where: { id: projectId },
+            data: { workspaceId: foreignW },
+          });
+        if (change === "task workspace")
+          await prisma.task.update({
+            where: { id: taskId },
+            data: { workspaceId: foreignW },
+          });
+        if (change === "session workspace")
+          await prisma.proboxAiSession.updateMany({
+            where: { taskId },
+            data: { workspaceId: foreignW },
+          });
+        if (change === "board association")
+          await prisma.taskBoardEntry.delete({ where: { taskId } });
+        const next = (
+          await sessionList(
+            `?projectId=${projectId}&limit=1&cursor=${first.nextCursor}`,
+          ).expect(200)
+        ).body;
+        expect(next).toMatchObject({
+          items: [],
+          hasMore: false,
+          nextCursor: null,
+        });
+        expect(next.asOf).toBe(first.asOf);
+      },
+    );
+    it("binds project cursors to canonical project identity while retaining legacy unfiltered cursor scope", async () => {
+      await linkListedTask();
+      await addListedSession({ createdAt: new Date("2026-10-01T00:00:00Z") });
+      const first = (
+        await sessionList(`?projectId=${projectId}&limit=1`).expect(200)
+      ).body;
+      const upper = (
+        await sessionList(
+          `?projectId=${projectId.toUpperCase()}&cursor=${first.nextCursor}`,
+        ).expect(200)
+      ).body;
+      expect(upper.items).toHaveLength(1);
+      await sessionList("?cursor=" + first.nextCursor).expect(400);
+      await sessionList(
+        `?projectId=${randomUUID()}&cursor=${first.nextCursor}`,
+      ).expect(400);
+      await sessionList(
+        `?projectId=${projectId}&taskId=${taskId}&cursor=${first.nextCursor}`,
+      ).expect(400);
+      const global = (await sessionList("?limit=1").expect(200)).body;
+      expect(
+        JSON.parse(Buffer.from(global.nextCursor, "base64url").toString())
+          .scope,
+      ).toBe(
+        createHash("sha256")
+          .update(JSON.stringify([owner, w, null, []]))
+          .digest("hex"),
+      );
+      await sessionList(
+        `?projectId=${projectId}&cursor=${global.nextCursor}`,
+      ).expect(400);
+      await sessionList("?cursor=" + global.nextCursor).expect(200);
+    });
+    it("keeps archived project session history readable without enabling execution or broadening the projection", async () => {
+      await linkListedTask();
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { archivedAt: new Date() },
+      });
+      const response = await sessionList(
+        `?projectId=${projectId}&taskId=${taskId}`,
+      ).expect(200);
+      expect(response.body.items.map((s: any) => s.id)).toEqual([sessionId]);
+      expect(response.body.items[0]).not.toHaveProperty("selectedProjectId");
+      expect(runner.start).not.toHaveBeenCalled();
+    });
+    it("publishes and validates the optional project session filter with bounded task context", async () => {
+      for (const query of [
+        "?projectId=bad",
+        `?projectId=${projectId}&projectId=${projectId}`,
+        `?selectedProjectId=${projectId}`,
+      ])
+        await sessionList(query).expect(400);
+      const doc = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().build(),
+      );
+      expect(doc.paths["/sessions"]!.get!.parameters).toContainEqual(
+        expect.objectContaining({
+          name: "projectId",
+          in: "query",
+          required: false,
+        }),
+      );
+      expect(
+        Object.keys(
+          (doc.components!.schemas!.SessionListItemDto as any).properties,
+        ).sort(),
+      ).toEqual([
+        "createdAt",
+        "id",
+        "status",
+        "stopConfirmation",
+        "task",
+        "taskId",
+        "updatedAt",
+      ]);
+      const itemSchema: any = doc.components!.schemas!.SessionListItemDto;
+      expect(itemSchema.required).not.toContain("task");
+      expect(itemSchema.properties.task.allOf[0].$ref).toBe(
+        "#/components/schemas/SessionListTaskContextDto",
+      );
+      const taskSchema: any =
+        doc.components!.schemas!.SessionListTaskContextDto;
+      expect(Object.keys(taskSchema.properties).sort()).toEqual([
+        "id",
+        "projectId",
+        "title",
+      ]);
+    });
     it("lists every matching assigned session without latest-per-task loss or private details", async () => {
       const older = await addListedSession({
         createdAt: new Date("2026-10-01T00:00:00Z"),
@@ -475,7 +906,7 @@ async function until(fn: () => Promise<boolean>) {
         "?limit=",
         "?limit=1e2",
         "?taskId=bad",
-        "?projectId=" + projectId,
+        "?projectId=bad",
       ])
         await sessionList(query).expect(400);
     });
@@ -1423,7 +1854,8 @@ async function until(fn: () => Promise<boolean>) {
           item: {
             id: "tool_1",
             type: "command_execution",
-            command: "private command",
+            command: "pnpm test",
+            exit_code: 0,
             aggregated_output: "private output",
             status: "completed",
           },
@@ -1461,6 +1893,20 @@ async function until(fn: () => Promise<boolean>) {
         }),
       ).toEqual({ projectionVersion: 2 });
       expect(next.events[1].data.omissionReason).toBe("TOOL_DETAILS_EXCLUDED");
+      expect(next.events[1].data.commandDetails).toMatchObject({
+        commandLabel: "pnpm test",
+        exitCode: 0,
+        outputState: "OMITTED",
+        provisional: true,
+      });
+      const storedCommand = await prisma.sessionEvent.findFirstOrThrow({
+        where: { sessionId, sequence: 4 },
+      });
+      expect(storedCommand.projectionVersion).toBe(3);
+      expect(storedCommand.rawPayload).toEqual(next.events[1].data);
+      expect(JSON.stringify(storedCommand.rawPayload)).not.toMatch(
+        /private output|private raw line|aggregated_output/,
+      );
       expect(JSON.stringify(next)).not.toMatch(
         /private command|private output|private raw line|hidden|actor/,
       );
@@ -1597,13 +2043,18 @@ async function until(fn: () => Promise<boolean>) {
         "INTERRUPTED",
       );
     });
-    it("recovers accepted-but-unlaunched work without replay and permits a new deliberate request", async () => {
+    it("keeps legacy accepted-but-unlaunched work interrupted without replay", async () => {
       const launch = jest
         .spyOn(sessions as any, "launchAccepted")
         .mockImplementationOnce(() => undefined);
       const key = randomUUID();
       const accepted = (await postTurn(key).expect(202)).body;
       launch.mockRestore();
+      // Simulate an existing pre-protocol row: migration defaults do not opt it in.
+      await prisma.proboxAiTurn.update({
+        where: { id: accepted.turnId },
+        data: { durableDispatch: false },
+      });
       await prisma.proboxAiSession.update({
         where: { id: sessionId },
         data: { runLeaseExpiresAt: new Date(0) },
@@ -1853,13 +2304,26 @@ async function until(fn: () => Promise<boolean>) {
       await pending.get(sessionId)!.event({
         type: "item.completed",
         payload: {
-          item: { id: "answer", type: "agent_message", text: "Live answer" },
+          item: {
+            id: "command",
+            type: "command_execution",
+            command: "git diff --check",
+            status: "completed",
+            exit_code: 0,
+            aggregated_output: "private stream output",
+          },
         },
         rawLine: "raw",
       });
       await until(async () => events.length === 3);
       expect(events.map((e) => e.id)).toEqual(["1", "2", "3"]);
       expect(events[2].data).not.toHaveProperty("actor");
+      expect(events[2].data.data.commandDetails).toMatchObject({
+        commandLabel: "git diff --check",
+        exitCode: 0,
+        outputState: "OMITTED",
+      });
+      expect(JSON.stringify(events)).not.toContain("private stream output");
       const rest = (await eventHistory(owner, "?after=2").expect(200)).body;
       expect(JSON.parse(JSON.stringify(events[2].data))).toEqual(
         rest.events[0],
@@ -2419,10 +2883,12 @@ async function until(fn: () => Promise<boolean>) {
           "id",
           "status",
           "stopConfirmation",
+          "task",
           "taskId",
           "updatedAt",
         ],
       );
+      expect(schemas.SessionListItemDto.required).not.toContain("task");
       expect(schemas.RequestInterruptDto.required).toContain("turnId");
       expect(schemas.PersistedSessionEventDto.properties).toHaveProperty(
         "sequence",
@@ -2435,6 +2901,19 @@ async function until(fn: () => Promise<boolean>) {
         "SNAPSHOT",
         "UNVERIFIED_FRAME",
       ]);
+      expect(schemas.CommandDisclosureDto.properties.policy.enum).toEqual([
+        "STRICT_ALLOWLIST_V1",
+      ]);
+      expect(schemas.CommandDisclosureDto.properties.provisional.enum).toEqual([
+        true,
+      ]);
+      expect(schemas.CommandDisclosureDto.properties.outputState.enum).toEqual([
+        "OMITTED",
+      ]);
+      expect(
+        schemas.PersistedSessionEventDto.properties.data.properties
+          .commandDetails.allOf[0].$ref,
+      ).toContain("CommandDisclosureDto");
       expect(
         schemas.AssistantTextUpdateDto.properties.runCompletion.enum,
       ).toEqual(["USE_SERVER_STATE"]);

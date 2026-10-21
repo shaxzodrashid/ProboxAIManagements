@@ -253,8 +253,11 @@ export class TelegramSessionRelay implements OnModuleInit, OnModuleDestroy {
       await save();
       await this.telegram.sendMessage(
         binding.chatId,
-        `Session ${session.id.slice(0, 8)}: ${session.status.toLowerCase()}.\nSelect this session to continue, or /new for a fresh task.`,
-        new InlineKeyboard().text("Continue this session", `s:${session.id}`),
+        `Session ${session.id.slice(0, 8)}: ${session.status.toLowerCase()}.\nView the session and check Status before a follow-up. /new prepares a fresh task; it does not reopen this run.`,
+        new InlineKeyboard()
+          .text("View session", `s:${session.id}`)
+          .row()
+          .text("Menu", "home"),
       );
       await this.prisma.telegramSession.updateMany({
         where: {

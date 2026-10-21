@@ -285,10 +285,14 @@ if (url) {
           "description",
           "ownerId",
           "statusId",
+          "workflowStatus",
           "revision",
           "priority",
           "assigneeIds",
+          "assigneeIdentities",
           "checklist",
+          "checklistSections",
+          "lifecycle",
           "deadline",
           "projectArchivedAt",
           "createdAt",
@@ -788,9 +792,10 @@ if (url) {
           expect.objectContaining({ name: "lifecycle" }),
         ]),
       );
-      expect(doc.components!.schemas!.HumanTaskResponseDto).not.toHaveProperty(
-        "properties.criteria",
-      );
+      expect(doc.components!.schemas!.HumanTaskReadResponseDto).toBeDefined();
+      expect(
+        doc.components!.schemas!.HumanTaskReadResponseDto,
+      ).not.toHaveProperty("properties.criteria");
     });
   },
 );

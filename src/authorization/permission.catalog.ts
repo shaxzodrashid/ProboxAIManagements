@@ -1,4 +1,6 @@
 export const Permissions = {
+  ARTICLES_CREATE: "articles.create",
+  ARTICLES_EDIT: "articles.edit",
   AUTHORIZATION_READ: "authorization.read",
   AUTHORIZATION_MANAGE: "authorization.manage",
   USERS_READ: "users.read",
@@ -46,6 +48,18 @@ export const PermissionDefinitions: ReadonlyArray<{
   description: string;
   category: string;
 }> = [
+  permission(
+    Permissions.ARTICLES_CREATE,
+    "Create private article drafts",
+    "Create individual private drafts in currently owned or joined projects.",
+    "Articles",
+  ),
+  permission(
+    Permissions.ARTICLES_EDIT,
+    "Edit private article drafts",
+    "Edit and arrange only the caller's individual private drafts in currently owned or joined projects.",
+    "Articles",
+  ),
   permission(
     Permissions.TASK_DETAILS_MANAGE,
     "Edit owned human task details",
@@ -304,6 +318,8 @@ export const TaskManagerPermissionKeys: readonly PermissionKey[] = [
   Permissions.TASK_WORKFLOW_MOVE,
 ];
 export const ExplicitGrantPermissionKeys: readonly PermissionKey[] = [
+  Permissions.ARTICLES_CREATE,
+  Permissions.ARTICLES_EDIT,
   ...TaskManagerPermissionKeys,
   Permissions.PROJECTS_ARCHIVE,
 ];

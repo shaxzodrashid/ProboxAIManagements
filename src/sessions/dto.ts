@@ -15,6 +15,7 @@ import {
   ApiPropertyOptional,
   getSchemaPath,
 } from "@nestjs/swagger";
+import { SAFE_COMMAND_LABELS } from "./command-disclosure";
 
 export class CreateSessionDto {
   @ApiPropertyOptional({
@@ -63,7 +64,8 @@ export class CreateSessionDto {
 
   @ApiPropertyOptional({
     example: "gpt-5.4",
-    description: "Optional runner model identifier.",
+    description:
+      "Optional runner model identifier. If no provider/model/effort field is supplied, a new session uses the authenticated manager's shared personal selection. Any explicit selection field retains the existing managed-catalog resolution rules.",
   })
   @IsOptional()
   @IsString()
@@ -77,9 +79,8 @@ export class CreateSessionDto {
       "anthropic",
       "deepmind",
     ],
-    default: "openai",
     description:
-      "Managed provider ID. The provider/model/effort combination is validated against the runtime catalog.",
+      "Managed provider ID. Explicit selection uses the runtime catalog and overrides personal defaults; an entirely omitted selection inherits shared personal preferences. Existing sessions and project context are unchanged.",
   })
   @IsOptional()
   @IsString()
@@ -376,7 +377,37 @@ export class AssistantTextUpdateDto {
   })
   runCompletion!: string;
 }
-@ApiExtraModels(AssistantTextUpdateDto, AssistantTextIdentityDto)
+export class CommandDisclosureDto {
+  @ApiProperty({ enum: ["STRICT_ALLOWLIST_V1"] }) policy!: string;
+  @ApiProperty({ enum: [true] }) provisional!: boolean;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    enum: [...SAFE_COMMAND_LABELS],
+    description:
+      "Exact allowlisted generic label; shell wrappers and dynamic arguments are omitted.",
+  })
+  commandLabel!: string | null;
+  @ApiProperty({ enum: ["ALLOWLISTED", "OMITTED"] }) commandState!: string;
+  @ApiProperty({
+    type: "integer",
+    format: "int32",
+    nullable: true,
+    minimum: -2147483648,
+    maximum: 2147483647,
+    description:
+      "Provider exit code only for a completed/failed item.completed frame; not run success.",
+  })
+  exitCode!: number | null;
+  @ApiProperty({ enum: ["OMITTED"] }) outputState!: string;
+  @ApiProperty({ enum: ["UNVERIFIED_CONTENT"] }) outputOmissionReason!: string;
+  @ApiProperty({ enum: ["USE_SERVER_STATE"] }) runCompletion!: string;
+}
+@ApiExtraModels(
+  AssistantTextUpdateDto,
+  AssistantTextIdentityDto,
+  CommandDisclosureDto,
+)
 export class PersistedSessionEventDto {
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ format: "uuid" }) sessionId!: string;
@@ -391,6 +422,11 @@ export class PersistedSessionEventDto {
     type: "object",
     additionalProperties: true,
     properties: {
+      commandDetails: {
+        allOf: [{ $ref: getSchemaPath(CommandDisclosureDto) }],
+        description:
+          "Provisional safe subset for v3 command events. Raw details remain omitted; absent on historical events.",
+      },
       textUpdate: {
         type: "object",
         additionalProperties: true,

@@ -1,5 +1,12 @@
 # FILE03 writer and runner facts
 
+20 October scope clarification: internal restore/expiry coordination, filesystem
+locking and supported native no-overwrite mechanics are authorized engineering.
+The historical options below do not create another product-approval gate. Use
+explicit busy/unknown outcomes when safety cannot be established; do not claim
+exclusion of uncontrolled external writers or change live deployment/security
+settings. No such guarantee is implemented by this documentation clarification.
+
 Read-only follow-up; no new writer policy, storage model or enforcement is implemented.
 
 - API filesystem mutations include folder creation, upload/move, file trash/restore, expiry cleanup and project purge in src/projects/projects.service.ts. Project initialization materializes trees and executes manifest commands in src/projects/project-initialization.service.ts. Codex sessions are another writer; arbitrary user shells/editors remain outside this application's process registry.

@@ -9,6 +9,8 @@ import { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
 import { lockWorkspace } from "../prisma/workspace-lock";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { PermissionKey } from "../authorization/permission.catalog";
+import { operationError } from "../openapi/operation-errors";
 
 const projectExecutions = new AsyncLocalStorage<string>();
 export function currentProjectExecutionId() {
@@ -28,8 +30,9 @@ export async function lockProjectLifecycle(
 export async function fencedProjectFilesystem<T>(
   prisma: PrismaService,
   projectId: string,
-  execute: () => Promise<T>,
+  execute: (currentActor?: AuthenticatedUser) => Promise<T>,
   actor?: AuthenticatedUser,
+  requiredPermission?: PermissionKey,
 ): Promise<T> {
   // Commit independently before issuing a callback. Loss of the enclosing lock
   // never proves this callback stopped; no expiry automatically clears the fence.
@@ -42,6 +45,57 @@ export async function fencedProjectFilesystem<T>(
     if (actor && scope.workspaceId !== actor.workspaceId)
       throw new NotFoundException("Project not found");
     await lockWorkspace(tx, scope.workspaceId);
+    let currentActor = actor;
+    if (actor) {
+      const current = await tx.user.findFirst({
+        where: { id: actor.id, workspaceId: scope.workspaceId, status: "OPEN" },
+        select: {
+          roleAssignments: {
+            select: {
+              role: {
+                select: {
+                  id: true,
+                  key: true,
+                  name: true,
+                  permissions: { select: { permissionKey: true } },
+                },
+              },
+            },
+          },
+        },
+      });
+      const permissions = [
+        ...new Set(
+          current?.roleAssignments.flatMap((assignment) =>
+            assignment.role.permissions.map(
+              (permission) => permission.permissionKey,
+            ),
+          ) ?? [],
+        ),
+      ];
+      if (
+        !current ||
+        !requiredPermission ||
+        !permissions.includes(requiredPermission)
+      )
+        throw new ForbiddenException(
+          operationError(
+            403,
+            "MANAGEMENT_ACCESS_CHANGED",
+            "Project mutation access is no longer available; refresh authorization",
+            "checkManagement",
+          ).getResponse(),
+        );
+      currentActor = {
+        ...actor,
+        roles: current.roleAssignments.map(({ role }) => ({
+          id: role.id,
+          key: role.key,
+          name: role.name,
+        })),
+        permissions,
+      };
+    }
     const project = await tx.project.findUnique({
       where: { id: projectId },
       select: {
@@ -52,20 +106,27 @@ export async function fencedProjectFilesystem<T>(
       },
     });
     if (
-      actor &&
+      currentActor &&
       project &&
-      project.creatorId !== actor.id &&
-      !project.members.some((member) => member.userId === actor.id) &&
-      !actor.permissions.includes("projects.manage-all")
+      project.creatorId !== currentActor.id &&
+      !project.members.some((member) => member.userId === currentActor.id) &&
+      !currentActor.permissions.includes("projects.manage-all")
     )
       throw new ForbiddenException("Project mutation scope is unavailable");
     if (!project || project.archivedAt || project.status === "DELETING")
       throw new ConflictException("Project lifecycle blocks filesystem work");
-    return tx.projectLifecycleExecution.create({ data: { projectId } });
+    return {
+      execution: await tx.projectLifecycleExecution.create({
+        data: { projectId },
+      }),
+      actor: currentActor,
+    };
   });
   let settled = false;
   try {
-    const result = await projectExecutions.run(fence.id, execute);
+    const result = await projectExecutions.run(fence.execution.id, () =>
+      execute(fence.actor),
+    );
     settled = true;
     return result;
   } catch (error) {
@@ -76,12 +137,17 @@ export async function fencedProjectFilesystem<T>(
   } finally {
     if (settled)
       await prisma.projectLifecycleExecution
-        .update({ where: { id: fence.id }, data: { finishedAt: new Date() } })
+        .update({
+          where: { id: fence.execution.id },
+          data: { finishedAt: new Date() },
+        })
         .catch(() => undefined);
   }
 }
 
-export function ActiveProjectMutation(): MethodDecorator {
+export function ActiveProjectMutation(
+  requiredPermission: PermissionKey,
+): MethodDecorator {
   return (_target, _key, descriptor: PropertyDescriptor) => {
     const original = descriptor.value as (
       ...args: unknown[]
@@ -95,8 +161,10 @@ export function ActiveProjectMutation(): MethodDecorator {
       return fencedProjectFilesystem(
         this.prisma,
         projectId,
-        () => original.call(this, actor, projectId, ...args),
+        (currentActor) =>
+          original.call(this, currentActor!, projectId, ...args),
         actor,
+        requiredPermission,
       );
     };
   };

@@ -1,6 +1,6 @@
 {
   "name": "proboxai",
-  "version": "0.2.2",
+  "version": "0.3.0-dev.10",
   "packageManager": "pnpm@10.13.1",
   "private": true,
   "description": "ProboxAI programmatic coding-session control plane",
@@ -25,7 +25,10 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "db:seed-admin": "ts-node prisma/seed.ts"
+    "db:seed-admin": "ts-node prisma/seed.ts",
+    "handoff:serve": "node scripts/frontend-session-handoff.mjs",
+    "handoff:verify": "node scripts/frontend-session-handoff.mjs --verify",
+    "handoff:prepare": "node scripts/frontend-session-handoff.mjs --prepare"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.883.0",
@@ -39,12 +42,14 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "cookie-parser": "^1.4.7",
+    "emoji-regex": "10.6.0",
     "grammy": "^1.36.1",
     "helmet": "^8.0.0",
     "libphonenumber-js": "^1.11.15",
     "multer": "^2.0.2",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.16.0",

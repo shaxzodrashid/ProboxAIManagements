@@ -43,10 +43,44 @@ export class TelegramService {
     await this.bot.api.deleteMessage(chatId.toString(), messageId);
   }
 
-  async answerCallback(id: string) {
+  async editMessage(
+    chatId: bigint,
+    messageId: number,
+    text: string,
+    keyboard?: InlineKeyboardMarkup,
+  ) {
     if (!this.bot)
       throw new ServiceUnavailableException("Telegram bot is not configured");
-    await this.bot.api.answerCallbackQuery(id);
+    return this.queued(chatId, async () => {
+      try {
+        return await this.bot!.api.editMessageText(
+          chatId.toString(),
+          messageId,
+          text,
+          {
+            reply_markup: keyboard,
+            link_preview_options: { is_disabled: true },
+          },
+        );
+      } catch (error) {
+        const failure = error as { error_code?: number; description?: unknown };
+        if (
+          failure.error_code === 400 &&
+          typeof failure.description === "string" &&
+          /^Bad Request: message is not modified(?:$|:)/.test(
+            failure.description,
+          )
+        )
+          return;
+        throw error;
+      }
+    });
+  }
+
+  async answerCallback(id: string, text?: string) {
+    if (!this.bot)
+      throw new ServiceUnavailableException("Telegram bot is not configured");
+    await this.bot.api.answerCallbackQuery(id, text ? { text } : undefined);
   }
 
   async sendDocument(chatId: bigint, bytes: Buffer, name: string) {

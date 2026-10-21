@@ -7,6 +7,10 @@ import { Permissions } from "../authorization/permission.catalog";
 import { PrismaService } from "../prisma/prisma.service";
 import { lockWorkspace } from "../prisma/workspace-lock";
 import {
+  validWorkflowStatusName,
+  workflowStatusSnapshot,
+} from "./task-workflow-status";
+import {
   humanTaskSelection,
   humanTaskSnapshot,
   advanceHumanTask,
@@ -17,8 +21,6 @@ import {
   databaseOperationError,
 } from "../openapi/operation-errors";
 import {
-  boardPalette,
-  BoardColors,
   BoardAuditQueryDto,
   CreateBoardStatusDto,
   UpdateBoardStatusDto,
@@ -40,12 +42,7 @@ function snapshot(board: Board) {
   if (
     board.statuses.length < 1 ||
     board.statuses.length > 100 ||
-    board.statuses.some(
-      (status, index) =>
-        status.position !== index ||
-        !status.name.trim() ||
-        status.name.length > 120,
-    )
+    board.statuses.some((status, index) => status.position !== index)
   )
     throw operationError(
       503,
@@ -55,19 +52,7 @@ function snapshot(board: Board) {
     );
   return {
     ...board,
-    statuses: board.statuses.map((status) => {
-      if (!BoardColors.includes(status.color as (typeof BoardColors)[number]))
-        throw operationError(
-          503,
-          "TASK_BOARD_UNAVAILABLE",
-          "Workflow metadata is unavailable",
-          "readTaskBoard",
-        );
-      return {
-        ...status,
-        palette: boardPalette[status.color as keyof typeof boardPalette],
-      };
-    }),
+    statuses: board.statuses.map(workflowStatusSnapshot),
   };
 }
 function outcome(row: TaskBoardAudit) {
@@ -341,11 +326,11 @@ export class TaskBoardsService {
       "CREATE_STATUS",
       dto,
       async (tx, board) => {
-        if (!dto.name.trim())
+        if (!validWorkflowStatusName(dto.name))
           throw operationError(
             400,
             "STATUS_NAME_INVALID",
-            "Status name must not be blank",
+            "Status name must be nonblank and at most 120 Unicode characters",
             "createStatus",
             "name",
           );
@@ -401,11 +386,11 @@ export class TaskBoardsService {
             "Supply name or color",
             "updateStatus",
           );
-        if (dto.name !== undefined && !dto.name.trim())
+        if (dto.name !== undefined && !validWorkflowStatusName(dto.name))
           throw operationError(
             400,
             "STATUS_NAME_INVALID",
-            "Status name must not be blank",
+            "Status name must be nonblank and at most 120 Unicode characters",
             "updateStatus",
             "name",
           );
@@ -512,6 +497,20 @@ export class TaskBoardsService {
             "STATUS_NOT_FOUND",
             "Status not found",
             "removeStatus",
+          );
+        // Shared workflow changes have separate scoped receipts. Do not move
+        // those entries through the original-project human audit projection.
+        if (
+          await tx.taskSharedBoardEntry.count({
+            where: { boardId: board.id, statusId },
+          })
+        )
+          throw operationError(
+            409,
+            "STATUS_IN_USE",
+            "Move shared tasks explicitly before removing their column",
+            "removeStatus",
+            "replacementStatusId",
           );
         const count = await tx.taskBoardEntry.count({
           where: { boardId: board.id, statusId },

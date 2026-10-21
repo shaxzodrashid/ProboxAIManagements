@@ -3,6 +3,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiProperty,
+  ApiServiceUnavailableResponse,
   ApiTags,
 } from "@nestjs/swagger";
 import { PrismaService } from "./prisma/prisma.service";
@@ -14,6 +15,28 @@ class HealthResponseDto {
 
   @ApiProperty({ example: "proboxai" })
   service!: "proboxai";
+}
+
+class ReadyDependenciesDto {
+  @ApiProperty({ enum: ["ok"] }) postgres!: "ok";
+  @ApiProperty({
+    enum: ["ok"],
+    description:
+      "Existing configuration-template storage check; does not verify avatar storage.",
+  })
+  minio!: "ok";
+}
+
+class ReadyResponseDto extends HealthResponseDto {
+  @ApiProperty({ type: ReadyDependenciesDto })
+  dependencies!: ReadyDependenciesDto;
+}
+
+class ReadyUnavailableResponseDto {
+  @ApiProperty({ enum: ["unavailable"] }) status!: "unavailable";
+  @ApiProperty({ enum: ["proboxai"] }) service!: "proboxai";
+  @ApiProperty({ example: "Required persistent dependencies are unavailable" })
+  message!: string;
 }
 
 @Controller("health")
@@ -38,8 +61,20 @@ export class HealthController {
   }
 
   @Get("ready")
-  @ApiOperation({ summary: "Check PostgreSQL and MinIO readiness" })
-  @ApiOkResponse({ description: "Required persistent dependencies are ready." })
+  @ApiOperation({
+    summary: "Check PostgreSQL and MinIO readiness",
+    description:
+      "Checks PostgreSQL and the existing configuration-template storage dependency. Does not establish avatar bucket readiness, runner liveness or individual feature readiness. Dependency failures return a sanitized 503 without internal exception text.",
+  })
+  @ApiOkResponse({
+    description: "Required persistent dependencies are ready.",
+    type: ReadyResponseDto,
+  })
+  @ApiServiceUnavailableResponse({
+    description:
+      "Required persistent dependencies are unavailable; no connection, bucket, credential or raw exception details.",
+    type: ReadyUnavailableResponseDto,
+  })
   async ready() {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
@@ -49,11 +84,11 @@ export class HealthController {
         service: "proboxai",
         dependencies: { postgres: "ok", minio: "ok" },
       };
-    } catch (error) {
+    } catch {
       throw new ServiceUnavailableException({
         status: "unavailable",
         service: "proboxai",
-        message: error instanceof Error ? error.message : String(error),
+        message: "Required persistent dependencies are unavailable",
       });
     }
   }

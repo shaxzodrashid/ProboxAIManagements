@@ -3,12 +3,14 @@ import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { lockWorkspace } from "../prisma/workspace-lock";
+import { readDependency } from "../prisma/read-dependency";
 import { AuthenticatedUser } from "../auth/auth.types";
 import {
   databaseOperationError,
   operationError,
 } from "../openapi/operation-errors";
 import { CreateChatGroupDto } from "./groups.dto";
+import { createHistoryMembership } from "./group-history-admission";
 
 const projection = {
   id: true,
@@ -65,6 +67,24 @@ export class GroupsService {
             data: { name, creatorId: actor.id, ownerId: actor.id },
             select: projection,
           });
+          await createHistoryMembership(
+            tx,
+            {
+              groupId: group.id,
+              accountId: actor.id,
+              historyAccess: "NONE",
+              joinedAt: group.createdAt,
+            },
+            0,
+          );
+          await tx.chatGroupInvitationPermission.create({
+            data: {
+              groupId: group.id,
+              accountId: actor.id,
+              canInvite: true,
+              grantedById: actor.id,
+            },
+          });
           const receipt = await tx.chatGroupCreation.create({
             data: {
               creatorId: actor.id,
@@ -106,49 +126,57 @@ export class GroupsService {
   }
 
   async read(actor: AuthenticatedUser, id: string, submission = false) {
-    try {
-      return await this.prisma.$transaction(
-        async (tx) => {
-          await this.active(tx, actor);
-          if (submission) {
-            const receipt = await tx.chatGroupCreation.findUnique({
-              where: {
-                creatorId_requestId: {
-                  creatorId: actor.id,
-                  requestId: id.toLowerCase(),
+    return readDependency("groups.read", async () => {
+      try {
+        return await this.prisma.$transaction(
+          async (tx) => {
+            await this.active(tx, actor);
+            if (submission) {
+              const receipt = await tx.chatGroupCreation.findUnique({
+                where: {
+                  creatorId_requestId: {
+                    creatorId: actor.id,
+                    requestId: id.toLowerCase(),
+                  },
                 },
+              });
+              if (!receipt)
+                throw operationError(
+                  404,
+                  "GROUP_NOT_FOUND",
+                  "Group creation not found",
+                  "groups.read",
+                );
+              return this.outcome(receipt);
+            }
+            const group = await tx.chatGroup.findFirst({
+              where: {
+                id: id.toLowerCase(),
+                OR: [
+                  { creatorId: actor.id },
+                  { memberships: { some: { accountId: actor.id } } },
+                ],
               },
+              select: projection,
             });
-            if (!receipt)
+            if (!group)
               throw operationError(
                 404,
                 "GROUP_NOT_FOUND",
-                "Group creation not found",
+                "Group not found",
                 "groups.read",
               );
-            return this.outcome(receipt);
-          }
-          const group = await tx.chatGroup.findFirst({
-            where: { id: id.toLowerCase(), creatorId: actor.id },
-            select: projection,
-          });
-          if (!group)
-            throw operationError(
-              404,
-              "GROUP_NOT_FOUND",
-              "Group not found",
-              "groups.read",
-            );
-          return group;
-        },
-        {
-          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
-          timeout: 10000,
-          maxWait: 2000,
-        },
-      );
-    } catch (error) {
-      databaseOperationError(error, "groups.read");
-    }
+            return group;
+          },
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+            timeout: 10000,
+            maxWait: 2000,
+          },
+        );
+      } catch (error) {
+        databaseOperationError(error, "groups.read");
+      }
+    });
   }
 }

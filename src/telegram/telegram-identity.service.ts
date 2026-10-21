@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuthenticatedUser } from "../auth/auth.types";
 
@@ -9,8 +10,9 @@ export class TelegramIdentityService {
   async actor(
     chatId: bigint,
     telegramUserId?: bigint,
+    db: Prisma.TransactionClient = this.prisma,
   ): Promise<AuthenticatedUser | null> {
-    const user = await this.prisma.user.findFirst({
+    const user = await db.user.findFirst({
       where: {
         telegramChatId: chatId,
         ...(telegramUserId === undefined ? {} : { telegramUserId }),

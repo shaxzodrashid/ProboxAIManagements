@@ -29,80 +29,10 @@ export class ApiErrorResponseDto {
   error!: string;
 
   @ApiPropertyOptional({
-    enum: [
-      "TEMPLATE_MANIFEST_INVALID",
-      "TEMPLATE_STORAGE_UNAVAILABLE",
-      "TEMPLATE_SLUG_CONFLICT",
-      "TEMPLATE_VERSION_CONFLICT",
-      "TEMPLATE_FILE_CONFLICT",
-      "TEMPLATE_ARCHIVED",
-      "TEMPLATE_DRAFT_EXISTS",
-      "TEMPLATE_PUBLISHED_VERSION_MISSING",
-      "TEMPLATE_FILE_LIMIT",
-      "TEMPLATE_VERSION_LIMIT",
-      "TEMPLATE_DRAFT_NOT_FOUND",
-      "INPUT_INVALID",
-      "RESOURCE_NOT_FOUND",
-      "CONSTRAINT_CONFLICT",
-      "STATE_CONFLICT",
-      "USER_PHONE_CONFLICT",
-      "SELF_USER_PROTECTED",
-      "USER_OWNS_PROJECTS",
-      "ROLE_KEY_CONFLICT",
-      "ROLE_SYSTEM_PROTECTED",
-      "SELF_ROLE_PROTECTED",
-      "ROLE_ASSIGNED",
-      "PERMISSION_KEYS_UNKNOWN",
-      "ROLE_IDS_INVALID",
-      "SELF_PERMISSION_GRANT_PROTECTED",
-      "SELF_MANAGEMENT_PROTECTED",
-      "DEPARTMENT_SLUG_CONFLICT",
-      "DEPARTMENT_DEFAULT_CONFLICT",
-      "DEPARTMENT_HOME_IN_USE",
-      "DEPARTMENT_ARCHIVED",
-      "DEPARTMENT_IS_DEFAULT",
-      "DEFAULT_DEPARTMENT_MISSING",
-      "DEPARTMENT_NAME_INVALID",
-      "HOME_PATH_INVALID",
-      "HOME_CONFIGURATION_INVALID",
-      "HOME_PROVISIONING_FAILED",
-      "TASK_BOARD_ACCESS_CHANGED",
-      "TASK_BOARD_NOT_FOUND",
-      "TASK_BOARD_ACCESS_DENIED",
-      "TASK_BOARD_UNAVAILABLE",
-      "TASK_BOARD_OPERATION_NOT_FOUND",
-      "TASK_BOARD_REQUEST_CONFLICT",
-      "TASK_BOARD_PROJECT_DELETING",
-      "TASK_BOARD_SCOPE_INVALID",
-      "TASK_BOARD_MOVE_ASSIGNMENT_REQUIRED",
-      "HUMAN_TASK_OPERATION_REJECTED",
-      "HUMAN_TASK_QUERY_REJECTED",
-      "HUMAN_TASK_QUERY_CHANGED",
-      "HUMAN_TASK_QUERY_SCOPE_LIMIT",
-      "GROUP_REQUEST_CONFLICT",
-      "GROUP_NOT_FOUND",
-      "STATUS_NAME_INVALID",
-      "STATUS_LIMIT",
-      "STATUS_NOT_FOUND",
-      "STATUS_EDIT_EMPTY",
-      "STATUS_ORDER_INVALID",
-      "STATUS_LAST_REQUIRED",
-      "STATUS_REPLACEMENT_INVALID",
-      "STATUS_IN_USE",
-      "REVISION_REQUIRED",
-      "REVISION_INVALID",
-      "STALE_REVISION",
-      "REVISION_EXHAUSTED",
-      "TASK_DEADLINE_INVALID",
-      "TASK_DEADLINE_UNAVAILABLE",
-      "TASK_DEADLINE_ACCESS_CHANGED",
-      "TASK_DEADLINE_NOT_FOUND",
-      "TASK_DEADLINE_REQUEST_CONFLICT",
-      "TASK_DEADLINE_OPERATION_NOT_FOUND",
-      "TASK_DEADLINE_PROJECT_INACTIVE",
-    ],
+    type: String,
+    example: "REVISION_REQUIRED",
     description:
-      "Stable domain failure category on admin/department/template/workflow/deadline errors; absent on standard validation, authentication and unexpected errors.",
+      "Optional domain failure category. Open string vocabulary: consult the operation-specific code contract. Absent on standard validation, authentication and unexpected errors.",
   })
   code?: string;
 
@@ -147,6 +77,14 @@ export const ApiTemplateErrors = () =>
 
 /** Documents the bearer token required by authenticated endpoints. */
 export const ApiAccessToken = () => ApiBearerAuth("access-token");
+
+/** Authentication and post-authentication content failures remain distinct. */
+export const ApiReadAvailability = () =>
+  ApiServiceUnavailableResponse({
+    type: ApiErrorResponseDto,
+    description:
+      "Authentication or content-read dependency is temporarily unavailable. Content reads use READ_DEPENDENCY_UNAVAILABLE with an operation action. No empty-data success, identity invalidation or automatic retry is implied; mutation outcomes have separate recovery contracts.",
+  });
 
 export const ApiUploadSizeError = () =>
   ApiPayloadTooLargeResponse({

@@ -37,6 +37,113 @@ if (url) {
       c: string,
       pending: string;
     const prefix = "picker" + randomUUID().replaceAll("-", "").slice(0, 12);
+    it("preserves exact legacy case-duplicate identities and rejects ambiguous or inactive fallback", async () => {
+      const lowerId = "de" + randomUUID().slice(2).toLowerCase();
+      const upperId = lowerId.toUpperCase();
+      const mixedId = "D" + lowerId.slice(1);
+      try {
+        for (const [id, fullName] of [
+          [lowerId, "Lower legacy identity"],
+          [upperId, "Upper legacy identity"],
+        ] as const) {
+          await prisma.user.create({
+            data: {
+              id,
+              workspaceId: w2,
+              phoneNumber: randomUUID(),
+              fullName,
+              status: "OPEN",
+            },
+          });
+        }
+        for (const [id, displayName] of [
+          [lowerId, "Lower legacy identity"],
+          [upperId, "Upper legacy identity"],
+        ] as const) {
+          const result = await request(app.getHttpServer())
+            .get("/profiles/" + id)
+            .expect(200);
+          expect(result.body).toMatchObject({ id, displayName, bio: null });
+        }
+        expect(mixedId).not.toBe(upperId);
+        await request(app.getHttpServer())
+          .get("/profiles/" + mixedId)
+          .expect(404);
+        await prisma.user.update({
+          where: { id: upperId },
+          data: { status: "BANNED" },
+        });
+        await request(app.getHttpServer())
+          .get("/profiles/" + upperId)
+          .expect(404);
+        await request(app.getHttpServer())
+          .get("/profiles/" + mixedId)
+          .expect(404);
+        await prisma.user.delete({ where: { id: lowerId } });
+        await request(app.getHttpServer())
+          .get("/profiles/" + lowerId)
+          .expect(404);
+        await prisma.user.update({
+          where: { id: upperId },
+          data: { status: "OPEN" },
+        });
+        expect(
+          (
+            await request(app.getHttpServer())
+              .get("/profiles/" + lowerId)
+              .expect(200)
+          ).body.id,
+        ).toBe(upperId);
+      } finally {
+        await prisma.user.deleteMany({
+          where: { id: { in: [lowerId, upperId] } },
+        });
+      }
+    });
+    it("treats uppercase profile UUIDs as the same identity without changing audiences", async () => {
+      const canonical = await request(app.getHttpServer())
+        .get("/profiles/" + b)
+        .expect(200);
+      const upper = await request(app.getHttpServer())
+        .get("/profiles/" + b.toUpperCase())
+        .expect(200);
+      expect(upper.body).toEqual(canonical.body);
+      expect(upper.body.id).toBe(b);
+      expect(upper.body.bio).toBeNull();
+      expect(upper.headers["cache-control"]).toBe("no-store");
+      await prisma.user.update({
+        where: { id: b },
+        data: { status: "BANNED" },
+      });
+      await request(app.getHttpServer())
+        .get("/profiles/" + b.toUpperCase())
+        .expect(404);
+      await request(app.getHttpServer())
+        .get("/profiles/" + randomUUID().toUpperCase())
+        .expect(404);
+    });
+    it("rejects public viewer and workspace query overrides on both lookup routes", async () => {
+      for (const route of [
+        "/profiles/" + a,
+        "/profiles/by-username/" + prefix + "_owner",
+      ]) {
+        for (const query of [
+          "?viewerId=" + a,
+          "?workspaceId=" + w1,
+          "?includePrivate=true",
+          "?field=BIO",
+        ]) {
+          await request(app.getHttpServer())
+            .get(route + query)
+            .expect(400);
+        }
+      }
+      const row = await prisma.user.findUniqueOrThrow({ where: { id: a } });
+      expect(row.bio).toBe("private biography");
+      expect(
+        await prisma.profileAudiencePolicy.count({ where: { ownerId: a } }),
+      ).toBe(0);
+    });
     beforeAll(async () => {
       prisma = new PrismaClient({ datasources: { db: { url } } });
       w1 = (
@@ -53,6 +160,8 @@ if (url) {
         (
           await prisma.user.create({
             data: {
+              // Ensure the case-variant revocation fixtures always change an ID.
+              id: suffix === "Blake" ? "b" + randomUUID().slice(1) : undefined,
               workspaceId,
               phoneNumber: randomUUID(),
               fullName: prefix + " " + suffix,
@@ -263,6 +372,173 @@ if (url) {
         ).body.alias,
       ).toBe("Other owner alias");
     });
+    it.each(["uppercase", "mixed-case"])(
+      "revokes Contacts-only biography and birthday with a %s UUID and preserves other owners",
+      async (casing) => {
+        await contact().expect(200);
+        await contact(b, c).expect(200);
+        await alias({ alias: "Owner private alias" }).expect(200);
+        await alias({ alias: "Other owner private alias" }, c).expect(200);
+        for (const field of [F.BIO, F.BIRTHDAY_DAY_MONTH, F.BIRTHDAY_YEAR])
+          await policy(field, M.CONTACTS).expect(200);
+        await policy(F.BIO, M.CONTACTS, [], [], c).expect(200);
+        expect((await publicRead(a, b).expect(200)).body).toMatchObject({
+          bio: "private biography",
+          birthdayDayMonth: { day: 29, month: 2 },
+          birthdayYear: 2000,
+        });
+        const reference =
+          casing === "uppercase"
+            ? b.toUpperCase()
+            : b.replace(/[a-f]/i, (letter) => letter.toUpperCase());
+        expect(reference).not.toBe(b);
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const removed = await http()
+            .delete("/users/me/contacts/" + reference)
+            .set("Authorization", "Bearer " + a)
+            .expect(200);
+          expect(removed.body).toEqual({ removed: true });
+          expect(removed.headers["cache-control"]).toBe("no-store");
+          expect((await publicRead(a, b).expect(200)).body).toMatchObject({
+            bio: null,
+            birthdayDayMonth: null,
+            birthdayYear: null,
+          });
+        }
+        expect(
+          await prisma.profileContact.findUnique({
+            where: {
+              ownerId_contactAccountId: { ownerId: a, contactAccountId: b },
+            },
+          }),
+        ).toBeNull();
+        expect((await publicRead(c, b).expect(200)).body.bio).toBe(
+          "private biography",
+        );
+        expect(
+          (
+            await http()
+              .get(`/users/me/contacts/${b}/alias`)
+              .set("Authorization", "Bearer " + c)
+              .expect(200)
+          ).body.alias,
+        ).toBe("Other owner private alias");
+        await http()
+          .get(`/users/me/contacts/${b}/alias`)
+          .set("Authorization", "Bearer " + a)
+          .expect(404);
+      },
+    );
+    it("revokes legacy mixed-case Contact references without rewriting identities or other owners' grants", async () => {
+      const lowerId = "d" + randomUUID().slice(1);
+      const upperId = lowerId.toUpperCase();
+      try {
+        for (const id of [lowerId, upperId]) {
+          await prisma.user.create({
+            data: {
+              id,
+              workspaceId: w2,
+              phoneNumber: randomUUID(),
+              fullName: "Legacy case fixture",
+              status: "OPEN",
+            },
+          });
+          await prisma.profileContact.create({
+            data: { ownerId: a, contactAccountId: id },
+          });
+        }
+        await prisma.profileContact.create({
+          data: {
+            ownerId: c,
+            contactAccountId: upperId,
+            alias: "Keep another owner's grant",
+          },
+        });
+        await policy(F.BIO, M.CONTACTS).expect(200);
+        for (const viewer of [lowerId, upperId])
+          expect((await publicRead(a, viewer).expect(200)).body.bio).toBe(
+            "private biography",
+          );
+        await http()
+          .delete("/users/me/contacts/" + lowerId)
+          .set("Authorization", "Bearer " + a)
+          .expect(200);
+        for (const viewer of [lowerId, upperId]) {
+          expect((await publicRead(a, viewer).expect(200)).body.bio).toBeNull();
+          expect(
+            await prisma.user.findUnique({ where: { id: viewer } }),
+          ).not.toBeNull();
+        }
+        expect(
+          await prisma.profileContact.findMany({ where: { ownerId: a } }),
+        ).toEqual([]);
+        expect(
+          await prisma.profileContact.findUnique({
+            where: {
+              ownerId_contactAccountId: {
+                ownerId: c,
+                contactAccountId: upperId,
+              },
+            },
+          }),
+        ).toMatchObject({ alias: "Keep another owner's grant" });
+      } finally {
+        await prisma.user.deleteMany({
+          where: { id: { in: [lowerId, upperId] } },
+        });
+      }
+    });
+    it("keeps Contact revocation authenticated, validated and idempotent for unknown UUIDs", async () => {
+      await contact().expect(200);
+      await http()
+        .delete("/users/me/contacts/" + b.toUpperCase())
+        .expect(401);
+      await http()
+        .delete("/users/me/contacts/not-a-uuid")
+        .set("Authorization", "Bearer " + a)
+        .expect(400);
+      for (let attempt = 0; attempt < 2; attempt++)
+        await http()
+          .delete("/users/me/contacts/" + randomUUID().toUpperCase())
+          .set("Authorization", "Bearer " + a)
+          .expect(200, { removed: true });
+      expect(
+        await prisma.profileContact.findUnique({
+          where: {
+            ownerId_contactAccountId: { ownerId: a, contactAccountId: b },
+          },
+        }),
+      ).not.toBeNull();
+    });
+    it("preserves independently allowed profile fields and public identity after Contact removal", async () => {
+      await contact().expect(200);
+      await policy(F.BIO, M.EVERYONE).expect(200);
+      await policy(F.BIRTHDAY_DAY_MONTH, M.CUSTOM, [b]).expect(200);
+      await policy(F.BIRTHDAY_YEAR, M.CONTACTS).expect(200);
+      await http()
+        .delete("/users/me/contacts/" + b.toUpperCase())
+        .set("Authorization", "Bearer " + a)
+        .expect(200);
+      expect((await publicRead(a, b).expect(200)).body).toMatchObject({
+        id: a,
+        displayName: prefix + " Owner",
+        bio: "private biography",
+        birthdayDayMonth: { day: 29, month: 2 },
+        birthdayYear: null,
+      });
+      const policies = (
+        await http()
+          .get("/users/me/privacy")
+          .set("Authorization", "Bearer " + a)
+          .expect(200)
+      ).body;
+      expect(
+        policies.find((entry: any) => entry.field === F.BIRTHDAY_DAY_MONTH),
+      ).toMatchObject({ mode: M.CUSTOM, accountIds: [b] });
+      expect(
+        policies.find((entry: any) => entry.field === F.BIO),
+      ).toMatchObject({ mode: M.EVERYONE });
+    });
     it("matches public names, @username and caller aliases, deduplicating multiple matches", async () => {
       await contact().expect(200);
       await contact(b, c).expect(200);
@@ -456,6 +732,8 @@ if (url) {
       const result = await publicRead().expect(200);
       expect(result.headers["cache-control"]).toBe("no-store");
       expect(result.body).toEqual({
+        avatar: null,
+        customStatus: null,
         id: a,
         displayName: prefix + " Owner",
         firstName: null,
@@ -511,14 +789,11 @@ if (url) {
         "private biography",
       );
       expect((await publicRead(b, a).expect(200)).body.bio).toBeNull();
-      expect(
-        (
-          await http()
-            .get("/profiles/" + a)
-            .query({ viewer: b })
-            .expect(200)
-        ).body.bio,
-      ).toBeNull();
+      await http()
+        .get("/profiles/" + a)
+        .query({ viewer: b })
+        .expect(400);
+      expect((await publicRead(a).expect(200)).body.bio).toBeNull();
       await http()
         .delete("/users/me/contacts/" + b)
         .set("Authorization", "Bearer " + a)
@@ -560,6 +835,27 @@ if (url) {
         { indexname: string }[]
       >`SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname IN ('User_public_fullName_search_idx', 'User_public_firstName_search_idx', 'User_public_lastName_search_idx', 'User_public_username_search_idx', 'ProfileContact_alias_search_idx') AND indexdef LIKE '%USING gin%'`;
       expect(indexes).toHaveLength(5);
+      // A small fixture can legitimately use another covering index even with
+      // seqscan disabled. Assert the installed expression/validity, not one
+      // cost-based plan. Case-variant HTTP tests above verify lookup behavior.
+      const casefold = await prisma.$queryRaw<
+        {
+          valid: boolean;
+          ready: boolean;
+          unique: boolean;
+          expression: string;
+        }[]
+      >`SELECT i.indisvalid AS valid, i.indisready AS ready,
+          i.indisunique AS unique, pg_get_expr(i.indexprs, i.indrelid) AS expression
+        FROM pg_index i
+        JOIN pg_class idx ON idx.oid = i.indexrelid
+        JOIN pg_class tab ON tab.oid = i.indrelid
+        JOIN pg_namespace ns ON ns.oid = tab.relnamespace
+        WHERE ns.nspname = 'public' AND tab.relname = 'User'
+          AND idx.relname = 'User_id_casefold_idx'`;
+      expect(casefold).toEqual([
+        { valid: true, ready: true, unique: false, expression: "lower(id)" },
+      ]);
     });
     it("OpenAPI declares discriminated picker items, privacy-safe public fields and nullable aliases", () => {
       const doc: any = SwaggerModule.createDocument(
@@ -567,6 +863,15 @@ if (url) {
         new DocumentBuilder().build(),
       );
       const schemas = doc.components.schemas;
+      for (const route of [
+        "/profiles/{accountId}",
+        "/profiles/by-username/{username}",
+      ]) {
+        expect(doc.paths[route].get.responses["400"]).toBeDefined();
+        expect(
+          doc.paths[route].get.parameters.every((p: any) => p.in !== "query"),
+        ).toBe(true);
+      }
       expect(
         schemas.AudiencePickerResponseDto.properties.items.items.oneOf,
       ).toHaveLength(2);

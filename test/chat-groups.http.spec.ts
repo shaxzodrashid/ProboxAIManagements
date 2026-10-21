@@ -1,7 +1,7 @@
 import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { JwtService } from "@nestjs/jwt";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { SchemaObject } from "@nestjs/swagger/dist/interfaces/open-api-spec.interface";
@@ -417,6 +417,13 @@ if (url) {
       expect(
         doc.paths["/chat-groups/creations/{requestId}"]?.get?.responses["200"],
       ).toBeDefined();
+      for (const path of [
+        "/chat-groups/creations/{requestId}",
+        "/chat-groups/{groupId}",
+      ])
+        expect(doc.paths[path]?.get?.responses["503"]).toMatchObject({
+          description: expect.stringContaining("READ_DEPENDENCY_UNAVAILABLE"),
+        });
       expect(
         (doc.components?.schemas?.CreateChatGroupDto as SchemaObject)?.required,
       ).toEqual(["requestId", "name"]);
@@ -427,5 +434,57 @@ if (url) {
         ).sort(),
       ).toEqual(["createdAt", "creatorId", "id", "name", "ownerId"]);
     });
+    it.each([false, true])(
+      "returns sanitized unavailable data for metadata read receipt=%s and recovers",
+      async (receipt) => {
+        const created = (await create().expect(201)).body;
+        const path = receipt
+          ? "/chat-groups/creations/" + created.requestId
+          : "/chat-groups/" + created.group.id;
+        const original = prisma.$transaction.bind(prisma);
+        const outer = jest
+          .spyOn(prisma, "$transaction")
+          .mockImplementationOnce((async (
+            read: (tx: Prisma.TransactionClient) => Promise<unknown>,
+            options: any,
+          ) =>
+            original(async (tx) => {
+              const failing = receipt
+                ? jest.spyOn(tx.chatGroupCreation, "findUnique")
+                : jest.spyOn(tx.chatGroup, "findFirst");
+              failing.mockRejectedValueOnce(
+                new Prisma.PrismaClientKnownRequestError(
+                  "private-host:5432; content failure",
+                  { code: "P1001", clientVersion: "fixture" },
+                ),
+              );
+              try {
+                return await read(tx);
+              } finally {
+                failing.mockRestore();
+              }
+            }, options)) as never);
+        try {
+          const response = await get(path).expect(503);
+          expect(response.body).toEqual({
+            statusCode: 503,
+            error: "Service Unavailable",
+            message: "Requested data is temporarily unavailable",
+            code: "READ_DEPENDENCY_UNAVAILABLE",
+            action: "groups.read",
+          });
+          expect(JSON.stringify(response.body)).not.toMatch(
+            /private-host|P1001|clientVersion/,
+          );
+        } finally {
+          outer.mockRestore();
+        }
+        expect((await get(path).expect(200)).body).toEqual(
+          receipt ? created : created.group,
+        );
+        await get(path, b).expect(404);
+        await get(path, c).expect(404);
+      },
+    );
   },
 );

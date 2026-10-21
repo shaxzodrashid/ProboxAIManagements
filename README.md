@@ -2,6 +2,12 @@
 
 Session directory preflight and selected-project context: [contract](Docs/session-directory-context-contracts.md).
 
+Durable REST follow-up recovery and session read availability:
+[contract](Docs/rest-followup-recovery-contracts.md).
+
+Current persisted authority at project mutation admission:
+[contract](Docs/project-mutation-authority-contracts.md).
+
 Persisted project initial-enqueue recovery: [contract](Docs/project-enqueue-recovery-contracts.md).
 
 Original project-creation readback and keyed CLEAR: [contract](Docs/project-creation-readback-contracts.md).
@@ -17,18 +23,35 @@ shape is intentionally identical to the operator-facing contract:
 proboxai exec --json --sandbox read-only -C /opt/apps/Test 'Reply with exactly: PROBOXAI_PROGRAMMATIC_CONTROL_OK'
 ```
 
-Every JSONL frame is written to the session archive before it is published over
-SSE and persisted in PostgreSQL with a hash-chain. The runner also records the
-final binary Git diff and stderr stream.
+Runner events persist bounded public projections and separately sanitized retained
+detail with integrity metadata. Keyed initial runs use database archives; legacy
+new archive files are sanitized. Existing old raw files are not rewritten. Final
+Git diff and stderr capture are separate from their disclosure policy: detailed
+tool/diff/stderr retrieval remains STRICT_METADATA. See
+[retained history](Docs/session-intent-history-contracts.md) for exact limits,
+protected execution input, retention, omissions and production prerequisites.
 
 ## Local setup
 
 Install dependencies with `pnpm install`. The install runs Husky's `prepare`
 script and configures the repository's Git hooks automatically.
 
+The deployment checks also require Bash and ShellCheck on the development
+machine. On Windows, install Git for Windows (which provides Bash) and ShellCheck:
+
+```powershell
+winget install --id koalaman.shellcheck --exact --source winget
+```
+
+Open a new terminal after installation so it picks up the updated `PATH`, then
+verify with `shellcheck --version` and `pnpm deploy:check`. For custom executable
+locations, set `PROBOX_TEST_BASH` and `PROBOX_SHELLCHECK` to their respective paths.
+
 Every commit must pass the following checks:
 
 - ESLint and Prettier checks for staged files.
+- Release contract validation, deployment Bash syntax/ShellCheck, and deployment
+  scenario tests.
 - A full TypeScript typecheck, including tests.
 - The complete Jest test suite.
 
@@ -122,7 +145,68 @@ sequence under `/api/v1/auth`. The final request accepts only `password` and
 `passwordConfirmation`, uses its own purpose-bound temporary Bearer token, and
 revokes every refresh token after changing the password.
 
+## Routine production deployments (app2)
+
+After the one-time release-directory and systemd setup, deploy a verified stable
+release published to `main` with this single command from app2's root shell:
+
+```bash
+runuser -u proboxai -- /srv/proboxai/operator/proboxai-deploy restart
+```
+
+It works from any directory. The command runs the configured wrapper as the
+`proboxai` service user; the wrapper loads
+`/srv/proboxai/operator/config.sh`. The lower-level `./deploy.sh restart` entry
+point requires that service user and the deployment environment configuration.
+
+The CLI fetches `main`, prepares an isolated release with frozen dependencies,
+generates Prisma Client, runs release/deployment checks, typecheck, lint, tests
+and build, then checks migration readiness. Preparation runs while the existing
+backend remains available. After successful checks, it fast-forwards the clean
+source checkout, briefly stops the backend, switches the release symlink and
+starts the candidate. Success requires dependency readiness and the matching
+OpenAPI release version. Dirty/divergent source and dev/prerelease versions are
+rejected. Preparation failure keeps the existing runtime selected; a failed
+runtime switch attempts restoration and verification of the previous release.
+
+Wait for the shell prompt to return. A successful update prints
+`Deployment healthy: <version>`. For a failed operation, inspect the private log
+path printed by the CLI before retrying. Check the active release with:
+
+```bash
+runuser -u proboxai -- /srv/proboxai/operator/proboxai-deploy status
+```
+
+**Releases with database migrations need an additional operator procedure.**
+Pending or failed migrations stop the update before the runtime switch. Review
+the migration/preflight requirements, coordinate writers, take and verify a
+private database backup, explicitly apply the reviewed migrations from the
+tested candidate and validate the resulting schema before activation. The CLI
+does not apply migrations or seeds, and runtime rollback does not undo schema or
+data changes. See the [CLI migration policy](Docs/deployment-cli.md#database-and-in-flight-work-policy)
+and the [0.2.x rollout example](Docs/release-0.2.0-rollout.md).
+
+The long baseline-copy, systemd, sudoers and tool-cache commands belong to the
+[one-time app2 setup](Docs/deployment-app2.md). Routine code updates use the
+single command above. The root-owned operator CLI is installed separately from
+the source checkout; changes to the CLI itself require a reviewed update of
+`/srv/proboxai/operator/deploy.sh`.
+
+To stop and start the selected runtime without fetching or building an update:
+
+```bash
+runuser -u proboxai -- /srv/proboxai/operator/proboxai-deploy stop &&
+runuser -u proboxai -- /srv/proboxai/operator/proboxai-deploy resume
+```
+
+See the [CLI reference](Docs/deployment-cli.md) for configuration, logs, exit codes,
+health checks and recovery behavior.
+
 ## VPS configuration
+
+This section describes first-time installation on a new VPS. The configured app2
+host uses the [routine deployment workflow](#routine-production-deployments-app2)
+above.
 
 Run the API as a dedicated, unprivileged `proboxai` user. The user must own the
 application checkout, the permitted workspaces, and the session archive:
@@ -178,7 +262,8 @@ Likewise, expose only the reverse proxy on ports 80/443; keep PostgreSQL and
 the application port (`3000`) bound to the VPS loopback interface or private
 network. Do not commit this file or reuse the development Docker credentials.
 
-Deploy application dependencies and migrations as the service user:
+For the first installation, install dependencies and apply migrations as the
+service user:
 
 ```bash
 sudo -u proboxai corepack pnpm install --frozen-lockfile
@@ -213,7 +298,7 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-Enable it after each deployment:
+Enable the service after its initial installation:
 
 ```bash
 sudo systemctl daemon-reload
@@ -378,8 +463,14 @@ project creator) may change or remove one. Deleting an unprotected file or
 folder moves it into the private project trash for 30 days. A protected file,
 or a folder containing one, first creates a five-minute confirmation request;
 the separate confirmation endpoint rechecks the target before moving it to
-trash. Trash is intentionally hidden from normal file APIs and can be listed
-and restored by members or administrators.
+trash. Trash is intentionally hidden from normal file APIs. Authorized members
+or administrators can list it and restore regular files through atomic
+no-overwrite publication. Restore and expiry share a durable per-item claim;
+uncertain executions never replay automatically. Directories fail safely with
+`FILE_RESTORE_UNSUPPORTED`. `GET /projects/:id/trash/:trashId` provides scoped
+outcome evidence, including after restoration or purge. Private hard-link aliases
+remain retained; external-writer exclusion and their safe reclamation remain
+FILE03 limits. See [the restore/expiry contract](Docs/file-trash-recovery-contracts.md).
 
 Permanent project deletion is intentionally owner-controlled. A member may
 create a deletion request, but the owner must approve it. The service checks
@@ -491,8 +582,18 @@ Exact deadline ordering: [timed instants first, date-only next and unchanged sto
 
 Group metadata foundations: [active human creation, creator-only readback and durable retries](Docs/chat-group-metadata-contracts.md).
 
+Group text sending: [admitted members by default, explicit owner restrictions and durable send receipts](Docs/group-text-sending-contracts.md).
+
 Project member discovery: [permitted active-workspace candidates, filters and bounded pages](Docs/project-member-picker-contracts.md).
 
 Backend releases: [versioning and commit provenance](Docs/backend-release-versioning.md), [Available since by feature](Docs/backend-feature-availability.md) and [changelog](CHANGELOG.md). Dev prereleases are progress snapshots, not deployments; API compatibility remains /api/v1.
 
-Production CLI artifact: [systemd setup, stop/resume/update, health verification and rollback policy](Docs/deployment-cli.md). The script was sandbox-tested; no production deployment or automatic migration is implied.
+Deployment operations: [CLI configuration, commands, health verification and rollback policy](Docs/deployment-cli.md), [one-time app2 setup](Docs/deployment-app2.md), and [database migration rollout](Docs/release-0.2.0-rollout.md).
+
+## Session detail retrieval increment
+
+Authorized current session managers can use the separate bounded, versioned
+`GET /api/v1/sessions/:id/events/:eventId/details` projection for redacted retained
+commands, combined output and file changes. See
+[the contract and local handoff](Docs/session-detail-retrieval-contracts.md).
+Existing live/archive metadata policy and long-lived retention remain unchanged.

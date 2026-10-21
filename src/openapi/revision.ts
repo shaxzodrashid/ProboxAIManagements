@@ -1,3 +1,4 @@
+import { ApiErrorResponseDto } from "./api-docs";
 import { createParamDecorator, ExecutionContext } from "@nestjs/common";
 import {
   ApiHeader,
@@ -45,10 +46,12 @@ export const ApiRevision = (scope = "department/version") =>
       description: `Exact quoted revision from the current ${scope} snapshot. Preserve entered data on 409, reread and resolve; never automatically replay stale edits.`,
     }),
     ApiConflictResponse({
+      type: ApiErrorResponseDto,
       description:
         "STALE_REVISION or lifecycle conflict; no mutation committed.",
     }),
     ApiResponse({
+      type: ApiErrorResponseDto,
       status: 428,
       description: "REVISION_REQUIRED: missing If-Match.",
     }),

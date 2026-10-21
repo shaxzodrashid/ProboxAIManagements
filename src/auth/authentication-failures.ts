@@ -1,4 +1,5 @@
 import { ServiceUnavailableException } from "@nestjs/common";
+import { isPrismaAvailabilityFailure } from "../prisma/dependency-errors";
 import {
   JsonWebTokenError,
   NotBeforeError,
@@ -61,5 +62,21 @@ export async function authenticationDependency<T>(
     return await operation();
   } catch {
     throw authenticationUnavailable();
+  }
+}
+
+/** Narrow login DB boundary: never wrap credential checks or token signing. */
+export async function loginDependency<T>(
+  operation: () => PromiseLike<T> | T,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (
+      error instanceof ServiceUnavailableException ||
+      isPrismaAvailabilityFailure(error)
+    )
+      throw authenticationUnavailable();
+    throw error;
   }
 }

@@ -36,6 +36,9 @@ export async function listSessions(
   actor: AuthenticatedUser,
   query: SessionListQueryDto,
 ) {
+  const projectId = query.projectId?.toLowerCase();
+  // Retain existing unfiltered cursor identities; bind project-filtered cursors
+  // to their explicit task-board scope without treating the hash as authority.
   const scope = createHash("sha256")
     .update(
       JSON.stringify([
@@ -43,6 +46,7 @@ export async function listSessions(
         actor.workspaceId,
         query.taskId ?? null,
         [...(query.statuses ?? [])].sort(),
+        ...(projectId ? [["task-board-project", projectId]] : []),
       ]),
     )
     .digest("hex");
@@ -112,7 +116,27 @@ export async function listSessions(
           throw new BadRequestException("Invalid session list cursor");
         const where: Prisma.ProboxAiSessionWhereInput = {
           workspaceId: actor.workspaceId,
-          task: { workspaceId: actor.workspaceId, managerId: actor.id },
+          task: {
+            workspaceId: actor.workspaceId,
+            managerId: actor.id,
+            ...(projectId
+              ? {
+                  boardEntry: {
+                    is: {
+                      status: {
+                        board: {
+                          projectId,
+                          project: {
+                            workspaceId: actor.workspaceId,
+                            members: { some: { userId: actor.id } },
+                          },
+                        },
+                      },
+                    },
+                  },
+                }
+              : {}),
+          },
           ...(query.taskId ? { taskId: query.taskId } : {}),
           ...(query.statuses ? { status: { in: query.statuses } } : {}),
           createdAt: { lte: new Date(asOf) },
@@ -134,8 +158,31 @@ export async function listSessions(
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
           take: limit + 1,
         });
-        const items = rows.slice(0, limit).map((row) => ({
+        const page = rows.slice(0, limit);
+        // Only explicit project queries have already established the human-task
+        // membership authority needed for task display. Hydrate one page in one
+        // batch inside this same snapshot; global summaries keep their old shape.
+        const tasks =
+          projectId && page.length
+            ? await tx.task.findMany({
+                where: {
+                  id: { in: [...new Set(page.map((row) => row.taskId))] },
+                  workspaceId: actor.workspaceId,
+                },
+                select: { id: true, title: true },
+              })
+            : [];
+        const taskContexts = new Map(
+          tasks.map((task) => [
+            task.id,
+            { id: task.id, title: task.title, projectId: projectId! },
+          ]),
+        );
+        if (projectId && page.some((row) => !taskContexts.has(row.taskId)))
+          throw new Error("Authorized task context unavailable");
+        const items = page.map((row) => ({
           ...row,
+          ...(projectId ? { task: taskContexts.get(row.taskId)! } : {}),
           stopConfirmation: [
             "NOT_OBSERVED",
             "NOT_STARTED",

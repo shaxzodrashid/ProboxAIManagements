@@ -1,5 +1,15 @@
 # Human task collaboration — October 13 approved increment
 
+The later [shared-task association foundation](shared-human-task-contracts.md)
+adds explicit owner-controlled additional boards and minimal canonical/local-state
+reads. Original ownership, assignment, content/history and execution scopes below
+remain intact; full destination content and canonical completion writes are pending
+their separate authority/disclosure choices. Sharing preserves the original link.
+
+The later [public assignee identity increment](task-assignee-identity-contracts.md)
+adds current public names to fresh read responses for task and checklist identity
+lookup. Frozen mutation/audit snapshots keep the original ID-only contract.
+
 The subsequent [checklist item deadline increment](checklist-item-deadline-contracts.md)
 adds optional item deadlines. The pending-deadline references below describe this
 earlier checkpoint; its route and permission boundaries remain in effect.

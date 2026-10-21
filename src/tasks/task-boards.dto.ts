@@ -30,7 +30,11 @@ export class BoardMutationDto {
   requestId!: string;
 }
 export class CreateBoardStatusDto extends BoardMutationDto {
-  @ApiProperty({ maxLength: 120 })
+  @ApiProperty({
+    maxLength: 120,
+    description:
+      "Trimmed nonblank status name, at most 120 Unicode code points (not grapheme clusters).",
+  })
   @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
   @IsString()
   @MaxLength(120)
@@ -40,7 +44,11 @@ export class CreateBoardStatusDto extends BoardMutationDto {
   color!: (typeof BoardColors)[number];
 }
 export class UpdateBoardStatusDto extends BoardMutationDto {
-  @ApiPropertyOptional({ maxLength: 120 })
+  @ApiPropertyOptional({
+    maxLength: 120,
+    description:
+      "Trimmed nonblank status name, at most 120 Unicode code points (not grapheme clusters).",
+  })
   @ValidateIf((_o, v) => v !== undefined)
   @Transform(({ value }) => (typeof value === "string" ? value.trim() : value))
   @IsString()
@@ -98,7 +106,11 @@ export class BoardColorPairDto {
 }
 export class BoardStatusResponseDto {
   @ApiProperty({ format: "uuid" }) id!: string;
-  @ApiProperty() name!: string;
+  @ApiProperty({
+    maxLength: 120,
+    description: "Plain-text workflow label, at most 120 Unicode code points.",
+  })
+  name!: string;
   @ApiProperty({ enum: BoardColors }) color!: string;
   @ApiProperty({ type: BoardColorPairDto }) palette!: BoardColorPairDto;
   @ApiProperty({ minimum: 0 }) position!: number;

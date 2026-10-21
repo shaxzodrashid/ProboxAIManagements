@@ -8,13 +8,13 @@ For the OpenAI stack, the cleanest architecture today is to use the **Agents SDK
 
 So the practical recommendation is this:
 
-| Layer | Recommended technology | Why |
-|---|---|---|
-| Manager and orchestration | OpenAI Agents SDK on your server | Built-in handoffs, guardrails, tracing, resumable approvals, specialist separation |
-| Long-running and custom API-driven logic | Responses API and background mode where you need direct control | Best when you want to own branching, state, or tool routing |
-| Coding workers | Codex SDK for local coding-focused threads, or Codex CLI exposed as MCP for Manager-driven workflows | Best specialist for repo work, plans, diffs, testing, and iterative coding |
-| Design worker | Figma MCP | Structured design read access, and controlled write-to-canvas workflows |
-| API workspace worker | Postman API | Read, fork, update collections/specs, and keep docs/specs in sync |
+| Layer                                    | Recommended technology                                                                               | Why                                                                                |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Manager and orchestration                | OpenAI Agents SDK on your server                                                                     | Built-in handoffs, guardrails, tracing, resumable approvals, specialist separation |
+| Long-running and custom API-driven logic | Responses API and background mode where you need direct control                                      | Best when you want to own branching, state, or tool routing                        |
+| Coding workers                           | Codex SDK for local coding-focused threads, or Codex CLI exposed as MCP for Manager-driven workflows | Best specialist for repo work, plans, diffs, testing, and iterative coding         |
+| Design worker                            | Figma MCP                                                                                            | Structured design read access, and controlled write-to-canvas workflows            |
+| API workspace worker                     | Postman API                                                                                          | Read, fork, update collections/specs, and keep docs/specs in sync                  |
 
 That gives you the exact hybrid you asked for: **Codex SDK + API technologies**, but with the architecture split in the right place rather than forcing one tool to do everything. citeturn28view2turn21view0turn30view0turn15view2turn15view4turn15view5turn15view7
 
@@ -69,12 +69,12 @@ The coding workers should run in **isolated worktrees and sandboxes**, not direc
 
 Here is the role model that best matches your idea while staying technically enforceable.
 
-| Role | Core responsibility | Default tool surface | Human-facing permission |
-|---|---|---|---|
-| Manager | Intake, decomposition, routing, approvals, integration, final reporting | Agents SDK handoffs, policy broker, read access to project metadata, approval tools, status tools | Yes |
-| Designer | Create or update design artifacts and design rationale | Figma MCP read; Figma write only in allowed scopes; artifact publish tool | No |
-| Frontend developer | Build UI from approved design/context and connect to backend contracts | Repo sandbox for frontend paths, Figma read, Postman read or fork, preview/test tools | No |
-| Backend developer | Build endpoints, migrations, jobs, and API documentation | Repo sandbox for backend paths, Figma read, Postman write/update/spec sync, DB migration tools | No |
+| Role               | Core responsibility                                                     | Default tool surface                                                                              | Human-facing permission |
+| ------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------- |
+| Manager            | Intake, decomposition, routing, approvals, integration, final reporting | Agents SDK handoffs, policy broker, read access to project metadata, approval tools, status tools | Yes                     |
+| Designer           | Create or update design artifacts and design rationale                  | Figma MCP read; Figma write only in allowed scopes; artifact publish tool                         | No                      |
+| Frontend developer | Build UI from approved design/context and connect to backend contracts  | Repo sandbox for frontend paths, Figma read, Postman read or fork, preview/test tools             | No                      |
+| Backend developer  | Build endpoints, migrations, jobs, and API documentation                | Repo sandbox for backend paths, Figma read, Postman write/update/spec sync, DB migration tools    | No                      |
 
 That matrix is consistent with current platform capabilities. Figma’s MCP server brings structured design context to agents and now supports writing back to canvas, but Figma’s own help docs make an important distinction: agents can read design components, variables, and layout data broadly, while **write-to-canvas requires write-capable setup**, and Dev seats have read-only access outside drafts whereas Full seats are required for broader write workflows. That strongly suggests using a **dedicated Designer service identity** for write access, while Frontend and Backend workers should normally remain Figma-read-only. citeturn22view1turn22view2turn15view5turn15view6
 
@@ -90,13 +90,13 @@ Your requirement that the system should know when to stop is exactly right, and 
 
 The right operating rule is **bounded autonomy**:
 
-| Situation | Default behavior |
-|---|---|
-| Purely internal, reversible, sandboxed actions | Continue automatically |
-| External or irreversible side effects | Pause for approval |
-| High ambiguity or conflicting evidence | Ask a clarifying question |
-| Confidence below threshold or tests incomplete | Pause with evidence package |
-| Any request involving secrets, permissions, publishing, or destructive data change | Mandatory approval |
+| Situation                                                                          | Default behavior            |
+| ---------------------------------------------------------------------------------- | --------------------------- |
+| Purely internal, reversible, sandboxed actions                                     | Continue automatically      |
+| External or irreversible side effects                                              | Pause for approval          |
+| High ambiguity or conflicting evidence                                             | Ask a clarifying question   |
+| Confidence below threshold or tests incomplete                                     | Pause with evidence package |
+| Any request involving secrets, permissions, publishing, or destructive data change | Mandatory approval          |
 
 This policy is not just prudence; it is the correct response to current agent-security realities. OWASP identifies prompt injection as the top LLM application risk, and OWASP’s agentic guidance emphasizes that autonomous systems expand the risk surface because they plan, act, and call tools. NIST’s generative AI profile likewise frames trustworthiness and risk management as lifecycle concerns, not one-time prompt concerns. So your Manager should treat **user input, worker output, and tool output as potentially confusable or malicious**, and stop whenever a meaningful side effect crosses a risk boundary. citeturn11search0turn11search4turn17view4turn17view5
 
@@ -118,14 +118,14 @@ Observability should be built in from day one. The Agents SDK already emits stru
 
 The safest build path is incremental. Start with a Manager and one coding worker, prove the control plane, then add true multi-role behavior only after you can observe and govern it.
 
-| Phase | What you build | What “done” looks like |
-|---|---|---|
-| Foundation | Task API, event store, Manager, one Codex worker, git worktree isolation, approval API | One feature-sized backend-only task can run end to end with pause/resume and full audit trail |
-| Role specialization | Add Designer and Frontend workers, Figma read integration, Postman read/fork integration | A UI feature with new endpoint can produce design-aware FE and BE changes from one task |
-| Canonical artifact flow | PRD delta, design delta, API contract, migration plan, acceptance checklist as typed objects | Workers no longer depend on free-form chat history to coordinate |
-| Governance and hardening | Approval policies, secret broker, tool-allow lists, role-specific GitHub Apps, branch protections | Sensitive actions are paused, logged, and resumable; no worker can escalate itself |
-| Realtime product layer | Website timeline, approvals UI, artifact browser, replay, run comparison, operator controls | Humans can assign, route, approve, reject, and inspect runs in real time |
-| Evaluation and scale | Public benchmarks plus internal product benchmarks, latency/cost dashboards, failure taxonomy | You can measure improvement, not just feel it |
+| Phase                    | What you build                                                                                    | What “done” looks like                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Foundation               | Task API, event store, Manager, one Codex worker, git worktree isolation, approval API            | One feature-sized backend-only task can run end to end with pause/resume and full audit trail |
+| Role specialization      | Add Designer and Frontend workers, Figma read integration, Postman read/fork integration          | A UI feature with new endpoint can produce design-aware FE and BE changes from one task       |
+| Canonical artifact flow  | PRD delta, design delta, API contract, migration plan, acceptance checklist as typed objects      | Workers no longer depend on free-form chat history to coordinate                              |
+| Governance and hardening | Approval policies, secret broker, tool-allow lists, role-specific GitHub Apps, branch protections | Sensitive actions are paused, logged, and resumable; no worker can escalate itself            |
+| Realtime product layer   | Website timeline, approvals UI, artifact browser, replay, run comparison, operator controls       | Humans can assign, route, approve, reject, and inspect runs in real time                      |
+| Evaluation and scale     | Public benchmarks plus internal product benchmarks, latency/cost dashboards, failure taxonomy     | You can measure improvement, not just feel it                                                 |
 
 This phased route is justified by both the current tools and the research. OpenAI’s SDK stack now supports specialist agents, handoffs, tracing, guardrails, and resumable approvals directly; Codex can be used as a specialist inside broader workflows; and durable workflow engines such as Temporal are specifically designed for pause/resume and external signal patterns. Meanwhile, the software-agent research literature repeatedly shows that coordination quality matters more than raw agent count. citeturn30view0turn30view1turn30view3turn30view4turn15view8turn15view9turn19view5
 

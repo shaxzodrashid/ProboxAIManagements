@@ -42,6 +42,14 @@ export class SessionListQueryDto {
   @IsOptional()
   @IsUUID("4")
   taskId?: string;
+  @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "Filter by the task's explicit project-board association and current project membership. Intersects taskId/statuses; unknown/inaccessible projects yield an empty list. Never infers membership from a session's saved execution project or cwd.",
+  })
+  @IsOptional()
+  @IsUUID("4")
+  projectId?: string;
   @ApiPropertyOptional({ minimum: 1, maximum: 100, default: 100 })
   @Transform(({ value }) =>
     typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)
@@ -62,7 +70,26 @@ export class SessionListQueryDto {
   @MaxLength(2048)
   cursor?: string;
 }
+export class SessionListTaskContextDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({
+    description: "Current task title from this page's authorized snapshot.",
+  })
+  title!: string;
+  @ApiProperty({
+    format: "uuid",
+    description:
+      "Explicit task-board project; never the saved execution project.",
+  })
+  projectId!: string;
+}
 export class SessionListItemDto {
+  @ApiPropertyOptional({
+    type: SessionListTaskContextDto,
+    description:
+      "Present only with a projectId filter, after current project membership and assigned-session checks. Current per-page metadata, not frozen by asOf. No project label, execution content or action capability is implied.",
+  })
+  task?: SessionListTaskContextDto;
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ format: "uuid" }) taskId!: string;
   @ApiProperty({

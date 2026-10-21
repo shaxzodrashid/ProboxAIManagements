@@ -6,3 +6,5 @@ dist/
 coverage/
 *.log
 prisma/*.db
+artifacts/
+Docs/**/*.json

@@ -75,6 +75,7 @@ export class TaskDeadlinesService {
         id: true,
         creatorId: true,
         managerId: true,
+        humanState: { select: { archivedAt: true, deletedAt: true } },
         boardEntry: {
           select: {
             status: {
@@ -120,6 +121,7 @@ export class TaskDeadlinesService {
     return {
       taskId: task.id,
       record: task.deadline,
+      inactive: !!(task.humanState?.archivedAt || task.humanState?.deletedAt),
       project: task.boardEntry?.status.board.project,
     };
   }
@@ -184,7 +186,11 @@ export class TaskDeadlinesService {
               "Task deadline changed; reread and resolve",
               "setTaskDeadline",
             );
-          if (state.project?.archivedAt || state.project?.status === "DELETING")
+          if (
+            state.inactive ||
+            state.project?.archivedAt ||
+            state.project?.status === "DELETING"
+          )
             throw operationError(
               409,
               "TASK_DEADLINE_PROJECT_INACTIVE",

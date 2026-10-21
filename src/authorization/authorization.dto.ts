@@ -115,6 +115,28 @@ export class AssignedRoleResponseDto {
   @ApiProperty() name!: string;
 }
 
+/** No caller-selected identity, workspace or grant filters are accepted. */
+export class SelfAuthorizationQueryDto {}
+
+export class SelfAuthorizationResponseDto {
+  @ApiProperty({ format: "uuid" }) id!: string;
+  @ApiProperty({
+    format: "uuid",
+    description: "Current persisted workspace, not a stale token claim.",
+  })
+  workspaceId!: string;
+  @ApiProperty({ type: AssignedRoleResponseDto, isArray: true })
+  roles!: AssignedRoleResponseDto[];
+  @ApiProperty({
+    type: String,
+    isArray: true,
+    uniqueItems: true,
+    description:
+      "Sorted effective permission keys from current role assignments. Empty is verified zero grants; resource scope and lifecycle checks still apply.",
+  })
+  permissions!: string[];
+}
+
 export class UserRolesResponseDto extends RevisionResponseDto {
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ type: AssignedRoleResponseDto, isArray: true })

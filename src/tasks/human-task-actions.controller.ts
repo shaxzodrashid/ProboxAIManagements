@@ -52,6 +52,50 @@ import {
 @ApiValidationErrors()
 export class HumanTaskActionsController {
   constructor(private readonly tasks: HumanTaskActionsService) {}
+  @Post("archive")
+  @HttpCode(200)
+  @Header("Cache-Control", "no-store")
+  @RequirePermissions(Permissions.TASK_DETAILS_MANAGE)
+  @ApiRevision("human task")
+  @ApiOperation({
+    summary: "Archive canonical human task content on every sharing side",
+    description:
+      "Current creator, original-project membership and tasks.details.manage. Retains task, shares, checklists, comments and audit. One-way marker; new human mutations conflict. Runner execution remains independent.",
+  })
+  @ApiOkResponse({ type: HumanTaskMutationResponseDto })
+  archive(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param("projectId", new ParseUUIDPipe({ version: "4" })) projectId: string,
+    @Param("taskId", new ParseUUIDPipe({ version: "4" })) taskId: string,
+    @ExpectedRevision() revision: number,
+    @Body() dto: BoardMutationDto,
+  ) {
+    return this.tasks.mutate(actor, projectId, taskId, revision, "ARCHIVE", {
+      ...dto,
+    });
+  }
+  @Delete("content")
+  @Header("Cache-Control", "no-store")
+  @RequirePermissions(Permissions.TASK_DETAILS_MANAGE)
+  @ApiRevision("human task")
+  @ApiOperation({
+    summary:
+      "Mark canonical human task content deleted while retaining its history",
+    description:
+      "Current creator, original-project membership and tasks.details.manage. Soft deletion only: all sharing sides retain explicit DELETED content and historical reads. No task/session purge, automatic unshare, reopening or runner cancellation.",
+  })
+  @ApiOkResponse({ type: HumanTaskMutationResponseDto })
+  deleteContent(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param("projectId", new ParseUUIDPipe({ version: "4" })) projectId: string,
+    @Param("taskId", new ParseUUIDPipe({ version: "4" })) taskId: string,
+    @ExpectedRevision() revision: number,
+    @Body() dto: BoardMutationDto,
+  ) {
+    return this.tasks.mutate(actor, projectId, taskId, revision, "DELETE", {
+      ...dto,
+    });
+  }
   @Post("link")
   @HttpCode(200)
   @Header("Cache-Control", "no-store")

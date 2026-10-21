@@ -1,5 +1,159 @@
 # Backend changelog
 
+## 0.3.0-dev.10 — verified API documentation handoff
+
+- Export all 160 registered local operations and their source-derived DTO/security
+  contracts without starting application services or running workflows.
+- Prepare deduplicated documentation for the existing private Postman workspace:
+  preserve 81 saved scenarios, add 80 missing operations, keep environment values
+  and credentials untouched. Validate refs, placeholders and request templates.
+- Record remaining product/security/storage decisions and backend/UI boundaries.
+
+External synchronization is blocked by automatic approval review: the first
+collection replacement was rejected and no write succeeded. The exact local
+artifacts and pending plan are in [the API handoff](Docs/api/README.md).
+No push, public publishing, deployment or production migration.
+
+## 0.3.0-dev.9 — atomic Profile Save
+
+- Add coherent edit read and guarded whole-Save commit/readback for profile fields,
+  supplied privacy and optional shared manual availability in one transaction.
+- Cover legacy and internal writers with an aggregate generation; preserve
+  standalone status revision/errors and truthful human mutation history.
+- Add minimal private root receipts for exact retries and unknown-outcome recovery.
+
+Additive migration20261016020000 preserves existing content, policies and status
+history. Frontend/Figma wiring and agent activation remain unfinished. See
+[contract](Docs/atomic-profile-save-contracts.md) and [UI handoff](Docs/backend-ui-handoff.md).
+No push, deployment or production migration.
+
+## 0.3.0-dev.8 — shared manual availability and UI handoff
+
+- Add self read/set/clear and public read for one shared Available/Away/Busy value.
+  No selected default, audience-specific rule or automatic presence inference.
+- Coordinate human writes with revisions, request receipts and truthful employee
+  history; exact retries never overwrite a newer status. Agent execution stays off.
+- Retain legacy STATUS audience metadata without applying it to shared availability;
+  other profile privacy remains independent. Add the ongoing backend/UI handoff.
+
+Additive migration20261016010000 has no user/policy/grant backfill. Custom text,
+badge symbols, expiry and coordinated main-profile/status Save remain unfinished.
+See [status contract](Docs/shared-manual-status-contracts.md) and
+[UI impact](Docs/backend-ui-handoff.md). No deployment or live credentials.
+
+## 0.3.0-dev.7 — inactive delegated bio domain foundation
+
+- Model trusted employee/agent separation, exact manual approval, revision-safe
+  bio changes, frozen replay and actual-actor history behind mandatory ports.
+- Model separate content/privacy scopes, one-time owner permission snapshots and
+  permanent downward removal; human overwrite clears the current AI badge.
+- Missing identity or atomic persistence fails closed. No production adapters,
+  routes, Nest registration, credentials or migration; current writers unchanged.
+
+In-memory tests prove domain rules and simulated transactions only. Activation
+requires real agent authentication, persistence, coordinated human writers and
+permission-loss hooks together; no live functionality or checklist closure is
+claimed. See [activation boundaries](Docs/delegated-bio-foundation-contracts.md).
+
+## 0.3.0-dev.6 — task text limit compatibility
+
+- Preserve existing creation limits on human detail edits: title240 and
+  description16000, using shared limits and the same class-validator length
+  semantics in DTOs and service guards. Valid existing Unicode text can round-trip.
+- Keep checklist title200, execution-only criteria8000, title trimming and
+  nonblank checks, ownership, revisions and frozen replay contracts unchanged.
+
+This fixes TASK04's bounded text-limit compatibility gap. No migration, new
+permission, provider or profile policy is introduced. See the
+[text limit contract](Docs/task-text-limit-contracts.md).
+
+## 0.3.0-dev.5 — recoverable task creation
+
+- Add optional requestId to existing POST/tasks: same owner/workspace/key and
+  canonical input replay the original201 task; changed reuse conflicts409.
+- Atomically store a narrow frozen receipt with the task. Create-only owners
+  can reconcile through GET/tasks/creations/:requestId without task-read grants.
+- Preserve legacy no-key behavior, field limits and creator/execution-manager
+  defaults. Recheck current creation authority under the workspace lock.
+
+Additive migration20261016000000 adds opt-in receipts without backfill or grants;
+fresh and legacy-data isolated migration checks passed. This closes TASK04's
+bounded uncertain-create recovery subset, not new project-task creation or the
+full Task Manager. See [recovery contract](Docs/task-creation-recovery-contracts.md).
+
+## 0.3.0-dev.4 — task identity in project session queries
+
+- Add current task identity/title and explicit board project ID only to the
+  existing project-filtered assigned-session index. Reuse current project
+  membership, session-read, assigned-manager and workspace checks.
+- Preserve global/task-only summaries, session keyset ordering/cursors and saved
+  execution context. Select only page task IDs/titles in the same snapshot;
+  expose no project label, description, criteria or new capability guarantee.
+
+This closes MAIN01's bounded project-session task-identity subset. Broader Home
+feeds, project-label/capability composition and complete counts remain open.
+No migration, new permission or agent/profile policy is introduced. See the
+[task identity contract](Docs/project-session-task-identity-contracts.md).
+
+## 0.3.0-dev.3 — public task assignee identities
+
+- Include current allowlisted public names on fresh member-only human task
+  detail, list and query items, shared by task and checklist assignee IDs.
+- Reuse structured names and verbatim legacy display fallback, without private
+  aliases, profile fields or invented avatar delivery. Retained inactive or
+  foreign-workspace IDs have no hydrated identity.
+- Preserve frozen mutation/audit responses, assignment eligibility and task query
+  generation. Public identity is current per-page display metadata.
+
+This closes the public-name read subset of TASK04/TASK05 only. No migration,
+new grant or profile/status policy is introduced. See the
+[assignee identity contract](Docs/task-assignee-identity-contracts.md).
+
+## 0.3.0-dev.2 — human task workflow display
+
+- Add current `workflowStatus` to member-only human task detail, compatibility list
+  and bounded query items, sharing the board's allowlisted identity, label, semantic
+  color, position and fixed palette. No additional board or management grant.
+- Keep frozen mutation/audit responses and legacy execution-task contracts unchanged;
+  no historical snapshot rewrite or runner-status inference.
+- Match status-name validation to the existing 120-Unicode-code-point database
+  boundary, preserving valid astral names and rejecting oversized presentation
+  sequences before writes. Unknown display metadata fails unavailable.
+
+This closes TASK02's resolved per-task workflow-display subset, with no migration,
+new colors, publication, deployment or profile policy. See the
+[workflow display contract](Docs/task-workflow-display-contracts.md).
+
+## 0.3.0-dev.1 — explicit project-task session query
+
+- Add an optional `projectId` filter to the existing assigned-session index,
+  using the task's explicit board/project association and current project
+  membership alongside existing assignment, workspace and session-read checks.
+- Intersect task/status filters, bind project-scoped cursors to canonical identity,
+  preserve unfiltered cursor compatibility and the existing minimal response.
+  Saved execution project/cwd never substitutes for the board association.
+- Verify membership/assignment/workspace revocation, archives, broad-grant denial,
+  execution-context separation, validation and OpenAPI through isolated HTTP tests.
+  No migration, new grant, runner action or production change is introduced.
+
+This closes the bounded MAIN01 project-task query subset; broader Home feeds,
+counts and action/capability composition remain incomplete. See
+[project session query contract](Docs/project-session-query-contracts.md).
+
+## 0.2.3-dev.1 — profile Contact revocation correction
+
+- Remove caller-owned directed Contact grants and private aliases with
+  case-insensitive UUID matching. A valid uppercase or mixed-case DELETE can no
+  longer report success while leaving Contacts-only biography or birthday access.
+- Revoke matching historical text spellings without rewriting account identities;
+  preserve other owners' Contacts and all separately selected audience policies.
+- Cover actual HTTP/PostgreSQL redaction after removal, repeated requests,
+  historical references, authentication and validation. No schema migration or
+  new profile/status/default policy is introduced. See
+  [contract and verification](Docs/profile-contact-revocation-contracts.md).
+
+Local development checkpoint only. No push, deployment or production action.
+
 ## 0.2.2 — concurrent profile test-server lifetime
 
 - Give the self-profile HTTP suite an explicitly listening loopback server for its

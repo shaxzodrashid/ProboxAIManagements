@@ -10,9 +10,13 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { Observable } from "rxjs";
-import { safeRunnerEvent, eventResponse } from "./safe-session-event";
+import {
+  safeRunnerEvent,
+  eventResponse,
+  publicSessionEventSelect,
+} from "./safe-session-event";
 import { appendSessionEvent } from "./durable-session-events";
 import { Prisma, SessionStatus, TaskStatus, TurnStatus } from "@prisma/client";
 import { ProboxAiRunner, RunnerEvent } from "./proboxai-runner.service";
@@ -25,8 +29,23 @@ import {
 } from "./session-projections";
 import { CreateSessionDto } from "./dto";
 import { ModelCatalogService } from "./model-catalog.service";
+import { personalSessionSelection } from "./personal-model-preferences.service";
+import { KeyedCreateSessionDto } from "./session-creation.dto";
+import {
+  archiveRunnerEvent,
+  archiveHash,
+  historyJson,
+  historyText,
+  protectSessionPrompt,
+  sessionExecutionPrompt,
+  sessionRuntimeProvenance,
+  SESSION_ARCHIVE_POLICY_VERSION,
+} from "./session-history";
 import * as path from "node:path";
 import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
+import { readDependency } from "../prisma/read-dependency";
+import { archiveEventResponse } from "./session-history";
+import { sessionDetailPage } from "./session-detail";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { SessionListQueryDto } from "./session-list.dto";
 import { listSessions } from "./session-list";
@@ -37,6 +56,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   private readonly owner = randomUUID();
   private recoveryTimer?: NodeJS.Timeout;
   private recoveryBusy = false;
+  private creationDispatchBusy = false;
   constructor(
     private readonly prisma: PrismaService,
     private readonly runner: ProboxAiRunner,
@@ -257,11 +277,115 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async create(actorId: string, dto: CreateSessionDto, start = true) {
-    const selection = this.modelCatalog.resolve(
-      dto.providerId,
-      dto.model,
-      dto.reasoningEffort,
+    const { creationReceipt: _creationReceipt, ...result } =
+      await this.acceptCreation(actorId, dto, start);
+    return result;
+  }
+  async submitCreation(actor: AuthenticatedUser, dto: KeyedCreateSessionDto) {
+    if (actor.type !== undefined && actor.type !== "access")
+      throw new ForbiddenException("Human session creation required");
+    if (
+      [
+        dto.projectId,
+        dto.cwd,
+        dto.providerId,
+        dto.model,
+        dto.reasoningEffort,
+      ].some((value) => value === null)
+    )
+      throw new BadRequestException(
+        "Omit optional session fields instead of null",
+      );
+    const requestId = dto.requestId.toLowerCase();
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        requestId,
+      )
+    )
+      throw new BadRequestException("UUIDv4 creation intent required");
+    const normalized = {
+      taskId: dto.taskId.toLowerCase(),
+      prompt: dto.prompt,
+      sandbox: dto.sandbox,
+      ...(dto.projectId === undefined
+        ? {}
+        : { projectId: dto.projectId.toLowerCase() }),
+      ...(dto.cwd === undefined ? {} : { cwd: dto.cwd }),
+      ...(dto.providerId === undefined ? {} : { providerId: dto.providerId }),
+      ...(dto.model === undefined ? {} : { model: dto.model }),
+      ...(dto.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: dto.reasoningEffort }),
+    };
+    const inputHash = createHash("sha256")
+      .update(JSON.stringify(normalized))
+      .digest("hex");
+    const result = await this.acceptCreation(actor.id, normalized, true, {
+      requestId,
+      inputHash,
+      workspaceId: actor.workspaceId,
+    });
+    return result.creationReceipt!;
+  }
+  private creationReceipt(session: {
+    id: string;
+    creationRequestId: string | null;
+    creationInitialTurnId: string | null;
+    creationAcceptedAt: Date | null;
+  }) {
+    if (
+      !session.creationRequestId ||
+      !session.creationInitialTurnId ||
+      !session.creationAcceptedAt
+    )
+      throw new ServiceUnavailableException(
+        "Session creation receipt is unavailable",
+      );
+    return {
+      accepted: true as const,
+      requestId: session.creationRequestId,
+      sessionId: session.id,
+      initialTurnId: session.creationInitialTurnId,
+      acceptedAt: session.creationAcceptedAt,
+    };
+  }
+  async creationOutcome(actor: AuthenticatedUser, requestId: string) {
+    return readDependency("readSessionCreation", () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          const session = await tx.proboxAiSession.findUnique({
+            where: {
+              creatorId_creationRequestId: {
+                creatorId: actor.id,
+                creationRequestId: requestId.toLowerCase(),
+              },
+            },
+          });
+          if (!session || session.workspaceId !== actor.workspaceId)
+            throw new NotFoundException("Session creation not found");
+          await this.assertManager(actor.id, session.id, "sessions.create", tx);
+          return this.creationReceipt(session);
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
     );
+  }
+  private async acceptCreation(
+    actorId: string,
+    dto: CreateSessionDto,
+    start: boolean,
+    creation?: { requestId: string; inputHash: string; workspaceId: string },
+  ) {
+    const explicitSelection =
+      [dto.providerId, dto.model, dto.reasoningEffort].some(
+        (value) => value !== undefined,
+      ) && !creation
+        ? this.modelCatalog.resolve(
+            dto.providerId,
+            dto.model,
+            dto.reasoningEffort,
+          )
+        : null;
     const accepted = await this.transaction(async (tx) => {
       await tx.$queryRaw`SELECT w.id FROM "Workspace" w JOIN "Task" t ON t."workspaceId" = w.id WHERE t.id = ${dto.taskId} FOR UPDATE OF w`;
       await tx.$queryRaw`SELECT id FROM "Task" WHERE id = ${dto.taskId} FOR UPDATE`;
@@ -285,7 +409,8 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
       if (
         !actor ||
         actor.status !== "OPEN" ||
-        actor.workspaceId !== task.workspaceId
+        actor.workspaceId !== task.workspaceId ||
+        (creation && actor.workspaceId !== creation.workspaceId)
       )
         throw new NotFoundException("Task not found");
       if (task.managerId !== actorId)
@@ -298,6 +423,39 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
         )
       )
         throw new ForbiddenException("Session creation is no longer available");
+      if (creation) {
+        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${"session-create:" + actorId + ":" + creation.requestId}, 0))`;
+        const prior = await tx.proboxAiSession.findUnique({
+          where: {
+            creatorId_creationRequestId: {
+              creatorId: actorId,
+              creationRequestId: creation.requestId,
+            },
+          },
+        });
+        if (prior) {
+          if (
+            prior.creationInputHash !== creation.inputHash ||
+            prior.workspaceId !== actor.workspaceId ||
+            prior.taskId !== task.id
+          )
+            throw new ConflictException(
+              "Creation intent already has different input",
+            );
+          return { session: prior, turn: null, created: false };
+        }
+      }
+      const selection =
+        explicitSelection ??
+        ([dto.providerId, dto.model, dto.reasoningEffort].some(
+          (value) => value !== undefined,
+        )
+          ? this.modelCatalog.resolve(
+              dto.providerId,
+              dto.model,
+              dto.reasoningEffort,
+            )
+          : await personalSessionSelection(tx, this.modelCatalog, actorId));
       const cwd = this.requireValidDirectory(
         await this.executionValidation(
           tx,
@@ -308,8 +466,28 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
           dto.sandbox,
         ),
       );
+      const sessionId = randomUUID(),
+        initialTurnId = start ? randomUUID() : null;
+      const protectedInput = start
+        ? protectSessionPrompt(
+            dto.prompt,
+            sessionId,
+            initialTurnId!,
+            !!creation,
+          )
+        : null;
       const session = await tx.proboxAiSession.create({
         data: {
+          id: sessionId,
+          ...(creation
+            ? {
+                creationRequestId: creation.requestId,
+                creationInputHash: creation.inputHash,
+                creationInitialTurnId: initialTurnId,
+                creationAcceptedAt: now,
+              }
+            : {}),
+          runtimeProvenance: await sessionRuntimeProvenance(tx),
           workspaceId: task.workspaceId,
           taskId: task.id,
           creatorId: actorId,
@@ -323,18 +501,21 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
           requestedReasoningEffort: selection.requestedReasoningEffort,
           effectiveReasoningEffort: selection.effectiveReasoningEffort,
           catalogSnapshot: selection.catalogSnapshot as Prisma.InputJsonValue,
-          status: start ? SessionStatus.RUNNING : SessionStatus.QUEUED,
-          startedAt: start ? now : null,
-          runOwner: start ? this.owner : null,
-          runLeaseExpiresAt: start ? new Date(now.getTime() + 60000) : null,
+          status:
+            start && !creation ? SessionStatus.RUNNING : SessionStatus.QUEUED,
+          startedAt: start && !creation ? now : null,
+          runOwner: start && !creation ? this.owner : null,
+          runLeaseExpiresAt:
+            start && !creation ? new Date(now.getTime() + 60000) : null,
           stopConfirmation: "NOT_STARTED",
         },
       });
       const turn = start
         ? await tx.proboxAiTurn.create({
             data: {
+              id: initialTurnId!,
               sessionId: session.id,
-              prompt: dto.prompt,
+              ...protectedInput!,
               status: TurnStatus.QUEUED,
               requestedById: actorId,
               executionPermission: "sessions.create",
@@ -351,14 +532,103 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
           where: { id: session.id },
         }),
         turn,
+        created: true,
       };
-    });
-    if (accepted.turn)
+    }, creation?.requestId);
+    if (creation && accepted.created) this.scheduleCreationDispatch();
+    else if (!creation && accepted.turn)
       this.launchAccepted(accepted.session.id, accepted.turn.id);
     return {
       ...sessionResponse(accepted.session),
       initialTurn: accepted.turn ? turnResponse(accepted.turn) : null,
+      creationReceipt: creation ? this.creationReceipt(accepted.session) : null,
     };
+  }
+
+  private scheduleCreationDispatch() {
+    setImmediate(() => {
+      void this.dispatchPendingCreations().catch(() =>
+        this.logger.error("Durable session dispatch unavailable"),
+      );
+    });
+  }
+  async dispatchPendingCreations() {
+    // Also dispatches explicitly opted-in REST follow-ups after safe lease
+    // recovery. Keep the existing method name for internal callers.
+    if (this.creationDispatchBusy) return;
+    this.creationDispatchBusy = true;
+    try {
+      const rows = await this.prisma.proboxAiSession.findMany({
+        where: {
+          OR: [
+            {
+              creationRequestId: { not: null },
+              creationInitialTurnId: { not: null },
+            },
+            {
+              turns: {
+                some: {
+                  durableDispatch: true,
+                  status: "QUEUED",
+                  executionStartedAt: null,
+                },
+              },
+            },
+          ],
+          status: "QUEUED",
+          stopConfirmation: "NOT_STARTED",
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: 100,
+        select: { id: true },
+      });
+      for (const row of rows) {
+        const claim = await this.prisma.$transaction(async (tx) => {
+          await this.lockRun(tx, row.id);
+          const now = await this.databaseNow(tx);
+          const session = await tx.proboxAiSession.findUnique({
+            where: { id: row.id },
+          });
+          if (
+            !session ||
+            session.status !== "QUEUED" ||
+            session.stopConfirmation !== "NOT_STARTED" ||
+            (session.runLeaseExpiresAt && session.runLeaseExpiresAt > now)
+          )
+            return null;
+          const turn = await tx.proboxAiTurn.findFirst({
+            where: {
+              sessionId: session.id,
+              status: "QUEUED",
+              executionStartedAt: null,
+              OR: [
+                { durableDispatch: true },
+                ...(session.creationRequestId && session.creationInitialTurnId
+                  ? [{ id: session.creationInitialTurnId }]
+                  : []),
+              ],
+            },
+          });
+          if (!turn) return null;
+          await tx.proboxAiSession.update({
+            where: { id: session.id },
+            data: {
+              status: "RUNNING",
+              runOwner: this.owner,
+              runLeaseExpiresAt: new Date(now.getTime() + 60000),
+              startedAt: session.startedAt ?? now,
+              dispatchAttempts: { increment: 1 },
+              lastDispatchAt: now,
+            },
+          });
+          await this.stateEvent(tx, session.id, turn.id);
+          return { sessionId: session.id, turnId: turn.id };
+        });
+        if (claim) this.launchAccepted(claim.sessionId, claim.turnId);
+      }
+    } finally {
+      this.creationDispatchBusy = false;
+    }
   }
 
   private launchAccepted(sessionId: string, turnId: string) {
@@ -406,15 +676,20 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async turnByRequest(actorId: string, sessionId: string, requestId: string) {
-    await this.assertManager(actorId, sessionId, "sessions.manage");
-    const turn = await this.prisma.proboxAiTurn.findUnique({
-      where: {
-        sessionId_requestId: { sessionId, requestId: requestId.toLowerCase() },
-      },
+    return readDependency("readSessionTurnReceipt", async () => {
+      await this.assertManager(actorId, sessionId, "sessions.manage");
+      const turn = await this.prisma.proboxAiTurn.findUnique({
+        where: {
+          sessionId_requestId: {
+            sessionId,
+            requestId: requestId.toLowerCase(),
+          },
+        },
+      });
+      if (!turn || turn.requestedById !== actorId)
+        throw new NotFoundException("Turn request not found");
+      return acceptanceResponse(turn);
     });
-    if (!turn || turn.requestedById !== actorId)
-      throw new NotFoundException("Turn request not found");
-    return acceptanceResponse(turn);
   }
 
   private async acceptTurn(
@@ -492,7 +767,13 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
           where: { sessionId_requestId: { sessionId, requestId } },
         });
         if (prior) {
-          if (prior.prompt !== prompt || prior.requestedById !== actorId)
+          if (
+            (prior.inputHash
+              ? prior.inputHash !==
+                createHash("sha256").update(prompt).digest("hex")
+              : prior.prompt !== prompt) ||
+            prior.requestedById !== actorId
+          )
             throw new ConflictException(
               "Request ID is already bound to another submission",
             );
@@ -537,16 +818,19 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
           runnerExitedAt: null,
         },
       });
+      const turnId = randomUUID();
       const turn = await tx.proboxAiTurn.create({
         data: {
+          id: turnId,
           sessionId,
-          prompt,
+          ...protectSessionPrompt(prompt, sessionId, turnId),
           requestId,
           requestedById: actorId,
           executionPermission: telegram?.initial
             ? "sessions.create"
             : "sessions.manage",
           status: TurnStatus.QUEUED,
+          durableDispatch: !telegram,
         },
       });
       await tx.task.update({
@@ -646,6 +930,21 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
         );
         return null;
       }
+      let executionPrompt: string;
+      try {
+        executionPrompt = sessionExecutionPrompt(turn);
+      } catch {
+        await this.terminal(
+          tx,
+          session,
+          turnId,
+          "FAILED",
+          "NOT_STARTED",
+          "INPUT_UNAVAILABLE",
+          now,
+        );
+        return null;
+      }
       await tx.proboxAiTurn.update({
         where: { id: turnId },
         data: { status: "RUNNING", executionStartedAt: now },
@@ -655,10 +954,10 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
         data: { stopConfirmation: "STOP_UNCONFIRMED" },
       });
       await this.stateEvent(tx, sessionId, turnId);
-      return { session, turn };
+      return { session, turn, executionPrompt };
     });
     if (!claimed) return;
-    const { session, turn } = claimed;
+    const { session, executionPrompt } = claimed;
     let failed = false;
     let code = -1;
     const heartbeat = setInterval(() => {
@@ -676,7 +975,8 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
           cwd: session.cwd,
           sandbox: session.sandbox as
             "read-only" | "workspace-write" | "danger-full-access",
-          prompt: turn.prompt,
+          prompt: executionPrompt,
+          archiveToDatabase: !!session.creationRequestId,
           model: session.model ?? undefined,
           providerId: session.providerId,
           reasoningEffort: session.effectiveReasoningEffort ?? undefined,
@@ -1034,7 +1334,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   }
   private async renewLease(sessionId: string, turnId: string) {
     await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "ProboxAiSession" WHERE id = ${sessionId} FOR UPDATE`;
+      await this.lockRun(tx, sessionId);
       const now = await this.databaseNow(tx);
       const s = await tx.proboxAiSession.findUnique({
         where: { id: sessionId },
@@ -1121,6 +1421,27 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
             active.every(
               (turn) => turn.status === "QUEUED" && !turn.executionStartedAt,
             );
+          if (
+            safe &&
+            active.length === 1 &&
+            (active[0]!.durableDispatch ||
+              (s.creationRequestId &&
+                active[0]!.id === s.creationInitialTurnId))
+          ) {
+            await tx.proboxAiSession.update({
+              where: { id: s.id },
+              data: {
+                status: "QUEUED",
+                runOwner: null,
+                runLeaseExpiresAt: null,
+                startedAt: null,
+                recoveryReason: null,
+              },
+            });
+            if (s.status !== "QUEUED")
+              await this.stateEvent(tx, s.id, active[0]!.id);
+            return;
+          }
           await this.terminal(
             tx,
             s,
@@ -1136,31 +1457,34 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
             data: { finished: false },
           });
         });
+      await this.dispatchPendingCreations();
     } finally {
       this.recoveryBusy = false;
     }
   }
 
   async get(actorId: string, sessionId: string) {
-    return this.prisma.$transaction(
-      async (tx) => {
-        const session = await this.assertManager(
-          actorId,
-          sessionId,
-          "sessions.read",
-          tx,
-        );
-        return {
-          ...sessionResponse(session),
-          turns: (
-            await tx.proboxAiTurn.findMany({
-              where: { sessionId },
-              orderBy: [{ startedAt: "asc" }, { id: "asc" }],
-            })
-          ).map(turnResponse),
-        };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    return readDependency("readSession", () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          const session = await this.assertManager(
+            actorId,
+            sessionId,
+            "sessions.read",
+            tx,
+          );
+          return {
+            ...sessionResponse(session),
+            turns: (
+              await tx.proboxAiTurn.findMany({
+                where: { sessionId },
+                orderBy: [{ startedAt: "asc" }, { id: "asc" }],
+              })
+            ).map(turnResponse),
+          };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
     );
   }
 
@@ -1178,7 +1502,9 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   ) {
     const projected = safeRunnerEvent(event);
     await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "ProboxAiSession" WHERE id = ${sessionId} FOR UPDATE`;
+      // Admission/interruption take workspace and task before session. Runner
+      // writes must share that order rather than hold session ahead of them.
+      await this.lockRun(tx, sessionId);
       const now = await this.databaseNow(tx);
       const s = await tx.proboxAiSession.findUniqueOrThrow({
         where: { id: sessionId },
@@ -1193,16 +1519,23 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
         t?.status !== "RUNNING"
       )
         throw new ConflictException("Run ownership was lost");
-      await appendSessionEvent(
+      const archived = archiveRunnerEvent(event);
+      const recorded = await appendSessionEvent(
         tx,
         sessionId,
         turnId,
         projected.type,
         projected.payload,
+        {
+          payload: archived,
+          hash: archiveHash(archived),
+          policyVersion: SESSION_ARCHIVE_POLICY_VERSION,
+        },
       );
       if (
         event.type === "thread.started" &&
         typeof event.payload.thread_id === "string" &&
+        historyText(event.payload.thread_id) === event.payload.thread_id &&
         /^[a-zA-Z0-9_-]{1,128}$/.test(event.payload.thread_id)
       )
         await tx.proboxAiSession.update({
@@ -1221,10 +1554,43 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
             cachedTokens: numberOrNull(usage.cached_input_tokens),
             outputTokens: numberOrNull(usage.output_tokens),
             reasoningTokens: numberOrNull(usage.reasoning_output_tokens),
+            usageProvenance: {
+              source: "RUNNER_TURN_COMPLETED",
+              eventSequence: recorded.sequence,
+              providerId: s.providerId,
+              model: s.effectiveModel ?? s.model,
+              observedAt: now.toISOString(),
+              reportedUsage: historyJson(usage),
+              normalizedCost: null,
+              costNormalization: "NOT_AVAILABLE_NO_PRICING_ASSUMPTION",
+            },
           },
         });
       }
     });
+  }
+
+  async eventDetail(
+    actorId: string,
+    sessionId: string,
+    eventId: string,
+    offset?: number,
+    limit?: number,
+    revision?: string,
+  ) {
+    return readDependency("readSessionEventDetail", () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          await this.assertManager(actorId, sessionId, "sessions.read", tx);
+          const event = await tx.sessionEvent.findFirst({
+            where: { id: eventId, sessionId },
+          });
+          if (!event) throw new NotFoundException("Session event not found");
+          return sessionDetailPage(event, offset, limit, revision);
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
+    );
   }
 
   async history(
@@ -1233,6 +1599,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     after = 0,
     limit = 100,
     untilSequence?: number,
+    includeArchive = false,
   ) {
     if (
       !Number.isSafeInteger(after) ||
@@ -1243,56 +1610,167 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
       limit > 100
     )
       throw new BadRequestException("Invalid event cursor or page size");
-    return this.prisma.$transaction(
-      async (tx) => {
-        const session = await this.assertManager(
-          actorId,
-          sessionId,
-          "sessions.read",
-          tx,
-        );
-        if (
-          untilSequence !== undefined &&
-          (!Number.isSafeInteger(untilSequence) ||
-            untilSequence < after ||
-            untilSequence > session.lastSequence)
-        )
-          throw new ConflictException("Invalid fixed history boundary");
-        const highWaterSequence = untilSequence ?? session.lastSequence;
-        if (after > highWaterSequence)
-          throw new ConflictException(
-            "Event cursor is ahead of persisted history",
-          );
-        const events = await tx.sessionEvent.findMany({
-          where: {
-            sessionId,
-            sequence: { gt: after, lte: highWaterSequence },
+    return readDependency(
+      includeArchive ? "readRetainedSessionArchive" : "readSessionHistory",
+      () =>
+        this.prisma.$transaction(
+          async (tx) => {
+            const session = await this.assertManager(
+              actorId,
+              sessionId,
+              "sessions.read",
+              tx,
+            );
+            if (
+              untilSequence !== undefined &&
+              (!Number.isSafeInteger(untilSequence) ||
+                untilSequence < after ||
+                untilSequence > session.lastSequence)
+            )
+              throw new ConflictException("Invalid fixed history boundary");
+            const highWaterSequence = untilSequence ?? session.lastSequence;
+            if (after > highWaterSequence)
+              throw new ConflictException(
+                "Event cursor is ahead of persisted history",
+              );
+            const events = await tx.sessionEvent.findMany({
+              select: publicSessionEventSelect,
+              where: {
+                sessionId,
+                sequence: { gt: after, lte: highWaterSequence },
+              },
+              orderBy: { sequence: "asc" },
+              take: limit,
+            });
+            const nextCursor = events.at(-1)?.sequence ?? after;
+            if (
+              events.some(
+                (event, index) => event.sequence !== after + index + 1,
+              ) ||
+              (!events.length && after < highWaterSequence)
+            )
+              throw new ConflictException({
+                code: "SESSION_HISTORY_UNAVAILABLE",
+                message:
+                  "Persisted history has unavailable sequences; reconcile the session snapshot",
+                highWaterSequence,
+              });
+            return {
+              session: sessionResponse(session),
+              events: events.map(eventResponse),
+              after,
+              nextCursor,
+              highWaterSequence,
+              hasMore: nextCursor < highWaterSequence,
+              historyAvailability: "RETAINED_WITH_EXPLICIT_OMISSIONS",
+              ...(includeArchive
+                ? {
+                    record: {
+                      retentionPolicy: "RETAIN_UNTIL_AUTHORIZED_DELETION",
+                      catalogSnapshot: historyJson(session.catalogSnapshot),
+                      runtimeProvenance: historyJson(session.runtimeProvenance),
+                      dispatchAttempts: session.dispatchAttempts,
+                      lastDispatchAt: session.lastDispatchAt,
+                    },
+                    archiveEvents: (
+                      await tx.sessionEvent.findMany({
+                        where: {
+                          sessionId,
+                          id: { in: events.map((event) => event.id) },
+                        },
+                        orderBy: { sequence: "asc" },
+                      })
+                    ).map(archiveEventResponse),
+                  }
+                : {}),
+            };
           },
-          orderBy: { sequence: "asc" },
-          take: limit,
-        });
-        const nextCursor = events.at(-1)?.sequence ?? after;
-        if (
-          events.some((event, index) => event.sequence !== after + index + 1) ||
-          (!events.length && after < highWaterSequence)
-        )
-          throw new ConflictException({
-            code: "SESSION_HISTORY_UNAVAILABLE",
-            message:
-              "Persisted history has unavailable sequences; reconcile the session snapshot",
-            highWaterSequence,
+          { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+        ),
+    );
+  }
+  async retainedTurns(
+    actor: AuthenticatedUser,
+    sessionId: string,
+    cursor?: string,
+  ) {
+    return readDependency("readRetainedSessionTurns", () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          await this.assertManager(actor.id, sessionId, "sessions.read", tx);
+          let asOf = await this.databaseNow(tx),
+            after: { startedAt: Date; id: string } | null = null;
+          if (cursor) {
+            try {
+              if (!/^[A-Za-z0-9_-]{1,2048}$/.test(cursor)) throw new Error();
+              const value = JSON.parse(
+                Buffer.from(cursor, "base64url").toString("utf8"),
+              ) as Record<string, unknown>;
+              if (
+                value.version !== 1 ||
+                value.actorId !== actor.id ||
+                value.workspaceId !== actor.workspaceId ||
+                value.sessionId !== sessionId ||
+                typeof value.asOf !== "string" ||
+                typeof value.startedAt !== "string" ||
+                typeof value.id !== "string" ||
+                !/^[0-9a-f-]{36}$/i.test(value.id)
+              )
+                throw new Error();
+              asOf = new Date(value.asOf);
+              after = { startedAt: new Date(value.startedAt), id: value.id };
+              if (
+                !Number.isFinite(asOf.getTime()) ||
+                !Number.isFinite(after.startedAt.getTime()) ||
+                after.startedAt > asOf
+              )
+                throw new Error();
+            } catch {
+              throw new BadRequestException("Invalid retained-turn cursor");
+            }
+          }
+          const rows = await tx.proboxAiTurn.findMany({
+            where: {
+              sessionId,
+              startedAt: { lte: asOf },
+              ...(after
+                ? {
+                    OR: [
+                      { startedAt: { gt: after.startedAt } },
+                      { startedAt: after.startedAt, id: { gt: after.id } },
+                    ],
+                  }
+                : {}),
+            },
+            orderBy: [{ startedAt: "asc" }, { id: "asc" }],
+            take: 51,
           });
-        return {
-          session: sessionResponse(session),
-          events: events.map(eventResponse),
-          after,
-          nextCursor,
-          highWaterSequence,
-          hasMore: nextCursor < highWaterSequence,
-          historyAvailability: "RETAINED_WITH_EXPLICIT_OMISSIONS",
-        };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+          const page = rows.slice(0, 50),
+            last = page.at(-1);
+          return {
+            items: page.map((row) => ({
+              ...turnResponse(row),
+              usageProvenance: historyJson(row.usageProvenance),
+            })),
+            hasMore: rows.length > 50,
+            nextCursor:
+              rows.length > 50 && last
+                ? Buffer.from(
+                    JSON.stringify({
+                      version: 1,
+                      actorId: actor.id,
+                      workspaceId: actor.workspaceId,
+                      sessionId,
+                      asOf: asOf.toISOString(),
+                      startedAt: last.startedAt.toISOString(),
+                      id: last.id,
+                    }),
+                  ).toString("base64url")
+                : null,
+          };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
     );
   }
   stream(actorId: string, sessionId: string, after: number, expiresAt: number) {

@@ -1,6 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, TaskPriority } from "@prisma/client";
 import { createHash } from "node:crypto";
+import { maxLength } from "class-validator";
+import {
+  TASK_TITLE_MAX_LENGTH,
+  TASK_DESCRIPTION_MAX_LENGTH,
+} from "./task-text-limits";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { authenticationDependency } from "../auth/authentication-failures";
 import { Permissions } from "../authorization/permission.catalog";
@@ -21,6 +26,7 @@ import {
 import { HumanTaskHistoryQueryDto } from "./human-tasks.dto";
 import { parseTaskDeadline } from "./task-deadline-value";
 import { DeadlineInputDto } from "./task-deadlines.dto";
+import { checklistSectionId, validateChecklistTree } from "./checklist-tree";
 
 type Input = { requestId: string; [key: string]: unknown };
 export type HumanAction =
@@ -32,6 +38,8 @@ export type HumanAction =
   | "CHECKLIST_DELETE"
   | "CHECKLIST_COMPLETE"
   | "CHECKLIST_REORDER"
+  | "ARCHIVE"
+  | "DELETE"
   | "COMMENT"
   | "MOVE";
 const actionPermissions: Record<HumanAction, string> = {
@@ -43,6 +51,8 @@ const actionPermissions: Record<HumanAction, string> = {
   CHECKLIST_DELETE: Permissions.TASK_CHECKLIST_MANAGE,
   CHECKLIST_COMPLETE: Permissions.TASK_CHECKLIST_COMPLETE,
   CHECKLIST_REORDER: Permissions.TASK_CHECKLIST_MANAGE,
+  ARCHIVE: Permissions.TASK_DETAILS_MANAGE,
+  DELETE: Permissions.TASK_DETAILS_MANAGE,
   COMMENT: Permissions.TASK_COMMENTS_CREATE,
   MOVE: Permissions.TASK_WORKFLOW_MOVE,
 };
@@ -50,7 +60,15 @@ const fail = (status: number, message: string) =>
   operationError(status, "HUMAN_TASK_OPERATION_REJECTED", message, "humanTask");
 function normalized(input: Input): Input {
   const value = { ...input };
-  for (const key of ["requestId", "statusId", "itemId", "assigneeId"])
+  for (const key of [
+    "requestId",
+    "statusId",
+    "itemId",
+    "assigneeId",
+    "parentId",
+    "sectionId",
+    "beforeItemId",
+  ])
     if (typeof value[key] === "string") value[key] = value[key].toLowerCase();
   if (Array.isArray(value.assigneeIds))
     value.assigneeIds = value.assigneeIds
@@ -71,6 +89,8 @@ export class HumanTaskActionsService {
     projectId: string,
     permission?: string,
   ) {
+    if (actor.type !== undefined && actor.type !== "access")
+      throw fail(403, "Human task access required");
     const user = await authenticationDependency(() =>
       tx.user.findFirst({
         where: { id: actor.id, workspaceId: actor.workspaceId, status: "OPEN" },
@@ -317,6 +337,8 @@ export class HumanTaskActionsService {
             "CHECKLIST_UPDATE",
             "CHECKLIST_DELETE",
             "CHECKLIST_REORDER",
+            "ARCHIVE",
+            "DELETE",
           ].includes(action)
         )
           this.owner(task, actor);
@@ -334,15 +356,117 @@ export class HumanTaskActionsService {
         const prior = await tx.taskHumanAudit.findUnique({
           where: { taskId_requestId: { taskId, requestId } },
         });
+        // Section grouping grants no new edit rights. Existing original-project
+        // authority above still applies; a destination section also requires its
+        // current share and current destination membership.
+        let sectionBoardId = task.boardEntry?.boardId;
+        let sideInactive = false;
+        if (action.startsWith("CHECKLIST_") && action !== "CHECKLIST_REORDER") {
+          const item = task.checklist.find((i) => i.id === input.itemId);
+          if (action !== "CHECKLIST_CREATE" && !item && !prior)
+            throw fail(404, "Checklist item not found");
+          sectionBoardId = item?.sectionBoardId ?? task.boardEntry!.boardId;
+          if (!item && prior && action !== "CHECKLIST_CREATE") {
+            // A committed removal still has a durable retry outcome. Recover its
+            // side from the immutable snapshot, then reauthorize today's share
+            // and membership before returning that outcome. Legacy snapshots
+            // predate side sections and therefore belong to the original side.
+            const saved = prior.before as Record<string, unknown> | null;
+            const oldItem = Array.isArray(saved?.checklist)
+              ? saved.checklist.find((entry: any) => entry?.id === input.itemId)
+              : null;
+            if (oldItem?.sectionId) {
+              sectionBoardId = [
+                task.boardEntry!.boardId,
+                ...task.sharedEntries.map((entry) => entry.boardId),
+              ].find(
+                (id) => checklistSectionId(taskId, id) === oldItem.sectionId,
+              );
+              if (!sectionBoardId)
+                throw fail(404, "Checklist section not found");
+            }
+          }
+          if (action === "CHECKLIST_CREATE" && input.sectionId !== undefined) {
+            sectionBoardId = [
+              task.boardEntry!.boardId,
+              ...task.sharedEntries.map((entry) => entry.boardId),
+            ].find((id) => checklistSectionId(taskId, id) === input.sectionId);
+            if (!sectionBoardId) throw fail(404, "Checklist section not found");
+          }
+          if (sectionBoardId !== task.boardEntry!.boardId) {
+            if (
+              !task.sharedEntries.some(
+                (entry) => entry.boardId === sectionBoardId,
+              )
+            )
+              throw fail(404, "Checklist section not found");
+            const side = await tx.taskBoard.findFirst({
+              where: {
+                id: sectionBoardId,
+                project: {
+                  workspaceId: actor.workspaceId,
+                  members: { some: { userId: actor.id } },
+                },
+              },
+              select: {
+                project: { select: { archivedAt: true, status: true } },
+              },
+            });
+            if (!side) throw fail(404, "Checklist section not found");
+            sideInactive =
+              !!side.project.archivedAt || side.project.status === "DELETING";
+          }
+        }
+        if (action === "CHECKLIST_REORDER") {
+          // A whole-list reorder can affect every side's sibling order.
+          const sourceBoardId = task.boardEntry!.boardId;
+          for (const id of new Set(
+            task.checklist
+              .map((item) => item.sectionBoardId)
+              .filter((id): id is string => !!id && id !== sourceBoardId),
+          )) {
+            const side = await tx.taskBoard.findFirst({
+              where: {
+                id,
+                project: {
+                  workspaceId: actor.workspaceId,
+                  members: { some: { userId: actor.id } },
+                },
+              },
+              select: {
+                id: true,
+                project: { select: { archivedAt: true, status: true } },
+              },
+            });
+            if (
+              !side ||
+              !task.sharedEntries.some((entry) => entry.boardId === id)
+            )
+              throw fail(
+                409,
+                "Whole-list order includes an unavailable side; use sibling placement instead",
+              );
+            sideInactive ||=
+              !!side.project.archivedAt || side.project.status === "DELETING";
+          }
+        }
         if (prior) {
           if (prior.inputHash !== inputHash)
             throw fail(409, "Request identity was reused for different input");
           return humanOutcome(prior);
         }
-        if (project.archivedAt || project.status === "DELETING")
+        if (sideInactive || project.archivedAt || project.status === "DELETING")
           throw fail(
             409,
             "Archived or deleting projects cannot accept human task actions",
+          );
+        if (
+          task.humanState?.deletedAt ||
+          (task.humanState?.archivedAt && action !== "DELETE")
+        )
+          throw fail(
+            409,
+            "Archived or deleted tasks cannot accept this action",
           );
         if ((task.humanState?.revision ?? 0) !== revision)
           throw fail(
@@ -375,7 +499,15 @@ export class HumanTaskActionsService {
             throw fail(404, "Workflow status not found in this project");
           return status;
         };
-        if (action === "LINK") {
+        if (action === "ARCHIVE" || action === "DELETE") {
+          await tx.taskHumanState.update({
+            where: { taskId },
+            data:
+              action === "ARCHIVE"
+                ? { archivedAt: new Date() }
+                : { deletedAt: new Date() },
+          });
+        } else if (action === "LINK") {
           if (task.boardEntry || task.humanState || revision !== 0)
             throw fail(
               409,
@@ -397,13 +529,13 @@ export class HumanTaskActionsService {
             input.title !== undefined &&
             (typeof input.title !== "string" ||
               !input.title.trim() ||
-              input.title.length > 200)
+              !maxLength(input.title, TASK_TITLE_MAX_LENGTH))
           )
             throw fail(400, "Invalid task title");
           if (
             input.description !== undefined &&
             (typeof input.description !== "string" ||
-              input.description.length > 8000)
+              !maxLength(input.description, TASK_DESCRIPTION_MAX_LENGTH))
           )
             throw fail(400, "Invalid task description");
           if (input.priority !== undefined) {
@@ -496,6 +628,30 @@ export class HumanTaskActionsService {
           if (action === "CHECKLIST_CREATE" && item)
             throw fail(409, "Checklist item identity already exists");
           if (
+            action === "CHECKLIST_CREATE" &&
+            (await tx.taskHumanAudit.findFirst({
+              where: {
+                taskId,
+                OR: [
+                  {
+                    before: {
+                      path: ["checklist"],
+                      array_contains: [{ id: String(input.itemId) }],
+                    },
+                  },
+                  {
+                    after: {
+                      path: ["checklist"],
+                      array_contains: [{ id: String(input.itemId) }],
+                    },
+                  },
+                ],
+              },
+              select: { id: true },
+            }))
+          )
+            throw fail(409, "Retired checklist identity cannot be reused");
+          if (
             input.title !== undefined &&
             (typeof input.title !== "string" ||
               !input.title.trim() ||
@@ -506,16 +662,55 @@ export class HumanTaskActionsService {
             action === "CHECKLIST_UPDATE" &&
             input.title === undefined &&
             input.assigneeId === undefined &&
-            input.deadline === undefined
+            input.deadline === undefined &&
+            input.parentId === undefined &&
+            input.beforeItemId === undefined
           )
             throw fail(400, "At least one checklist detail is required");
           if (input.assigneeId !== undefined) {
             if (!task.assignees.some((a) => a.userId === input.assigneeId))
               throw fail(404, "Checklist assignee must be a task assignee");
-            await this.recipients(tx, actor, projectId, [
+            const assignmentProject = await tx.taskBoard.findUniqueOrThrow({
+              where: { id: sectionBoardId! },
+              select: { projectId: true },
+            });
+            await this.recipients(tx, actor, assignmentProject.projectId, [
               String(input.assigneeId),
             ]);
           }
+          const parentId =
+            input.parentId !== undefined
+              ? (input.parentId as string | null)
+              : (item?.parentId ?? null);
+          if (parentId && !task.checklist.some((i) => i.id === parentId))
+            throw fail(404, "Checklist parent not found");
+          const candidate = {
+            id: String(input.itemId),
+            parentId,
+            sectionBoardId: sectionBoardId!,
+            position: task.checklist.length,
+          };
+          validateChecklistTree(
+            [...task.checklist.filter((i) => i.id !== input.itemId), candidate],
+            task.boardEntry!.boardId,
+          );
+          const beforeItem =
+            input.beforeItemId == null
+              ? null
+              : task.checklist.find((i) => i.id === input.beforeItemId);
+          if (input.beforeItemId != null && !beforeItem)
+            throw fail(404, "Checklist placement item not found");
+          if (
+            beforeItem &&
+            (beforeItem.id === input.itemId ||
+              beforeItem.parentId !== parentId ||
+              (beforeItem.sectionBoardId ?? task.boardEntry!.boardId) !==
+                sectionBoardId)
+          )
+            throw fail(
+              409,
+              "Checklist placement must name another sibling in the same section",
+            );
           if (action === "CHECKLIST_CREATE")
             await tx.taskChecklistItem.create({
               data: {
@@ -524,6 +719,8 @@ export class HumanTaskActionsService {
                 title: String(input.title),
                 assigneeId: String(input.assigneeId),
                 position: task.checklist.length,
+                sectionBoardId,
+                parentId,
                 deadline:
                   input.deadline == null
                     ? Prisma.DbNull
@@ -534,6 +731,7 @@ export class HumanTaskActionsService {
             await tx.taskChecklistItem.update({
               where: { id: String(input.itemId) },
               data: {
+                ...(input.parentId !== undefined ? { parentId } : {}),
                 ...(input.deadline !== undefined
                   ? {
                       deadline:
@@ -550,9 +748,25 @@ export class HumanTaskActionsService {
                   : {}),
               },
             });
+          if (
+            input.beforeItemId !== undefined ||
+            (action === "CHECKLIST_UPDATE" && input.parentId !== undefined)
+          ) {
+            const ids = task.checklist
+              .filter((i) => i.id !== input.itemId)
+              .map((i) => i.id);
+            const at = beforeItem ? ids.indexOf(beforeItem.id) : ids.length;
+            ids.splice(at, 0, String(input.itemId));
+            await this.order(tx, taskId, ids);
+          }
         } else if (action === "CHECKLIST_DELETE") {
           if (!task.checklist.some((i) => i.id === input.itemId))
             throw fail(404, "Checklist item not found");
+          if (task.checklist.some((i) => i.parentId === input.itemId))
+            throw fail(
+              409,
+              "Reparent or remove children before removing their parent",
+            );
           await tx.taskChecklistItem.delete({
             where: { id: String(input.itemId) },
           });
@@ -629,5 +843,17 @@ export class HumanTaskActionsService {
           throw databaseOperationError(error, "humanTask");
         throw error;
       });
+  }
+  private async order(
+    tx: Prisma.TransactionClient,
+    taskId: string,
+    ids: string[],
+  ) {
+    await tx.taskChecklistItem.updateMany({
+      where: { taskId },
+      data: { position: { increment: 200 } },
+    });
+    for (const [position, id] of ids.entries())
+      await tx.taskChecklistItem.update({ where: { id }, data: { position } });
   }
 }

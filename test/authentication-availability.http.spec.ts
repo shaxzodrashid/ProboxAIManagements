@@ -96,6 +96,33 @@ describe("authentication availability HTTP contracts", () => {
     authorization.listPermissions.mockResolvedValue([]);
   });
   const call = () => request(app.getHttpServer());
+  it("does not cache current self authorization and rejects caller/workspace selectors", async () => {
+    const token = access();
+    const response = await call()
+      .get("/authorization/me")
+      .set("Authorization", `Bearer ${token}`)
+      .expect(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    for (const query of [
+      "?id=other",
+      "?workspaceId=foreign",
+      "?permissions=authorization.manage",
+      "?includeRoles=true",
+    ]) {
+      await call()
+        .get("/authorization/me" + query)
+        .set("Authorization", `Bearer ${token}`)
+        .expect(400);
+    }
+    expect(response.body).toEqual({
+      id: user.id,
+      workspaceId: user.workspaceId,
+      roles: [],
+      permissions: [],
+    });
+    expect(prisma.sessionToken.create).not.toHaveBeenCalled();
+    expect(prisma.sessionToken.updateMany).not.toHaveBeenCalled();
+  });
   it.each(routes)(
     "sanitizes persisted identity failure on %s without entering the handler",
     async (route) => {
@@ -399,6 +426,33 @@ describe("authentication availability HTTP contracts", () => {
       app,
       new DocumentBuilder().build(),
     );
+    expect(
+      (doc.paths["/authorization/me"]!.get as any).responses["200"].content[
+        "application/json"
+      ].schema.$ref,
+    ).toContain("SelfAuthorizationResponseDto");
+    const schemas: any = doc.components!.schemas;
+    expect(schemas.SelfAuthorizationResponseDto.required.sort()).toEqual([
+      "id",
+      "permissions",
+      "roles",
+      "workspaceId",
+    ]);
+    expect(
+      schemas.SelfAuthorizationResponseDto.properties.roles.items.$ref,
+    ).toContain("AssignedRoleResponseDto");
+    expect(schemas.AssignedRoleResponseDto.required.sort()).toEqual([
+      "id",
+      "key",
+      "name",
+    ]);
+    expect(
+      schemas.SelfAuthorizationResponseDto.properties.permissions,
+    ).toMatchObject({
+      type: "array",
+      uniqueItems: true,
+      items: { type: "string" },
+    });
     for (const [route, method] of [
       ["/authorization/me", "get"],
       ["/profiles/by-username/{username}", "get"],
