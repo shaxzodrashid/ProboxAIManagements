@@ -104,6 +104,23 @@ tar, pnpm and a Node runtime supporting the backend and `--env-file`. Update pre
 and development verification also require ShellCheck. The entire lifecycle command holds one exclusive lock.
 Production source/remote selection is operator configuration, not a new integration.
 
+Since 0.3.1, ordinary `pnpm test` runs one Jest child worker with recycling above
+128 MB idle memory and isolated test compilation. This prevents TypeScript/Jest
+state from accumulating across the full run in the coordinator as it did with
+`--runInBand` in the failed 0.3.0 server preparation. Strict type checking remains
+a separate required preparation step. The 30-second Jest case budget affects
+tests only; application and native-helper timeouts are unchanged. The threshold
+is checked after each suite, not a hard process memory cap. It does not establish
+that a host has enough memory for any single suite.
+
+Local 0.3.1 verification ran the ordinary test command with
+`NODE_OPTIONS=--max-old-space-size=1024`, `NODE_ENV=test`, the deployment build-only
+database URL and no `PROFILE_TEST_DATABASE_URL`: 931 tests in 67 suites passed;
+the usual 1,159 database-dependent tests in 40 suites were skipped. This checks
+the deployment test path under a lower heap limit, not live database behavior.
+The separate strict typecheck, lint and build passed at normal memory settings;
+applying the artificial 1 GB cap to the full typecheck was insufficient.
+
 Package manager selection is pinned in `package.json` (`pnpm@10.13.1`). Preparation
 passes `COREPACK_ENABLE_DOWNLOAD_PROMPT=0`, `COREPACK_DEFAULT_TO_LATEST=0` and
 `COREPACK_ENABLE_AUTO_PIN=0` through its otherwise scrubbed environment. It does not

@@ -1,5 +1,22 @@
 # Backend changelog
 
+## 0.3.1 — bounded deployment test memory
+
+- Run Jest in one child worker and recycle it after a suite exceeds the 128 MB
+  idle-memory threshold. Remove runInBand, which retains the whole run in the
+  coordinator process and prevents worker recycling.
+- Transpile test files with isolated ts-jest compilation; retain the separate
+  strict whole-project typecheck in both precommit and deployment preparation.
+- Use the previously verified 30-second Jest case budget for native helper tests.
+  No application, database or native-helper timeout or assertion is weakened.
+- Apply this configuration to ordinary pnpm test, including server deployment
+  preparation and local commit hooks. The 0.3.0 server attempt exhausted Node's
+  roughly 2 GB heap during Jest before build, migration readiness or runtime cutover.
+
+No runtime API, dependency, schema or deployment credential change. No new
+migrations relative to v0.3.0; the 21-migration delta from v0.2.2 still applies.
+The immutable v0.3.0 release remains preserved. Publication does not prove deployment.
+
 ## 0.3.0 — stable backend release
 
 - Promote the merged development contracts to a stable package release, preserving

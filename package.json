@@ -1,6 +1,6 @@
 {
   "name": "proboxai",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "packageManager": "pnpm@10.13.1",
   "private": true,
   "description": "ProboxAI programmatic coding-session control plane",
@@ -20,7 +20,7 @@
     "release:check": "node scripts/backend-release.mjs",
     "release:docs": "node scripts/backend-release.mjs --write",
     "prepare": "husky",
-    "test": "jest --runInBand",
+    "test": "jest",
     "test:watch": "jest --watch",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -79,6 +79,9 @@
     "typescript-eslint": "^8.18.0"
   },
   "jest": {
+    "maxWorkers": 1,
+    "workerIdleMemoryLimit": "128MB",
+    "testTimeout": 30000,
     "moduleFileExtensions": [
       "js",
       "json",
@@ -87,7 +90,14 @@
     "rootDir": ".",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.(t|j)s$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "isolatedModules": true
+          }
+        }
+      ]
     },
     "collectCoverageFrom": [
       "src/**/*.ts"
