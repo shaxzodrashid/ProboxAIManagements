@@ -717,8 +717,9 @@ if (url) requireFixtureDatabase(url);
             where: { reviewId: r.id },
           }),
         ).toBe(0);
+        // The account is already banned when this new request authenticates.
         expect((await call("/article-tree", voters[0]!)).status).toBe(
-          kind === "membership" ? 404 : 403,
+          kind === "membership" ? 404 : 401,
         );
       },
     );

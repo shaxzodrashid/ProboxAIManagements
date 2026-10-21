@@ -8,3 +8,4 @@ coverage/
 prisma/*.db
 artifacts/
 Docs/**/*.json
+!Docs/backend-release-catalog.json

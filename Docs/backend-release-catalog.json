@@ -1,0 +1,470 @@
+{
+  "baseline": {
+    "packageVersion": "0.1.0",
+    "commit": "31fdd5a9d9a9bf19d6268c24504496bb54b75e2a",
+    "provenance": "Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown."
+  },
+  "releases": [
+    {
+      "version": "0.3.0",
+      "gitRef": "refs/tags/v0.3.0",
+      "channel": "production",
+      "deployment": "deployment-unverified"
+    },
+    {
+      "version": "0.3.0-dev.10",
+      "gitRef": "refs/tags/v0.3.0-dev.10",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.3.0-dev.9",
+      "gitRef": "refs/tags/v0.3.0-dev.9",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.3.0-dev.8",
+      "gitRef": "refs/tags/v0.3.0-dev.8",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.3.0-dev.7",
+      "gitRef": "refs/tags/v0.3.0-dev.7",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.3.0-dev.6",
+      "gitRef": "refs/tags/v0.3.0-dev.6",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.3.0-dev.5",
+      "gitRef": "refs/tags/v0.3.0-dev.5",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.3.0-dev.4",
+      "gitRef": "refs/tags/v0.3.0-dev.4",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.3.0-dev.3",
+      "gitRef": "refs/tags/v0.3.0-dev.3",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.3.0-dev.2",
+      "gitRef": "refs/tags/v0.3.0-dev.2",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.3.0-dev.1",
+      "gitRef": "refs/tags/v0.3.0-dev.1",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.2.3-dev.1",
+      "gitRef": "refs/tags/v0.2.3-dev.1",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.2.2",
+      "gitRef": "refs/tags/v0.2.2",
+      "channel": "production",
+      "deployment": "deployment-unverified"
+    },
+    {
+      "version": "0.2.1",
+      "gitRef": "refs/tags/v0.2.1",
+      "channel": "production",
+      "deployment": "deployment-unverified"
+    },
+    {
+      "version": "0.2.0",
+      "gitRef": "refs/tags/v0.2.0",
+      "channel": "production",
+      "deployment": "deployment-unverified"
+    },
+    {
+      "version": "0.2.0-dev.2",
+      "gitRef": "refs/tags/v0.2.0-dev.2",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    },
+    {
+      "version": "0.2.0-dev.1",
+      "gitRef": "refs/tags/v0.2.0-dev.1",
+      "channel": "dev",
+      "deployment": "not-deployed"
+    }
+  ],
+  "features": [
+    {
+      "id": "self-profile-contract",
+      "title": "Self-scoped identity and independent names",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/self-profile-contract.md"
+    },
+    {
+      "id": "admin-atomicity-contracts",
+      "title": "Atomic account lifecycle and role changes",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/admin-atomicity-contracts.md"
+    },
+    {
+      "id": "atomic-profile-save-contracts",
+      "title": "Atomic human Profile Save with stale-draft protection and whole-operation receipts",
+      "since": "0.3.0-dev.9",
+      "state": "supported",
+      "contract": "Docs/atomic-profile-save-contracts.md"
+    },
+    {
+      "id": "authentication-availability-contracts",
+      "title": "Credential rejection versus authentication availability",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/authentication-availability-contracts.md"
+    },
+    {
+      "id": "chat-group-metadata-contracts",
+      "title": "Active-human group metadata and creator-only retry/readback",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/chat-group-metadata-contracts.md"
+    },
+    {
+      "id": "template-department-contract-fixes",
+      "title": "Department/template response, validation and concurrency contracts",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/template-department-contract-fixes.md"
+    },
+    {
+      "id": "deployment-cli",
+      "title": "Systemd deployment CLI and sandbox lifecycle verification",
+      "since": "0.2.0-dev.2",
+      "state": "foundation",
+      "contract": "Docs/deployment-cli.md"
+    },
+    {
+      "id": "file-deletion-journal-contracts",
+      "title": "Deletion identity/readback and recoverable local boundaries",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/file-deletion-journal-contracts.md"
+    },
+    {
+      "id": "task-assignee-identity-contracts",
+      "title": "Public identity on fresh human task reads",
+      "since": "0.3.0-dev.3",
+      "state": "supported",
+      "contract": "Docs/task-assignee-identity-contracts.md"
+    },
+    {
+      "id": "task-text-limit-contracts",
+      "title": "Human task edits preserve existing creation text limits",
+      "since": "0.3.0-dev.6",
+      "state": "supported",
+      "contract": "Docs/task-text-limit-contracts.md"
+    },
+    {
+      "id": "task-workflow-display-contracts",
+      "title": "Current workflow label and palette on member task reads",
+      "since": "0.3.0-dev.2",
+      "state": "supported",
+      "contract": "Docs/task-workflow-display-contracts.md"
+    },
+    {
+      "id": "delegated-bio-foundation-contracts",
+      "title": "Inactive domain rules for owner-approved delegated bio edits",
+      "since": "0.3.0-dev.7",
+      "state": "foundation",
+      "contract": "Docs/delegated-bio-foundation-contracts.md"
+    },
+    {
+      "id": "initialization-event-readback-contracts",
+      "title": "Bounded initialization event recovery",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/initialization-event-readback-contracts.md"
+    },
+    {
+      "id": "profile-picker-contracts",
+      "title": "Profile audiences, directed contacts and private aliases",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/profile-picker-contracts.md"
+    },
+    {
+      "id": "human-task-query-bio-evidence",
+      "title": "Optional plain bio, limit1000 and private default",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/human-task-query-bio-evidence.md"
+    },
+    {
+      "id": "profile-privacy-foundations",
+      "title": "Self birthday and independently authorized date parts",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/profile-privacy-foundations.md"
+    },
+    {
+      "id": "project-archive-human-task-contracts",
+      "title": "Archive retention and member-only human task reads",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-archive-human-task-contracts.md"
+    },
+    {
+      "id": "project-creation-readback-contracts",
+      "title": "Durable project creation outcome and retry readback",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-creation-readback-contracts.md"
+    },
+    {
+      "id": "project-enqueue-recovery-contracts",
+      "title": "Setup enqueue failure reconciliation",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-enqueue-recovery-contracts.md"
+    },
+    {
+      "id": "project-member-picker-contracts",
+      "title": "Permitted active-workspace project member discovery",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-member-picker-contracts.md"
+    },
+    {
+      "id": "project-session-task-identity-contracts",
+      "title": "Task identity in project session queries",
+      "since": "0.3.0-dev.4",
+      "state": "supported",
+      "contract": "Docs/project-session-task-identity-contracts.md"
+    },
+    {
+      "id": "project-session-query-contracts",
+      "title": "Member-scoped session index for explicit project-board tasks",
+      "since": "0.3.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/project-session-query-contracts.md"
+    },
+    {
+      "id": "self-telegram-link-contracts",
+      "title": "Stored self Telegram link readback",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/self-telegram-link-contracts.md"
+    },
+    {
+      "id": "session-index-contracts",
+      "title": "Bounded assigned session index",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/session-index-contracts.md"
+    },
+    {
+      "id": "session-assistant-text-contracts",
+      "title": "Canonical assistant text reconstruction",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/session-assistant-text-contracts.md"
+    },
+    {
+      "id": "session-durability-contracts",
+      "title": "Durable turn acceptance, replay and terminal state",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/session-durability-contracts.md"
+    },
+    {
+      "id": "session-directory-context-contracts",
+      "title": "Authorized saved project/directory execution context",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/session-directory-context-contracts.md"
+    },
+    {
+      "id": "shared-manual-status-contracts",
+      "title": "One shared manual availability with self revision and retry recovery",
+      "since": "0.3.0-dev.8",
+      "state": "supported",
+      "contract": "Docs/shared-manual-status-contracts.md"
+    },
+    {
+      "id": "task-board-status-contracts",
+      "title": "Revision-safe project workflow statuses",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/task-board-status-contracts.md"
+    },
+    {
+      "id": "checklist-order-contracts",
+      "title": "Independent checklist deadlines and whole-list ordering",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/checklist-order-contracts.md"
+    },
+    {
+      "id": "task-creation-recovery-contracts",
+      "title": "Opt-in task creation retry and readback",
+      "since": "0.3.0-dev.5",
+      "state": "supported",
+      "contract": "Docs/task-creation-recovery-contracts.md"
+    },
+    {
+      "id": "exact-deadline-sort-contracts",
+      "title": "Priority, deadlines and bounded human task queries",
+      "since": "0.2.0-dev.1",
+      "state": "supported",
+      "contract": "Docs/exact-deadline-sort-contracts.md"
+    },
+    {
+      "id": "human-task-collaboration-contracts",
+      "title": "Human task edits, assignees, checklists, comments and moves",
+      "since": "0.2.0-dev.1",
+      "state": "foundation",
+      "contract": "Docs/human-task-collaboration-contracts.md"
+    },
+    {
+      "id": "browser-session-local-implementation",
+      "title": "Browser cookie sessions with CSRF and bounded proxy admission",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/browser-session-local-implementation.md"
+    },
+    {
+      "id": "session-intent-history-contracts",
+      "title": "Durable session intents, protected history and bounded retained projections",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/session-intent-history-contracts.md"
+    },
+    {
+      "id": "rest-followup-recovery-contracts",
+      "title": "REST follow-up dispatch recovery and session read availability",
+      "since": "0.3.0",
+      "state": "supported",
+      "contract": "Docs/rest-followup-recovery-contracts.md"
+    },
+    {
+      "id": "project-mutation-authority-contracts",
+      "title": "Current persisted project authority at mutation admission",
+      "since": "0.3.0",
+      "state": "supported",
+      "contract": "Docs/project-mutation-authority-contracts.md"
+    },
+    {
+      "id": "shared-human-task-contracts",
+      "title": "Shared human task reads and revision-safe collaboration",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/shared-human-task-contracts.md"
+    },
+    {
+      "id": "shared-checklist-tree-contracts",
+      "title": "Shared checklist tree admission and validation",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/shared-checklist-tree-contracts.md"
+    },
+    {
+      "id": "group-admission-contracts",
+      "title": "Explicit group admissions and current membership authority",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/group-admission-contracts.md"
+    },
+    {
+      "id": "group-text-sending-contracts",
+      "title": "Admitted human group text with keyed retry recovery",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/group-text-sending-contracts.md"
+    },
+    {
+      "id": "group-message-history-contracts",
+      "title": "Frozen group history visibility boundaries",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/group-message-history-contracts.md"
+    },
+    {
+      "id": "group-message-reactions-contracts",
+      "title": "Own visible group message reactions",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/group-message-reactions-contracts.md"
+    },
+    {
+      "id": "file-trash-recovery-contracts",
+      "title": "Durable file Trash restore and expiry coordination",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/file-trash-recovery-contracts.md"
+    },
+    {
+      "id": "windows-directory-restore-contracts",
+      "title": "Bounded native Windows directory restoration",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/windows-directory-restore-contracts.md"
+    },
+    {
+      "id": "article-private-draft-contracts",
+      "title": "Private article drafts and independent reading order",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/article-private-draft-contracts.md"
+    },
+    {
+      "id": "article-publication-review-contracts",
+      "title": "Snapshot article publication review and electorate decisions",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/article-publication-review-contracts.md"
+    },
+    {
+      "id": "article-proposal-foundations-contracts",
+      "title": "Article proposal foundations",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/article-proposal-foundations-contracts.md"
+    },
+    {
+      "id": "article-reviewer-resolution-contracts",
+      "title": "Article reviewer resolution",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/article-reviewer-resolution-contracts.md"
+    },
+    {
+      "id": "article-conflict-ballot-contracts",
+      "title": "Article conflict ballots",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/article-conflict-ballot-contracts.md"
+    },
+    {
+      "id": "article-canonical-publication-contracts",
+      "title": "Canonical article publication",
+      "since": "0.3.0",
+      "state": "foundation",
+      "contract": "Docs/article-canonical-publication-contracts.md"
+    }
+  ]
+}

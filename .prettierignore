@@ -4,3 +4,4 @@ node_modules/
 pnpm-lock.yaml
 artifacts/
 Docs/**/*.json
+!Docs/backend-release-catalog.json

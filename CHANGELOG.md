@@ -1,5 +1,32 @@
 # Backend changelog
 
+## 0.3.0 — stable backend release
+
+- Promote the merged development contracts to a stable package release, preserving
+  their original tracked introduction versions and foundation/supported scope.
+- Include task creation retry/readback, project-scoped session queries, current
+  task assignee/workflow display, shared manual availability, atomic Profile Save,
+  and case-insensitive Contact revocation fixes from the development checkpoints.
+- Include the later browser session/CSRF boundary, durable session intent and
+  follow-up recovery, current project authority, shared human tasks/checklists,
+  group admission/text/history/reactions, article draft/review/publication
+  foundations, and bounded file Trash recovery. Native directory restoration is
+  limited to the documented Windows runtime and NTFS configuration.
+- Restore the machine-readable release catalog from the committed feature
+  availability document and explicitly track it despite the general Docs JSON
+  ignore rule. Fresh checkouts now validate and regenerate the same release data.
+- Correct the article regression assertion for a request made after account
+  revocation: the existing authentication guard returns 401. Revocation during
+  an already authenticated approval still returns 403; runtime behavior is unchanged.
+
+There are 21 added migrations relative to `v0.2.2`. The production migration ledger,
+backup, writer coordination and explicit migration procedure must be verified
+before runtime cutover. Browser sessions remain opt-in; this release does not
+activate unfinished agent domains or claim complete product workflows. Existing
+development handoff statements describe their original checkpoints, not this
+release's publication or deployment status. Git publication is not deployment.
+See the [0.3.0 rollout notes](Docs/release-0.3.0-rollout.md).
+
 ## 0.3.0-dev.10 — verified API documentation handoff
 
 - Export all 160 registered local operations and their source-derived DTO/security
