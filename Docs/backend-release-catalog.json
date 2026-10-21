@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.2",
+      "gitRef": "refs/tags/v0.3.2",
+      "channel": "production",
+      "deployment": "deployment-unverified"
+    },
+    {
       "version": "0.3.1",
       "gitRef": "refs/tags/v0.3.1",
       "channel": "production",

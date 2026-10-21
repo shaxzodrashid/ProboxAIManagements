@@ -1,5 +1,17 @@
 # Backend changelog
 
+## 0.3.2 — deterministic history cursor tampering test
+
+- Change an actual authentication-tag bit in the group-history cursor rejection
+  test, then encode the altered bytes canonically. Replacing the final characters
+  with AA occasionally left a valid random token unchanged, causing a false
+  failure during server deployment preparation.
+- Retain key-rotation, version, round-trip, nonce, length and bound checks. Cursor
+  encryption, validation and runtime behavior are unchanged; no checks are skipped.
+
+No new migrations, dependencies or production configuration relative to v0.3.1.
+Earlier release tags remain immutable. Publication does not prove deployment.
+
 ## 0.3.1 — bounded deployment test memory
 
 - Run Jest in one child worker and recycle it after a suite exceeds the 128 MB

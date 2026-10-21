@@ -36,7 +36,14 @@ describe("opaque group-history continuations", () => {
       decodeHistoryCursor(token, cursorKey("rotated fixture")),
     ).toThrow();
     expect(() => decodeHistoryCursor("2" + token.slice(1), key)).toThrow();
-    expect(() => decodeHistoryCursor(token.slice(0, -2) + "AA", key)).toThrow();
+    const parts = token.split(".");
+    const tag = Buffer.from(parts[3]!, "base64url");
+    // Always change a real tag bit, including when the original suffix is AA.
+    tag[0] = tag[0]! ^ 1;
+    parts[3] = tag.toString("base64url");
+    const tampered = parts.join(".");
+    expect(tampered).not.toBe(token);
+    expect(() => decodeHistoryCursor(tampered, key)).toThrow();
   });
   it("rejects authenticated but inconsistent bounds", () => {
     for (const bad of [
