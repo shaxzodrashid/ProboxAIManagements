@@ -425,6 +425,423 @@ if (url) requireFixtureDatabase(url);
       }
       return result;
     };
+    const threeAuthors = async () => {
+      const published = await seedPublishedBase(),
+        people = [author, voters[3]!, voters[4]!],
+        sources = [privateId, randomUUID(), randomUUID()];
+      for (let i = 1; i < 3; i++) {
+        await f.prisma.userRoleAssignment.create({
+          data: {
+            userId: people[i]!,
+            roleId: authorRole,
+            workspaceId: f.manifest.workspaceId,
+          },
+        });
+        expect(
+          (
+            await call(
+              "/article-drafts",
+              people[i]!,
+              "POST",
+              {
+                id: sources[i]!,
+                title: "Submitted title",
+                text: `Private contribution ${i}`,
+              },
+              0,
+            )
+          ).status,
+        ).toBe(201);
+      }
+      const candidates = [];
+      for (let i = 0; i < 3; i++) {
+        const response = await stage(
+          {
+            ...input(),
+            sourceArticleId: sources[i]!,
+            baseVersionId: published.version.id,
+            baseForestRevision: 1,
+          },
+          i ? 1 : 2,
+          people[i]!,
+        );
+        expect(response.status).toBe(201);
+        candidates.push(await response.json());
+      }
+      return { published, people, sources, candidates };
+    };
+    it("warns about submitted opponents and rejects only the third-author pending batch without deleting work", async () => {
+      const x = await threeAuthors(),
+        [a, b, c] = x.candidates;
+      const unrelatedId = randomUUID();
+      expect(
+        (await call("/article-documents", author, "POST", { id: unrelatedId }))
+          .status,
+      ).toBe(201);
+      const unrelated = await (
+        await stage({
+          ...input(),
+          documentId: unrelatedId,
+          sourceArticleId: privateId,
+          baseForestRevision: 1,
+          positions: [
+            { id: documentId, parentId: null },
+            { id: unrelatedId, parentId: null },
+          ],
+          readingOrder: [documentId, unrelatedId],
+        })
+      ).json();
+      expect((await push(unrelated.id)).status).toBe(201);
+      expect((await push(a.id, x.people[0]!)).status).toBe(201);
+      const warning = await (await get(b.id, x.people[1]!)).json();
+      expect(warning.opponentWarning).toMatchObject({
+        competing: true,
+        otherAuthorCount: 1,
+      });
+      expect(JSON.stringify(warning.opponentWarning)).not.toContain(
+        x.people[0],
+      );
+      expect((await push(b.id, x.people[1]!)).status).toBe(201);
+      const rejected = await push(c.id, x.people[2]!);
+      expect(rejected.status).toBe(201);
+      expect(await rejected.json()).toMatchObject({
+        state: "REJECTED_FOR_COORDINATION",
+        revision: 3,
+        opponentWarning: { otherAuthorCount: 2 },
+        coordination: { reason: "AUTHOR_LIMIT" },
+      });
+      for (let i = 0; i < 3; i++) {
+        expect(
+          (await (await get(x.candidates[i]!.id, x.people[i]!)).json()).state,
+        ).toBe("REJECTED_FOR_COORDINATION");
+        expect(
+          (await call(`/article-drafts/${x.sources[i]}`, x.people[i]!)).status,
+        ).toBe(200);
+      }
+      expect((await (await get(unrelated.id)).json()).state).toBe(
+        "QUEUED_FOR_REVIEW",
+      );
+      expect(
+        await f.prisma.articleProposalContribution.count({
+          where: { documentId },
+        }),
+      ).toBe(3);
+      expect(
+        (
+          await f.prisma.articleDocument.findUniqueOrThrow({
+            where: { id: documentId },
+          })
+        ).headVersionId,
+      ).toBe(x.published.version.id);
+      await expect(
+        f.prisma.articleProposalCandidate.update({
+          where: { id: a.id },
+          data: {
+            revision: 1,
+            coordinationRejectedAt: null,
+            coordinationReason: null,
+          },
+        }),
+      ).rejects.toThrow();
+      expect(
+        (
+          await call(
+            `/article-drafts/${privateId}`,
+            author,
+            "PUT",
+            {
+              title: "Coordinated",
+              text: "One combined document after discussion",
+            },
+            2,
+          )
+        ).status,
+      ).toBe(200);
+      const fresh = await (
+        await stage(
+          {
+            ...input(),
+            sourceArticleId: privateId,
+            baseVersionId: x.published.version.id,
+            baseForestRevision: 1,
+          },
+          3,
+        )
+      ).json();
+      expect((await push(fresh.id)).status).toBe(201);
+      expect((await (await get(fresh.id)).json()).state).toBe(
+        "QUEUED_FOR_REVIEW",
+      );
+    });
+    it("rolls back a failed third-author rejection and reconciles a committed lost acknowledgement without replay", async () => {
+      const x = await threeAuthors(),
+        [a, b, c] = x.candidates,
+        original = f.prisma.$transaction.bind(f.prisma);
+      expect((await push(a.id)).status).toBe(201);
+      expect((await push(b.id, x.people[1]!)).status).toBe(201);
+      jest.spyOn(f.prisma, "$transaction").mockImplementationOnce(((
+        callback: any,
+      ) =>
+        original(async (tx) => {
+          jest
+            .spyOn(tx.articleProposalCandidate, "updateMany")
+            .mockRejectedValueOnce(new Error("Synthetic rejection failure"));
+          return callback(tx);
+        })) as typeof f.prisma.$transaction);
+      expect((await push(c.id, x.people[2]!)).status).toBe(500);
+      expect((await (await get(a.id)).json()).state).toBe("QUEUED_FOR_REVIEW");
+      expect((await (await get(c.id, x.people[2]!)).json()).state).toBe(
+        "PRE_REVIEW",
+      );
+      jest.restoreAllMocks();
+      let attempts = 0;
+      jest.spyOn(f.prisma, "$transaction").mockImplementationOnce((async (
+        callback: any,
+      ) => {
+        attempts++;
+        await original(callback);
+        throw new Prisma.PrismaClientKnownRequestError(
+          "Synthetic rejection acknowledgement",
+          { code: "P2028", clientVersion: "synthetic" },
+        );
+      }) as typeof f.prisma.$transaction);
+      const response = await push(c.id, x.people[2]!);
+      expect(response.status).toBe(503);
+      expect((await response.json()).code).toBe("OPERATION_OUTCOME_UNKNOWN");
+      expect(attempts).toBe(1);
+      expect((await push(c.id, x.people[2]!)).status).toBe(409);
+      for (let i = 0; i < 3; i++)
+        expect(
+          (await (await get(x.candidates[i]!.id, x.people[i]!)).json()).state,
+        ).toBe("REJECTED_FOR_COORDINATION");
+      expect(
+        await f.prisma.articleProposalContribution.count({
+          where: { documentId },
+        }),
+      ).toBe(3);
+    });
+    it("rejects three active versions even from one author, preserving all captured snapshots", async () => {
+      const a = await (await stage()).json(),
+        b = await (
+          await stage({ ...input(), sourceArticleId: privateId })
+        ).json();
+      expect((await push(a.id)).status).toBe(201);
+      expect((await push(b.id)).status).toBe(201);
+      const source = randomUUID();
+      expect(
+        (
+          await call(
+            "/article-drafts",
+            author,
+            "POST",
+            {
+              id: source,
+              title: "Third version",
+              text: "Third distinct source",
+            },
+            2,
+          )
+        ).status,
+      ).toBe(201);
+      const c = await (
+        await stage({ ...input(), sourceArticleId: source }, 3)
+      ).json();
+      const result = await push(c.id);
+      expect(result.status).toBe(201);
+      expect(await result.json()).toMatchObject({
+        state: "REJECTED_FOR_COORDINATION",
+        coordination: { reason: "VERSION_LIMIT" },
+      });
+      expect(
+        await f.prisma.articleProposalContribution.count({
+          where: { documentId },
+        }),
+      ).toBe(3);
+      for (const candidate of [a, b, c])
+        expect((await (await get(candidate.id)).json()).comparison).toEqual(
+          candidate.comparison,
+        );
+    });
+    it("supersedes only a newer revision of its own source while preserving two-author provenance and preview", async () => {
+      const x = await threeAuthors(),
+        a = x.candidates[0],
+        b = x.candidates[1];
+      expect((await push(a.id)).status).toBe(201);
+      expect((await push(b.id, x.people[1]!)).status).toBe(201);
+      expect(
+        (
+          await call(
+            `/article-drafts/${privateId}`,
+            author,
+            "PUT",
+            { title: "Submitted title", text: "Intro\nnew A\nFooter\n" },
+            2,
+          )
+        ).status,
+      ).toBe(200);
+      const next = await (
+        await stage(
+          {
+            ...input(),
+            sourceArticleId: privateId,
+            baseVersionId: x.published.version.id,
+            baseForestRevision: 1,
+          },
+          3,
+        )
+      ).json();
+      const response = await push(next.id);
+      expect(response.status).toBe(201);
+      expect((await response.json()).state).toBe("QUEUED_FOR_REVIEW");
+      const frozen = await dispatch(a.id);
+      expect(frozen.status).toBe(201);
+      const r = await frozen.json();
+      expect(r.materialization.contributionIds).toEqual([a.id, b.id, next.id]);
+      expect(r.materialization.supersededContributionIds).toEqual([a.id]);
+      expect(r.combinedComparison).not.toBeNull();
+      expect(
+        (await (await get(x.candidates[2].id, x.people[2]!)).json()).state,
+      ).toBe("PRE_REVIEW");
+    });
+    it("serializes the third-author push against reviewer visibility without changing a frozen review", async () => {
+      const x = await threeAuthors(),
+        [a, b, c] = x.candidates;
+      expect((await push(a.id)).status).toBe(201);
+      expect((await push(b.id, x.people[1]!)).status).toBe(201);
+      const [submitted, frozen] = await Promise.all([
+        push(c.id, x.people[2]!),
+        dispatch(a.id),
+      ]);
+      expect(submitted.status).toBe(201);
+      if (frozen.status === 201) {
+        const r = await frozen.json();
+        expect(r.materialization.contributionIds).toEqual([a.id, b.id]);
+        expect((await (await get(c.id, x.people[2]!)).json()).state).toBe(
+          "QUEUED_FOR_REVIEW",
+        );
+        expect((await (await read(r.id)).json()).combinedComparison).toEqual(
+          r.combinedComparison,
+        );
+      } else {
+        expect(frozen.status).toBe(409);
+        for (let i = 0; i < 3; i++)
+          expect(
+            (await (await get(x.candidates[i]!.id, x.people[i]!)).json()).state,
+          ).toBe("REJECTED_FOR_COORDINATION");
+      }
+    });
+    it("exposes and freezes one combined preview with common content once before keep-both voting", async () => {
+      expect(
+        (
+          await call(
+            `/article-drafts/${articleId}`,
+            author,
+            "PUT",
+            { title: "Shared title", text: "Intro\nA chunk\nFooter\n" },
+            2,
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await call(
+            `/article-drafts/${privateId}`,
+            author,
+            "PUT",
+            { title: "Shared title", text: "Intro\nB chunk\nFooter\n" },
+            3,
+          )
+        ).status,
+      ).toBe(200);
+      const a = await (await stage(input(), 4)).json(),
+        b = await (
+          await stage({ ...input(), sourceArticleId: privateId }, 4)
+        ).json();
+      expect((await push(a.id)).status).toBe(201);
+      expect((await push(b.id)).status).toBe(201);
+      const response = await dispatch(a.id);
+      expect(response.status).toBe(201);
+      const r = await response.json();
+      expect(r.combinedComparison.after.article).toEqual({
+        id: documentId,
+        title: "Shared title",
+        text: "Intro\nA chunk\nB chunk\nFooter\n",
+      });
+      await expect(
+        f.prisma.articleResolutionReview.update({
+          where: { id: r.id },
+          data: { combinedComparison: {} },
+        }),
+      ).rejects.toThrow();
+      expect(
+        (
+          await call(
+            `/article-drafts/${articleId}`,
+            author,
+            "PUT",
+            { title: "Later private", text: "Not reviewed" },
+            4,
+          )
+        ).status,
+      ).toBe(200);
+      expect((await (await read(r.id)).json()).combinedComparison).toEqual(
+        r.combinedComparison,
+      );
+      for (const voter of [voters[0]!, voters[2]!])
+        expect((await ballot(r.id, "KEEP_BOTH", voter)).status).toBe(201);
+      expect((await (await canonical()).json()).article).toEqual(
+        r.combinedComparison.after.article,
+      );
+      const version = await f.prisma.articlePublishedVersion.findUniqueOrThrow({
+        where: { resolutionReviewId: r.id },
+      });
+      expect(version.provenance).toMatchObject({
+        format: 2,
+        outcome: "KEEP_BOTH",
+        contributionIds: [a.id, b.id],
+      });
+    });
+    it("does not freeze an invalid oversized combined title or silently choose one title", async () => {
+      expect(
+        (
+          await call(
+            `/article-drafts/${articleId}`,
+            author,
+            "PUT",
+            { title: "A".repeat(120), text: "A" },
+            2,
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await call(
+            `/article-drafts/${privateId}`,
+            author,
+            "PUT",
+            { title: "B".repeat(120), text: "B" },
+            3,
+          )
+        ).status,
+      ).toBe(200);
+      const a = await (await stage(input(), 4)).json(),
+        b = await (
+          await stage({ ...input(), sourceArticleId: privateId }, 4)
+        ).json();
+      expect((await push(a.id)).status).toBe(201);
+      expect((await push(b.id)).status).toBe(201);
+      const response = await dispatch(a.id);
+      expect(response.status).toBe(409);
+      expect((await response.json()).code).toBe(
+        "ARTICLE_COMBINED_RESULT_INVALID",
+      );
+      expect(
+        await f.prisma.articleResolutionReview.count({
+          where: { projectId: f.manifest.projectId },
+        }),
+      ).toBe(0);
+      expect((await (await get(a.id)).json()).state).toBe("QUEUED_FOR_REVIEW");
+    });
     it("reviews exact conflict-free bytes and forest, publishing at3/5 only after everyone votes", async () => {
       const r = await reviewStage();
       expect((await canonical()).status).toBe(404);
@@ -741,7 +1158,7 @@ if (url) requireFixtureDatabase(url);
         response: { code: "READ_DEPENDENCY_UNAVAILABLE" },
       });
     });
-    it("does not convert keep-both into conflict-free approval or publication", async () => {
+    it("publishes only the frozen combined keep-both result without a second approval", async () => {
       const r = await conflictReview();
       expect((await approval(r.id, true, voters[0]!)).status).toBe(409);
       for (let i = 0; i < 5; i++)
@@ -753,8 +1170,12 @@ if (url) requireFixtureDatabase(url);
         {},
       );
       expect(retry.status).toBe(201);
-      expect((await retry.json()).publication.state).toBe("CLOSED");
-      expect((await canonical()).status).toBe(404);
+      expect((await retry.json()).publication.state).toBe("PUBLISHED");
+      const published = await canonical();
+      expect(published.status).toBe(200);
+      expect((await published.json()).article).toEqual(
+        r.combinedComparison.after.article,
+      );
     });
     it.each(["KEEP_BOTH", "PUBLISH_A", "PUBLISH_B", "REJECT_BOTH"])(
       "selects %s at inclusive60 only after every fixed reviewer votes",
@@ -782,7 +1203,7 @@ if (url) requireFixtureDatabase(url);
           );
           expect(current.conflictVoting.winner).toBe(i === 4 ? option : null);
           expect(current.conflictVoting.publicationAvailable).toBe(
-            i === 4 && ["PUBLISH_A", "PUBLISH_B"].includes(option),
+            i === 4 && ["KEEP_BOTH", "PUBLISH_A", "PUBLISH_B"].includes(option),
           );
         }
         expect((await ballot(r.id, option, voters[0]!)).status).toBe(201);
@@ -805,7 +1226,7 @@ if (url) requireFixtureDatabase(url);
             where: { id: documentId },
           })
         ).headVersionId;
-        if (["PUBLISH_A", "PUBLISH_B"].includes(option))
+        if (["KEEP_BOTH", "PUBLISH_A", "PUBLISH_B"].includes(option))
           expect(publishedHead).not.toBeNull();
         else expect(publishedHead).toBeNull();
         expect((await (await read(r.id)).json()).materialization).toEqual(

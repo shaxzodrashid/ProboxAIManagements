@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.3",
+      "gitRef": "refs/tags/v0.3.3",
+      "channel": "production",
+      "deployment": "deployment-unverified"
+    },
+    {
       "version": "0.3.2",
       "gitRef": "refs/tags/v0.3.2",
       "channel": "production",
@@ -121,6 +127,20 @@
     }
   ],
   "features": [
+    {
+      "id": "browser-auth-creation-transport",
+      "title": "Browser registration, recovery and keyed project creation transport",
+      "since": "0.3.3",
+      "state": "foundation",
+      "contract": "Docs/browser-auth-creation-transport.md"
+    },
+    {
+      "id": "article-keep-both-coordination",
+      "title": "Frozen keep-both comparison and bounded pending article coordination",
+      "since": "0.3.3",
+      "state": "foundation",
+      "contract": "Docs/article-keep-both-coordination.md"
+    },
     {
       "id": "self-profile-contract",
       "title": "Self-scoped identity and independent names",

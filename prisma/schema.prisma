@@ -73,20 +73,22 @@ model ArticleProposalContribution {
 
 // FIFO reservations only. This slice exposes no merge, dispatch, vote or promotion mutation.
 model ArticleProposalCandidate {
-  submittedAt        DateTime?
-  submittedSequence  Int?
-  resolutionReviewId String?
-  resolutionReview   ArticleResolutionReview?    @relation(fields: [resolutionReviewId], references: [id], onDelete: Restrict)
-  id                 String                      @id
-  projectId          String
-  documentId         String
-  authorId           String
-  sequence           Int
-  revision           Int                         @default(0)
-  contributionId     String                      @unique
-  reachedReviewersAt DateTime?
-  document           ArticleDocument             @relation(fields: [projectId, documentId], references: [projectId, id], onDelete: Restrict)
-  contribution       ArticleProposalContribution @relation(fields: [contributionId], references: [id], onDelete: Restrict)
+  coordinationRejectedAt DateTime?
+  coordinationReason     String?
+  submittedAt            DateTime?
+  submittedSequence      Int?
+  resolutionReviewId     String?
+  resolutionReview       ArticleResolutionReview?    @relation(fields: [resolutionReviewId], references: [id], onDelete: Restrict)
+  id                     String                      @id
+  projectId              String
+  documentId             String
+  authorId               String
+  sequence               Int
+  revision               Int                         @default(0)
+  contributionId         String                      @unique
+  reachedReviewersAt     DateTime?
+  document               ArticleDocument             @relation(fields: [projectId, documentId], references: [projectId, id], onDelete: Restrict)
+  contribution           ArticleProposalContribution @relation(fields: [contributionId], references: [id], onDelete: Restrict)
 
   @@unique([projectId, sequence])
   @@unique([projectId, submittedSequence])
@@ -94,6 +96,7 @@ model ArticleProposalCandidate {
 }
 
 model ArticleResolutionReview {
+  combinedComparison Json?
   baseVersionId      String?
   baseForestRevision Int?
   publishedVersion   ArticlePublishedVersion?

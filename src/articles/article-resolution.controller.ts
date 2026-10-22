@@ -119,7 +119,7 @@ export class ArticleResolutionController {
     summary:
       "Selected reviewer casts one immutable four-option conflict ballot",
     description:
-      "KEEP_BOTH, PUBLISH_A, PUBLISH_B or REJECT_BOTH. Frozen complete A/B comparisons retain provenance. Every fixed reviewer must vote; winner needs inclusive60% of the full electorate. If needed, one unique-top-two runoff requires all reviewers and60%; a tied cutoff or failed runoff returns for revision. No plurality fallback, extra binary conflict approval or publication is performed. KEEP_BOTH retains both complete alternatives without concatenation. Multiway ambiguities fail closed.",
+      "KEEP_BOTH, PUBLISH_A, PUBLISH_B or REJECT_BOTH. Frozen complete A/B comparisons retain provenance. Every fixed reviewer must vote; winner needs inclusive60% of the full electorate. If needed, one unique-top-two runoff requires all reviewers and60%; a tied cutoff or failed runoff returns for revision. No plurality fallback or extra binary conflict approval occurs. KEEP_BOTH uses the exact frozen single combinedComparison preview, retaining common context once and both conflicting chunks. Compatible approved results promote atomically. Invalid combined title/placement/order fails before reviewer visibility. More than two competing authors or active versions requires one coordinated document.",
   })
   vote(
     @CurrentUser() actor: AuthenticatedUser,

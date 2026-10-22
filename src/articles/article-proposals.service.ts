@@ -26,6 +26,7 @@ import {
 } from "./article-comparison";
 import { StageArticleProposalDto } from "./article-proposals.dto";
 import { validatePublishedVersion } from "./article-version-validation";
+import { pendingBatchLimit } from "./article-pending-batch";
 const action = "articleProposalFoundations";
 const missing = () =>
   operationError(
@@ -102,10 +103,76 @@ export class ArticleProposalsService {
       return { id: document.id, headVersionId: document.headVersionId };
     });
   }
-  private detail(r: Candidate) {
+  private async pending(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    documentId: string,
+  ) {
+    return tx.articleProposalCandidate.findMany({
+      where: {
+        projectId,
+        documentId,
+        submittedAt: { not: null },
+        resolutionReviewId: null,
+        coordinationRejectedAt: null,
+      },
+      select: {
+        id: true,
+        authorId: true,
+        contribution: {
+          select: { sourceArticleId: true, sourceRevision: true },
+        },
+      },
+      orderBy: { submittedSequence: "asc" },
+      take: 101,
+    });
+  }
+  private async opponentWarning(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    documentId: string,
+    authorId: string,
+  ) {
+    const rows = await this.pending(tx, projectId, documentId);
+    return this.warningFor(rows, authorId);
+  }
+  private warningFor(rows: { authorId: string }[], authorId: string) {
+    const count = new Set(
+      rows.filter((r) => r.authorId !== authorId).map((r) => r.authorId),
+    ).size;
+    return {
+      competing: count > 0,
+      otherAuthorCount: count,
+      instruction: count
+        ? "Other authors have submitted this document; discuss conflicting work before review"
+        : null,
+    };
+  }
+  private detail(
+    r: Candidate,
+    opponentWarning = {
+      competing: false,
+      otherAuthorCount: 0,
+      instruction: null as string | null,
+    },
+  ) {
     const c = r.contribution;
     if (
+      r.revision !== 3 &&
+      (r.coordinationRejectedAt != null || r.coordinationReason != null)
+    )
+      throw unavailable();
+    if (
       !(
+        (r.revision === 3 &&
+          r.submittedAt != null &&
+          r.submittedSequence != null &&
+          r.reachedReviewersAt === null &&
+          r.resolutionReviewId == null &&
+          r.coordinationRejectedAt != null &&
+          ["AUTHOR_LIMIT", "VERSION_LIMIT"].includes(
+            r.coordinationReason ?? "",
+          )) ||
         (r.revision === 0 &&
           r.submittedAt == null &&
           r.submittedSequence == null &&
@@ -133,12 +200,24 @@ export class ArticleProposalsService {
       id: r.id,
       documentId: r.documentId,
       revision: r.revision,
+      opponentWarning,
+      coordination:
+        r.coordinationRejectedAt != null
+          ? {
+              required: true,
+              reason: r.coordinationReason,
+              instruction:
+                "Review submissions rejected for coordination. Contact the other participants, discuss the changes and submit one combined document; drafts and history are preserved",
+            }
+          : null,
       state:
-        r.reachedReviewersAt !== null
-          ? "REVIEWER_RESOLUTION"
-          : r.submittedAt != null
-            ? "QUEUED_FOR_REVIEW"
-            : "PRE_REVIEW",
+        r.coordinationRejectedAt != null
+          ? "REJECTED_FOR_COORDINATION"
+          : r.reachedReviewersAt !== null
+            ? "REVIEWER_RESOLUTION"
+            : r.submittedAt != null
+              ? "QUEUED_FOR_REVIEW"
+              : "PRE_REVIEW",
       dispatchAvailable: false,
       sourceArticleId: c.sourceArticleId,
       sourceRevision: c.sourceRevision,
@@ -176,21 +255,59 @@ export class ArticleProposalsService {
       if (!space || space.nextSequence < 0 || space.nextSequence >= 2147483646)
         throw unavailable();
       const next = space.nextSequence + 1;
+      const pending = await this.pending(tx, projectId, r.documentId);
+      if (pending.length >= 100)
+        throw operationError(
+          409,
+          "ARTICLE_REVIEW_CAPACITY",
+          "Pending contribution history exceeds supported review capacity; all work preserved",
+          action,
+        );
+      const warning = this.warningFor(pending, actor.id);
       await tx.articlePublicationSpace.update({
         where: { projectId },
         data: { nextSequence: next },
       });
-      return this.detail(
-        await tx.articleProposalCandidate.update({
-          where: { id: r.id },
-          data: {
-            submittedAt: new Date(),
-            submittedSequence: next,
+      const submitted = await tx.articleProposalCandidate.update({
+        where: { id: r.id },
+        data: {
+          submittedAt: new Date(),
+          submittedSequence: next,
+          revision: 1,
+        },
+        include: { contribution: true },
+      });
+      const reason = pendingBatchLimit([...pending, submitted]);
+      if (reason) {
+        const now = new Date();
+        const rejected = await tx.articleProposalCandidate.updateMany({
+          where: {
+            projectId,
+            documentId: r.documentId,
+            submittedAt: { not: null },
+            resolutionReviewId: null,
+            reachedReviewersAt: null,
+            coordinationRejectedAt: null,
             revision: 1,
           },
-          include: { contribution: true },
-        }),
-      );
+          data: {
+            coordinationRejectedAt: now,
+            coordinationReason: reason,
+            revision: 3,
+          },
+        });
+        if (rejected.count !== pending.length + 1) throw unavailable();
+        return this.detail(
+          {
+            ...submitted,
+            coordinationRejectedAt: now,
+            coordinationReason: reason,
+            revision: 3,
+          },
+          warning,
+        );
+      }
+      return this.detail(submitted, warning);
     });
   }
   stage(
@@ -378,18 +495,20 @@ export class ArticleProposalsService {
           comparison: comparison as unknown as Prisma.InputJsonValue,
         },
       });
+      const candidate = await tx.articleProposalCandidate.create({
+        data: {
+          id: dto.id,
+          projectId,
+          documentId: document.id,
+          authorId: actor.id,
+          sequence: counter + 1,
+          contributionId: contribution.id,
+        },
+        include: { contribution: true },
+      });
       return this.detail(
-        await tx.articleProposalCandidate.create({
-          data: {
-            id: dto.id,
-            projectId,
-            documentId: document.id,
-            authorId: actor.id,
-            sequence: counter + 1,
-            contributionId: contribution.id,
-          },
-          include: { contribution: true },
-        }),
+        candidate,
+        await this.opponentWarning(tx, projectId, document.id, actor.id),
       );
     });
   }
@@ -406,7 +525,10 @@ export class ArticleProposalsService {
           include: { contribution: true },
         });
         if (!r) throw missing();
-        return this.detail(r);
+        return this.detail(
+          r,
+          await this.opponentWarning(tx, projectId, r.documentId, r.authorId),
+        );
       }),
     );
   }

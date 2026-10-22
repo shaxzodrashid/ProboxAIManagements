@@ -122,14 +122,33 @@ export class ArticleChangeFlagsDto {
 export class ArticleCandidateSummaryDto {
   @ApiProperty({ format: "uuid" }) id!: string;
   @ApiProperty({ format: "uuid" }) documentId!: string;
-  @ApiProperty({ enum: [0, 1, 2] }) revision!: number;
+  @ApiProperty({ enum: [0, 1, 2, 3] }) revision!: number;
   @ApiProperty({
-    enum: ["PRE_REVIEW", "QUEUED_FOR_REVIEW", "REVIEWER_RESOLUTION"],
+    enum: [
+      "PRE_REVIEW",
+      "QUEUED_FOR_REVIEW",
+      "REVIEWER_RESOLUTION",
+      "REJECTED_FOR_COORDINATION",
+    ],
   })
   state!: string;
   @ApiProperty({ enum: [false] }) dispatchAvailable!: false;
 }
+export class ArticleOpponentWarningDto {
+  @ApiProperty() competing!: boolean;
+  @ApiProperty({ minimum: 0, maximum: 101 }) otherAuthorCount!: number;
+  @ApiProperty({ type: String, nullable: true }) instruction!: string | null;
+}
+export class ArticleCoordinationDto {
+  @ApiProperty({ enum: [true] }) required!: true;
+  @ApiProperty({ enum: ["AUTHOR_LIMIT", "VERSION_LIMIT"] }) reason!: string;
+  @ApiProperty() instruction!: string;
+}
 export class ArticleCandidateDetailDto extends ArticleCandidateSummaryDto {
+  @ApiProperty({ type: () => ArticleOpponentWarningDto })
+  opponentWarning!: ArticleOpponentWarningDto;
+  @ApiProperty({ type: () => ArticleCoordinationDto, nullable: true })
+  coordination!: ArticleCoordinationDto | null;
   @ApiProperty({ format: "uuid" }) sourceArticleId!: string;
   @ApiProperty() sourceRevision!: number;
   @ApiProperty({ type: String, nullable: true }) baseVersionId!: string | null;

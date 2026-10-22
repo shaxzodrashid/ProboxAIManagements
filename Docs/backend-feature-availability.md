@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.3.2**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.3.3**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -13,12 +13,14 @@ Available since refers to the first tracked Git release containing this bounded 
 | Atomic account lifecycle and role changes                                          | 0.2.0-dev.1     | supported  | [Contract](../Docs/admin-atomicity-contracts.md)               |
 | Canonical article publication                                                      | 0.3.0           | foundation | [Contract](../Docs/article-canonical-publication-contracts.md) |
 | Article conflict ballots                                                           | 0.3.0           | foundation | [Contract](../Docs/article-conflict-ballot-contracts.md)       |
+| Frozen keep-both comparison and bounded pending article coordination               | 0.3.3           | foundation | [Contract](../Docs/article-keep-both-coordination.md)          |
 | Private article drafts and independent reading order                               | 0.3.0           | foundation | [Contract](../Docs/article-private-draft-contracts.md)         |
 | Article proposal foundations                                                       | 0.3.0           | foundation | [Contract](../Docs/article-proposal-foundations-contracts.md)  |
 | Snapshot article publication review and electorate decisions                       | 0.3.0           | foundation | [Contract](../Docs/article-publication-review-contracts.md)    |
 | Article reviewer resolution                                                        | 0.3.0           | foundation | [Contract](../Docs/article-reviewer-resolution-contracts.md)   |
 | Atomic human Profile Save with stale-draft protection and whole-operation receipts | 0.3.0-dev.9     | supported  | [Contract](../Docs/atomic-profile-save-contracts.md)           |
 | Credential rejection versus authentication availability                            | 0.2.0-dev.1     | supported  | [Contract](../Docs/authentication-availability-contracts.md)   |
+| Browser registration, recovery and keyed project creation transport                | 0.3.3           | foundation | [Contract](../Docs/browser-auth-creation-transport.md)         |
 | Browser cookie sessions with CSRF and bounded proxy admission                      | 0.3.0           | foundation | [Contract](../Docs/browser-session-local-implementation.md)    |
 | Active-human group metadata and creator-only retry/readback                        | 0.2.0-dev.1     | foundation | [Contract](../Docs/chat-group-metadata-contracts.md)           |
 | Independent checklist deadlines and whole-list ordering                            | 0.2.0-dev.1     | supported  | [Contract](../Docs/checklist-order-contracts.md)               |
@@ -64,6 +66,7 @@ Available since refers to the first tracked Git release containing this bounded 
 
 ## Release references
 
+- **0.3.3**: `refs/tags/v0.3.3`, production, deployment-unverified.
 - **0.3.2**: `refs/tags/v0.3.2`, production, deployment-unverified.
 - **0.3.1**: `refs/tags/v0.3.1`, production, deployment-unverified.
 - **0.3.0**: `refs/tags/v0.3.0`, production, deployment-unverified.

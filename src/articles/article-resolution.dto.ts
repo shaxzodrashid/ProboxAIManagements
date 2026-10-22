@@ -156,6 +156,8 @@ export class ArticleResolutionResponseDto {
   publication!: ResolutionPublicationDto;
   @ApiProperty({ type: ArticleMaterializationDto })
   materialization!: ArticleMaterializationDto;
+  @ApiProperty({ type: ExactArticleComparisonDto, nullable: true })
+  combinedComparison!: ExactArticleComparisonDto | null;
   @ApiProperty({ type: ConflictVotingDto }) conflictVoting!: ConflictVotingDto;
   @ApiProperty({ type: [OwnConflictBallotDto], maxItems: 2 })
   myBallots!: OwnConflictBallotDto[];

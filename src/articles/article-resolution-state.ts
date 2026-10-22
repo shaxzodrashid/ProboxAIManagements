@@ -10,6 +10,8 @@ import {
   conflictVotingProgress,
 } from "./article-conflict-vote";
 import { articleReviewDecision } from "./article-review-decision";
+import { keepBothComparison } from "./article-keep-both";
+import { decodeArticleComparison } from "./article-comparison";
 export const resolutionInclude = {
   publishedVersion: { select: { id: true, number: true } },
   reviewers: {
@@ -76,6 +78,22 @@ export function resolutionMaterialization(r: ResolutionBundle) {
   const computed = materializeArticleChanges(r.documentId, r.before, changes);
   if (!isDeepStrictEqual(computed, r.materialization))
     throw resolutionUnavailable();
+  if (r.combinedComparison != null) {
+    const binary = binaryConflictAlternatives(computed);
+    if (!binary.available) throw resolutionUnavailable();
+    let expected;
+    try {
+      expected = keepBothComparison(
+        binary.alternatives[0]!.comparison,
+        binary.alternatives[1]!.comparison,
+        r.documentId,
+      );
+    } catch {
+      throw resolutionUnavailable();
+    }
+    if (!isDeepStrictEqual(expected, r.combinedComparison))
+      throw resolutionUnavailable();
+  }
   return computed;
 }
 export function resolutionDecision(r: ResolutionBundle) {
@@ -128,7 +146,9 @@ export function resolutionDecision(r: ResolutionBundle) {
       ? alternatives.alternatives.find(
           (a) => a.label === (outcome === "PUBLISH_A" ? "A" : "B"),
         )!.comparison
-      : null;
+      : outcome === "KEEP_BOTH" && r.combinedComparison != null
+        ? decodeArticleComparison(r.combinedComparison, r.documentId)
+        : null;
   return {
     state: comparison
       ? "APPROVED"

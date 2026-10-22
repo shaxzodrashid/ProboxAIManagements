@@ -10,7 +10,7 @@ import {
 import { JwtService } from "@nestjs/jwt";
 import { BrowserSession, Prisma } from "@prisma/client";
 import type { Request, Response } from "express";
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { AuthService } from "../auth/auth.service";
 import { LoginDto } from "../auth/auth.dto";
 import { PrismaService } from "../prisma/prisma.service";
@@ -29,6 +29,12 @@ interface Bundle {
   accessToken?: string;
   refreshToken?: string;
   accessExpiresAt?: number;
+  grant?: {
+    purpose: "registration" | "password-reset";
+    token: string;
+    handleHash: string;
+    expiresAt: number;
+  };
 }
 
 @Injectable()
@@ -231,7 +237,7 @@ export class BrowserSessionService {
       user: {
         id: user.id,
         workspaceId: user.workspaceId,
-        displayName: user.fullName,
+        displayName: user.fullName ?? "",
       },
       permissions: [
         ...new Set(
@@ -362,6 +368,94 @@ export class BrowserSessionService {
           bundle.accessExpiresAt!,
         ),
       };
+    });
+  }
+
+  /** Anonymous browser authentication still requires an enabled origin and CSRF on writes. */
+  async anonymous(req: Request) {
+    this.assertOrigin(req, req.method !== "GET");
+    return this.transaction(async (tx) => {
+      const row = await this.locked(tx, this.cookie(req));
+      if (req.method !== "GET") this.csrf(req, row);
+      if (row.userId)
+        throw new ConflictException("Sign out before changing credentials");
+      return row;
+    });
+  }
+
+  async rememberGrant(
+    req: Request,
+    purpose: "registration" | "password-reset",
+    value: { temporaryToken: string; expiresInSeconds: number },
+  ) {
+    const handle = randomBytes(48).toString("base64url");
+    return this.transaction(async (tx) => {
+      const row = await this.locked(tx, this.cookie(req));
+      this.csrf(req, row);
+      if (row.userId) throw new ConflictException("Browser identity changed");
+      const bundle = this.unpack(row);
+      const expiresAt = Math.min(
+        Date.now() + value.expiresInSeconds * 1000,
+        row.absoluteExpiresAt.getTime(),
+      );
+      bundle.grant = {
+        purpose,
+        token: value.temporaryToken,
+        handleHash: browserDigest(handle),
+        expiresAt,
+      };
+      await tx.browserSession.update({
+        where: { id: row.id },
+        data: { bundle: encryptBrowserBundle(this.config, row.id, bundle) },
+      });
+      // This handle is session-bound; the actual purpose token never leaves the server.
+      return {
+        temporaryToken: handle,
+        expiresInSeconds: Math.max(
+          1,
+          Math.floor((expiresAt - Date.now()) / 1000),
+        ),
+      };
+    });
+  }
+
+  async temporaryGrant(
+    req: Request,
+    purpose: "registration" | "password-reset",
+  ) {
+    const row = await this.anonymous(req);
+    const handle = req.headers["x-browser-grant"];
+    const grant = this.unpack(row).grant;
+    if (
+      typeof handle !== "string" ||
+      !/^[A-Za-z0-9_-]{64}$/.test(handle) ||
+      !grant ||
+      grant.purpose !== purpose ||
+      grant.expiresAt <= Date.now() ||
+      !timingSafeEqual(
+        Buffer.from(browserDigest(handle)),
+        Buffer.from(grant.handleHash),
+      )
+    )
+      throw new UnauthorizedException("Browser verification expired");
+    return grant.token;
+  }
+
+  async forgetGrant(req: Request) {
+    return this.transaction(async (tx) => {
+      const row = await this.locked(tx, this.cookie(req));
+      const bundle = this.unpack(row);
+      const handle = req.headers["x-browser-grant"];
+      if (
+        typeof handle === "string" &&
+        bundle.grant?.handleHash === browserDigest(handle)
+      ) {
+        delete bundle.grant;
+        await tx.browserSession.update({
+          where: { id: row.id },
+          data: { bundle: encryptBrowserBundle(this.config, row.id, bundle) },
+        });
+      }
     });
   }
 

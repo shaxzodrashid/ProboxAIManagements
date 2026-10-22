@@ -63,6 +63,15 @@ const writes = new RegExp(
 );
 export function browserProxyAllowed(method: string, path: string) {
   if (method === "POST" && path === "sessions/creations") return true;
+  if (method === "POST" && path === "projects/creation-submissions")
+    return true;
+  if (
+    method === "GET" &&
+    new RegExp(
+      `^(?:projects/creation-submissions/${id}|departments|configuration-templates(?:/${id})?)$`,
+    ).test(path)
+  )
+    return true;
   if (
     method === "GET" &&
     new RegExp(`^sessions/(?:creations/${id}|${id}/(?:archive|turns))$`).test(

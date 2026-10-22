@@ -22,6 +22,8 @@ import {
 } from "../openapi/operation-errors";
 import { currentArticlePublicationBase } from "./article-publication-base";
 import { promoteReviewedArticle } from "./article-promotion";
+import { keepBothComparison } from "./article-keep-both";
+import { pendingBatchLimit } from "./article-pending-batch";
 import { eligibleArticleReviewers } from "./article-reviewer-selection";
 import {
   AuthoredArticleChange,
@@ -155,6 +157,7 @@ export class ArticleResolutionService {
       finalVotingAvailable:
         !materialization.conflicts.length && r.phase === "RESOLVING",
       materialization,
+      combinedComparison: r.combinedComparison ?? null,
       reviewerIds: r.reviewers.map((v) => v.userId),
       myChoiceVersion: reviewer?.choiceVersion ?? null,
       myChoices,
@@ -276,6 +279,7 @@ export class ArticleResolutionService {
           documentId: candidate.documentId,
           submittedAt: { not: null },
           resolutionReviewId: null,
+          coordinationRejectedAt: null,
         },
         orderBy: { submittedSequence: "asc" },
         take: 101,
@@ -325,6 +329,39 @@ export class ArticleResolutionService {
         before,
         changes,
       );
+      if (pendingBatchLimit(candidates))
+        throw operationError(
+          409,
+          "ARTICLE_COORDINATION_REQUIRED",
+          "At most two authors and two active versions may enter conflict review; combine work and resubmit",
+          action,
+        );
+      let combinedComparison: Prisma.InputJsonValue | typeof Prisma.DbNull =
+        Prisma.DbNull;
+      if (materialization.conflicts.length) {
+        const binary = binaryConflictAlternatives(materialization);
+        if (!binary.available)
+          throw operationError(
+            409,
+            "ARTICLE_COORDINATION_REQUIRED",
+            "Two complete alternatives are required; coordinate one combined document",
+            action,
+          );
+        try {
+          combinedComparison = keepBothComparison(
+            binary.alternatives[0]!.comparison,
+            binary.alternatives[1]!.comparison,
+            document.id,
+          ) as unknown as Prisma.InputJsonValue;
+        } catch {
+          throw operationError(
+            409,
+            "ARTICLE_COMBINED_RESULT_INVALID",
+            "A valid exact keep-both preview is required before review; coordinate incompatible title, placement or order changes",
+            action,
+          );
+        }
+      }
       const reviewerIds = await eligibleArticleReviewers(
         tx,
         actor,
@@ -358,6 +395,7 @@ export class ArticleResolutionService {
           baseForestRevision: publicationSpace?.revision ?? 0,
           before: before as unknown as Prisma.InputJsonValue,
           materialization: materialization as unknown as Prisma.InputJsonValue,
+          combinedComparison,
           reviewers: { create: reviewerIds.map((userId) => ({ userId })) },
         },
       });
@@ -512,6 +550,13 @@ export class ArticleResolutionService {
         return this.detail(tx, r, actor);
       }
       const progress = this.voting(r);
+      if (dto.option === "KEEP_BOTH" && r.combinedComparison == null)
+        throw operationError(
+          409,
+          "ARTICLE_KEEP_BOTH_PREVIEW_UNAVAILABLE",
+          "This retained review has no immutable combined preview; content and ballots preserved",
+          action,
+        );
       if (
         r.phase !== "RESOLVING" ||
         !progress.available ||

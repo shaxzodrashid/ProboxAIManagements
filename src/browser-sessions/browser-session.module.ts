@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { BrowserAuthController } from "./browser-auth.controller";
 import { AuthModule } from "../auth/auth.module";
 import { BrowserSessionController } from "./browser-session.controller";
 import {
@@ -9,7 +10,7 @@ import { browserSessionConfig } from "./browser-session.config";
 
 @Module({
   imports: [AuthModule],
-  controllers: [BrowserSessionController],
+  controllers: [BrowserSessionController, BrowserAuthController],
   providers: [
     BrowserSessionService,
     {

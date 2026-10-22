@@ -96,6 +96,10 @@ plan](Docs/profile-audience-implementation-plan.md).
 
 ## User identity and authentication
 
+Frontend integration guidance: [documentation index](Docs/frontend/README.md) and
+[Authentication APIs](Docs/frontend/authentication.md), covering browser sessions,
+Telegram activation/recovery, request examples, validation, and error handling.
+
 Self profile read/update and backwards-compatible structured creation names are
 documented in [the profile contract](Docs/self-profile-contract.md). Apply the
 additive `20261011000000_self_profile_names` migration before running this version.
@@ -404,6 +408,10 @@ or plugin credentials to this allowlist without a demonstrated managed-session
 requirement and a separate review.
 
 ## Projects
+
+Frontend integration: [Projects APIs](Docs/frontend/projects.md), including
+permissions, request/response examples, lifecycle handling, outcome recovery, and
+the current browser transport boundary.
 
 Projects are workspace-scoped directories managed by the API and assigned to a
 department. The migration creates a default IT department using the previous

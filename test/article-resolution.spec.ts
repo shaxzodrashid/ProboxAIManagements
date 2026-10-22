@@ -5,6 +5,8 @@ import { PrismaService } from "../src/prisma/prisma.service";
 import { ArticleResolutionService } from "../src/articles/article-resolution.service";
 import { ArticleComparison } from "../src/articles/article-comparison";
 import { materializeArticleChanges } from "../src/articles/article-materialization";
+import { binaryConflictAlternatives } from "../src/articles/article-conflict-vote";
+import { keepBothComparison } from "../src/articles/article-keep-both";
 describe("reviewer resolution phase without publication decisions", () => {
   const projectId = randomUUID(),
     documentId = randomUUID(),
@@ -81,6 +83,16 @@ describe("reviewer resolution phase without publication decisions", () => {
       })),
     );
     bundle = {
+      combinedComparison: (() => {
+        const b = binaryConflictAlternatives(materialization);
+        return b.available
+          ? keepBothComparison(
+              b.alternatives[0]!.comparison,
+              b.alternatives[1]!.comparison,
+              documentId,
+            )
+          : null;
+      })(),
       id: reviewId,
       projectId,
       documentId,
@@ -128,6 +140,9 @@ describe("reviewer resolution phase without publication decisions", () => {
         }),
       },
       articleReview: { findUnique: jest.fn().mockResolvedValue(null) },
+      articlePublishedVersion: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
       articleProposalCandidate: {
         findFirst: jest.fn().mockResolvedValue(candidates[0]),
         findMany: jest.fn().mockResolvedValue(candidates),
@@ -412,5 +427,22 @@ describe("reviewer resolution phase without publication decisions", () => {
         option: "KEEP_BOTH",
       }),
     ).rejects.toMatchObject({ status: 404 });
+  });
+  it("preserves a legacy frozen keep-both decision without inventing a combined preview or changing ballots", async () => {
+    load();
+    bundle.combinedComparison = null;
+    bundle.phase = "DECIDED";
+    for (const v of bundle.reviewers)
+      v.ballots = [
+        { userId: v.userId, reviewId, round: 1, option: "KEEP_BOTH" },
+      ];
+    const original = JSON.stringify(bundle);
+    const response = await service.read(actor(reviewerId), projectId, reviewId);
+    expect(response.combinedComparison).toBeNull();
+    expect(response.publication.state).toBe("CLOSED");
+    await service.vote(actor(reviewerId), projectId, reviewId, 0, {
+      option: "KEEP_BOTH",
+    });
+    expect(JSON.stringify(bundle)).toBe(original);
   });
 });

@@ -1,4 +1,9 @@
+import { DepartmentsController } from "../../src/departments/departments.controller";
+import { DepartmentsService } from "../../src/departments/departments.service";
+import { ConfigurationTemplatesController } from "../../src/configuration-templates/configuration-templates.controller";
+import { ConfigurationTemplatesService } from "../../src/configuration-templates/configuration-templates.service";
 import "reflect-metadata";
+import { BrowserAuthController } from "../../src/browser-sessions/browser-auth.controller";
 import { ArticlesController } from "../../src/articles/articles.controller";
 import { ArticlesService } from "../../src/articles/articles.service";
 import { ArticleReviewsController } from "../../src/articles/article-reviews.controller";
@@ -371,6 +376,9 @@ export async function createFrontendSessionHarness(
         ArticleCanonicalController,
         ArticlesController,
         BrowserSessionController,
+        BrowserAuthController,
+        DepartmentsController,
+        ConfigurationTemplatesController,
         AuthController,
         AccountsController,
         AuthorizationController,
@@ -388,6 +396,17 @@ export async function createFrontendSessionHarness(
         PersonalModelPreferencesService,
         ModelCatalogService,
         BrowserSessionService,
+        {
+          provide: DepartmentsService,
+          useValue: new DepartmentsService(prisma as PrismaService, paths),
+        },
+        {
+          provide: ConfigurationTemplatesService,
+          useValue: new ConfigurationTemplatesService(
+            prisma as PrismaService,
+            {} as never,
+          ),
+        },
         { provide: BROWSER_SESSION_CONFIG, useValue: browserConfig },
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: jwt },

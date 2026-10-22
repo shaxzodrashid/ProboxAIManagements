@@ -1,5 +1,24 @@
 # Backend changelog
 
+## 0.3.3 — browser authentication and article coordination
+
+- Add anonymous browser registration and password recovery through existing OTP
+  validation, with encrypted server-side purpose tokens and session-bound handles.
+  Retain Origin, CSRF, JSON and original account authorization requirements.
+- Allow browser project creation submissions, outcome readback and read-only
+  department/template selectors; document authentication and project flows.
+- Freeze and validate one combined article comparison before KEEP_BOTH voting.
+  Preserve common text once, exact contribution history and valid forest changes;
+  reject incompatible or oversized combined results without truncation.
+- Bound pending review batches to two authors and two active versions. Reject
+  excess batches for coordination while retaining drafts, snapshots and history.
+- Include the deterministic history-cursor tampering test from 0.3.2.
+
+Two additive migrations are required relative to v0.3.1 and v0.3.2. Browser
+sessions remain opt-in; publication does not activate production configuration.
+Existing release tags remain immutable. See [rollout notes](Docs/release-0.3.3-rollout.md).
+Git publication does not prove deployment.
+
 ## 0.3.2 — deterministic history cursor tampering test
 
 - Change an actual authentication-tag bit in the group-history cursor rejection
