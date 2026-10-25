@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import { randomUUID, createHash } from "node:crypto";
 import { Observable } from "rxjs";
+import { assertSessionAuthority } from "../auth/session-authority";
 import {
   safeRunnerEvent,
   eventResponse,
@@ -1773,7 +1774,13 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
       ),
     );
   }
-  stream(actorId: string, sessionId: string, after: number, expiresAt: number) {
+  stream(
+    actorId: string,
+    sessionId: string,
+    after: number,
+    expiresAt: number,
+    identity?: AuthenticatedUser,
+  ) {
     return new Observable<MessageEvent>((subscriber) => {
       let stopped = false;
       let cursor = after;
@@ -1785,6 +1792,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
             return;
           }
           const batch = await this.history(actorId, sessionId, cursor, 100);
+          if (identity) await assertSessionAuthority(this.prisma, identity);
           if (stopped || Date.now() >= expiresAt) return subscriber.complete();
           for (const event of batch.events) {
             subscriber.next({

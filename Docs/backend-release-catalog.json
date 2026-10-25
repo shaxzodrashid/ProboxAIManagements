@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.4",
+      "gitRef": "refs/tags/v0.3.4",
+      "channel": "production",
+      "deployment": "deployment-unverified"
+    },
+    {
       "version": "0.3.3",
       "gitRef": "refs/tags/v0.3.3",
       "channel": "production",
@@ -497,6 +503,13 @@
       "since": "0.3.0",
       "state": "foundation",
       "contract": "Docs/article-canonical-publication-contracts.md"
+    },
+    {
+      "id": "rolling-device-authentication-contracts",
+      "title": "Opt-in rolling browser sessions, device revocation and recent authentication",
+      "since": "0.3.4",
+      "state": "foundation",
+      "contract": "Docs/rolling-authentication-contracts.md"
     }
   ]
 }

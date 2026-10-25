@@ -599,23 +599,22 @@ if (databaseUrl) {
       await context().expect(200);
     });
     it("does not return credentials or sign access after a lost database write acknowledgment", async () => {
-      const insert = prisma.sessionToken.create.bind(prisma.sessionToken);
+      const transact = prisma.$transaction.bind(prisma);
       const before = await prisma.sessionToken.count({
         where: { userId: manager },
       });
       const sign = jest.spyOn(jwt, "sign");
       const loseAcknowledgment = async (
-        args: Prisma.SessionTokenCreateArgs,
+        work: (tx: Prisma.TransactionClient) => Promise<unknown>,
       ) => {
-        await insert(args);
+        await transact(work);
         throw new Prisma.PrismaClientKnownRequestError(
           "lost database acknowledgment",
           { code: "P1017", clientVersion: "6.19.3" },
         );
       };
-      // Login only awaits this delegate; its fluent relation API is unused.
       const persistence = jest
-        .spyOn(prisma.sessionToken, "create")
+        .spyOn(prisma, "$transaction")
         .mockImplementationOnce(loseAcknowledgment as never);
       try {
         const result = await api()
@@ -648,9 +647,27 @@ if (databaseUrl) {
           { code: "P1017", clientVersion: "6.19.3" },
         );
       const sign = jest.spyOn(jwt, "sign");
-      const lookup = jest
-        .spyOn(prisma.user, "findUnique")
-        .mockRejectedValueOnce(failure());
+      const transact = prisma.$transaction.bind(prisma);
+      const inject = (stage: "lookup" | "persistence") =>
+        jest.spyOn(prisma, "$transaction").mockImplementationOnce(((
+          work: (tx: Prisma.TransactionClient) => Promise<unknown>,
+        ) =>
+          transact(async (tx) => {
+            const spy =
+              stage === "lookup"
+                ? jest
+                    .spyOn(tx.user, "findUnique")
+                    .mockRejectedValueOnce(failure())
+                : jest
+                    .spyOn(tx.sessionToken, "create")
+                    .mockRejectedValueOnce(failure());
+            try {
+              return await work(tx);
+            } finally {
+              spy.mockRestore();
+            }
+          })) as never);
+      const lookup = inject("lookup");
       try {
         const result = await api()
           .post("/api/v1/auth/login")
@@ -663,9 +680,7 @@ if (databaseUrl) {
       const before = await prisma.sessionToken.count({
         where: { userId: manager },
       });
-      const persistence = jest
-        .spyOn(prisma.sessionToken, "create")
-        .mockRejectedValueOnce(failure());
+      const persistence = inject("persistence");
       try {
         await api()
           .post("/api/v1/auth/login")

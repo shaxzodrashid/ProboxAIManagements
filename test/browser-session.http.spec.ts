@@ -259,7 +259,7 @@ integration("isolated browser cookie HTTP boundary", () => {
         }),
       },
     });
-    const spy = jest.spyOn(f.app.get(AuthService), "refresh");
+    const spy = jest.spyOn(f.app.get(AuthService), "sessionAccessToken");
     try {
       const results = await Promise.all([
         c.call("/browser/api/users/me"),
@@ -284,9 +284,9 @@ integration("isolated browser cookie HTTP boundary", () => {
           }),
         },
       });
-      spy.mockRejectedValueOnce(
-        new (await import("@nestjs/common")).ServiceUnavailableException(),
-      );
+      spy.mockImplementationOnce(() => {
+        throw new (require("@nestjs/common").ServiceUnavailableException)();
+      });
       expect((await c.call("/browser/api/users/me")).status).toBe(503);
     } finally {
       spy.mockRestore();
@@ -310,7 +310,7 @@ integration("isolated browser cookie HTTP boundary", () => {
     });
     expect((await c.call("/browser/api/users/me")).status).toBe(401);
   });
-  it("logout revokes one browser refresh only, preserves other browser and legacy bearer", async () => {
+  it("logout revokes one browser and its issued access token, preserving other browsers", async () => {
     const a = client(),
       b = client();
     await a.signIn();
@@ -339,7 +339,7 @@ integration("isolated browser cookie HTTP boundary", () => {
           headers: { Authorization: `Bearer ${bundle.accessToken}` },
         })
       ).status,
-    ).toBe(200);
+    ).toBe(401);
     expect(
       (
         await f.prisma.sessionToken.findUniqueOrThrow({
@@ -496,15 +496,28 @@ integration("isolated browser cookie HTTP boundary", () => {
       started = new Promise<void>((resolve) => {
         entered = resolve;
       });
-    const auth = f.app.get(AuthService),
-      original = auth.refresh.bind(auth);
-    const spy = jest
-      .spyOn(auth, "refresh")
-      .mockImplementationOnce(async (token) => {
-        entered();
-        await gate;
-        return original(token);
-      });
+    const prisma = f.prisma;
+    const original = prisma.$transaction.bind(prisma);
+    const spy = jest.spyOn(prisma, "$transaction").mockImplementationOnce(((
+      fn: (tx: Prisma.TransactionClient) => Promise<unknown>,
+    ) =>
+      original(async (tx) => {
+        const mint = jest
+          .spyOn(tx.refreshCredential, "create")
+          .mockImplementationOnce((async (
+            args: Prisma.RefreshCredentialCreateArgs,
+          ) => {
+            entered();
+            await gate;
+            mint.mockRestore();
+            return tx.refreshCredential.create(args);
+          }) as never);
+        try {
+          return await fn(tx);
+        } finally {
+          mint.mockRestore();
+        }
+      })) as never);
     const cookie = c.cookie;
     try {
       const reading = c.call("/browser/api/users/me");

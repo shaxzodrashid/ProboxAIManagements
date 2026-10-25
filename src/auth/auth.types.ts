@@ -5,6 +5,9 @@ export interface AuthenticatedUser {
   permissions: string[];
   type?: "access";
   accessExpiresAt?: number;
+  sessionId?: string;
+  authenticatedAt?: number;
+  accessIssuedAt?: number;
 }
 
 export interface AccessTokenPayload {
@@ -12,4 +15,8 @@ export interface AccessTokenPayload {
   workspaceId: string;
   type: "access";
   exp?: number;
+  iat?: number;
+  sid?: string;
+  auth_time?: number;
+  issued_at?: number;
 }

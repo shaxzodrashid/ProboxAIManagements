@@ -71,6 +71,7 @@ describe("JwtAuthGuard", () => {
       select: {
         id: true,
         workspaceId: true,
+        authRevokedAt: true,
         roleAssignments: {
           select: {
             role: {

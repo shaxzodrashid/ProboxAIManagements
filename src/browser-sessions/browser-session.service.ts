@@ -6,13 +6,19 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
   ConflictException,
+  HttpException,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { BrowserSession, Prisma } from "@prisma/client";
 import type { Request, Response } from "express";
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createHmac,
+  randomBytes,
+  randomInt,
+  timingSafeEqual,
+} from "node:crypto";
 import { AuthService } from "../auth/auth.service";
-import { LoginDto } from "../auth/auth.dto";
+import { AuthLocale, LoginDto } from "../auth/auth.dto";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   BrowserSessionConfig,
@@ -25,6 +31,7 @@ import {
 
 export const BROWSER_SESSION_CONFIG = Symbol("BROWSER_SESSION_CONFIG");
 interface Bundle {
+  inactivityMs?: number;
   csrfToken: string;
   accessToken?: string;
   refreshToken?: string;
@@ -104,7 +111,7 @@ export class BrowserSessionService {
       !row ||
       row.revokedAt ||
       row.idleExpiresAt.getTime() <= Date.now() ||
-      row.absoluteExpiresAt.getTime() <= Date.now()
+      (!row.rolling && row.absoluteExpiresAt.getTime() <= Date.now())
     )
       throw new UnauthorizedException("Browser session expired");
     return row;
@@ -148,6 +155,8 @@ export class BrowserSessionService {
     row: BrowserSession,
     bundle: Bundle,
   ) {
+    if (row.refreshId)
+      await tx.$queryRaw`SELECT "id" FROM "SessionToken" WHERE "id" = ${row.refreshId} FOR UPDATE`;
     const refresh = row.refreshId
       ? await tx.sessionToken.findUnique({
           where: { id: row.refreshId },
@@ -165,7 +174,8 @@ export class BrowserSessionService {
       refresh.user.workspaceId !== row.workspaceId ||
       !bundle.accessToken ||
       !bundle.refreshToken ||
-      browserDigest(bundle.refreshToken) !== refresh.tokenHash
+      (!refresh.managed &&
+        browserDigest(bundle.refreshToken) !== refresh.tokenHash)
     )
       throw new UnauthorizedException("Browser session expired");
     return refresh;
@@ -222,6 +232,9 @@ export class BrowserSessionService {
         id: true,
         workspaceId: true,
         fullName: true,
+        passwordHash: true,
+        telegramChatId: true,
+        verifiedAt: true,
         roleAssignments: {
           select: {
             role: {
@@ -247,12 +260,27 @@ export class BrowserSessionService {
         ),
       ].sort(),
       idleExpiresAt: row.idleExpiresAt.toISOString(),
-      absoluteExpiresAt: row.absoluteExpiresAt.toISOString(),
+      // Compatibility deadline for old adapters; new clients use hardExpiresAt.
+      absoluteExpiresAt: (row.rolling
+        ? row.idleExpiresAt
+        : row.absoluteExpiresAt
+      ).toISOString(),
+      expiryPolicy: row.rolling ? "rolling" : "absolute",
+      hardExpiresAt: row.rolling ? null : row.absoluteExpiresAt.toISOString(),
+      authenticatedAt: (row.authenticatedAt ?? row.createdAt).toISOString(),
+      reauthenticationMethod: user.passwordHash
+        ? "password"
+        : user.verifiedAt && user.telegramChatId
+          ? "telegram-otp"
+          : "unavailable",
     };
   }
 
   async login(req: Request, res: Response, dto: LoginDto) {
     this.assertOrigin(req, true);
+    const policy = req.headers["x-browser-session-policy"];
+    if (policy !== undefined && policy !== "rolling-v1")
+      throw new ForbiddenException("Unsupported browser session policy");
     const raw = this.cookie(req),
       next = browserSecret(),
       nextId = browserDigest(next);
@@ -269,32 +297,48 @@ export class BrowserSessionService {
           where: { tokenHash: issuedRefresh },
           include: { user: true },
         });
+        const modernClient = policy === "rolling-v1";
+        const inactivityMs = modernClient
+          ? this.config.idleMs
+          : Math.min(this.config.idleMs, 30 * 60_000);
+        const capMs = modernClient
+          ? this.config.absoluteMs
+          : Math.min(
+              this.config.absoluteMs || 8 * 60 * 60_000,
+              8 * 60 * 60_000,
+            );
         const csrfToken = browserSecret();
         const bundle: Bundle = {
+          inactivityMs,
           ...tokens,
           csrfToken,
           accessExpiresAt: this.accessExpiry(tokens.accessToken),
         };
+        const rolling = capMs === 0;
         const absoluteExpiresAt = new Date(
-          Math.min(
-            Date.now() + this.config.absoluteMs,
-            refresh.expiresAt.getTime(),
-          ),
+          Date.now() + (rolling ? inactivityMs : capMs),
         );
+        const idleExpiresAt = new Date(
+          Math.min(Date.now() + inactivityMs, absoluteExpiresAt.getTime()),
+        );
+        await tx.sessionToken.update({
+          where: { id: refresh.id },
+          data: { managed: true, expiresAt: idleExpiresAt },
+        });
+        await tx.refreshCredential.create({
+          data: { sessionId: refresh.id, tokenHash: issuedRefresh! },
+        });
         const row = await tx.browserSession.create({
           data: {
             id: nextId,
             userId: refresh.userId,
             workspaceId: refresh.user.workspaceId,
             refreshId: refresh.id,
+            rolling,
+            authenticatedAt: refresh.createdAt,
             bundle: encryptBrowserBundle(this.config, nextId, bundle),
             csrfHash: browserDigest(csrfToken),
-            idleExpiresAt: new Date(
-              Math.min(
-                Date.now() + this.config.idleMs,
-                absoluteExpiresAt.getTime(),
-              ),
-            ),
+            idleExpiresAt,
             absoluteExpiresAt,
           },
         });
@@ -304,7 +348,7 @@ export class BrowserSessionService {
         });
         return {
           view: await this.view(tx, row, bundle),
-          expiresAt: absoluteExpiresAt,
+          expiresAt: idleExpiresAt,
         };
       });
       this.setCookie(res, next, result.expiresAt);
@@ -330,29 +374,68 @@ export class BrowserSessionService {
   }
 
   /** PostgreSQL row lock serializes refresh with every browser logout across replicas. */
-  async authorize(req: Request, touch: boolean) {
+  async authorize(req: Request, touch: boolean, res?: Response) {
     this.assertOrigin(req, !["GET", "HEAD"].includes(req.method));
-    return this.transaction(async (tx) => {
+    const raw = this.cookie(req);
+    const result = await this.transaction(async (tx) => {
       const row = await this.locked(tx, this.cookie(req)),
         bundle = this.unpack(row);
       if (!["GET", "HEAD"].includes(req.method)) this.csrf(req, row);
-      await this.current(tx, row, bundle);
+      const refresh = await this.current(tx, row, bundle);
       if (
         !bundle.accessExpiresAt ||
         bundle.accessExpiresAt <= Date.now() + 60_000
       ) {
-        const refreshed = await this.auth.refresh(bundle.refreshToken!, tx);
-        bundle.accessToken = refreshed.accessToken;
-        bundle.accessExpiresAt = this.accessExpiry(refreshed.accessToken);
+        if (refresh.managed) {
+          const credential = await tx.refreshCredential.findUnique({
+            where: { tokenHash: browserDigest(bundle.refreshToken!) },
+          });
+          if (
+            !credential ||
+            credential.sessionId !== refresh.id ||
+            credential.consumedAt
+          ) {
+            // Return a rejection sentinel so revocation commits before throwing.
+            await tx.sessionToken.update({
+              where: { id: refresh.id },
+              data: { revokedAt: new Date() },
+            });
+            return null;
+          }
+          const next = randomBytes(48).toString("base64url");
+          await tx.refreshCredential.update({
+            where: { id: credential.id },
+            data: { consumedAt: new Date() },
+          });
+          await tx.refreshCredential.create({
+            data: { sessionId: refresh.id, tokenHash: browserDigest(next) },
+          });
+          bundle.refreshToken = next;
+          bundle.accessToken = this.auth.sessionAccessToken(
+            refresh.user,
+            refresh.id,
+            row.authenticatedAt ?? refresh.createdAt,
+          );
+        } else {
+          bundle.accessToken = (
+            await this.auth.refresh(bundle.refreshToken!, tx)
+          ).accessToken;
+        }
+        bundle.accessExpiresAt = this.accessExpiry(bundle.accessToken);
       }
       const idleExpiresAt = touch
         ? new Date(
             Math.min(
-              Date.now() + this.config.idleMs,
-              row.absoluteExpiresAt.getTime(),
+              Date.now() + (bundle.inactivityMs ?? this.config.idleMs),
+              row.rolling ? Infinity : row.absoluteExpiresAt.getTime(),
             ),
           )
         : row.idleExpiresAt;
+      if (touch && refresh.managed)
+        await tx.sessionToken.update({
+          where: { id: refresh.id },
+          data: { expiresAt: idleExpiresAt },
+        });
       await tx.browserSession.update({
         where: { id: row.id },
         data: {
@@ -364,9 +447,251 @@ export class BrowserSessionService {
         accessToken: bundle.accessToken!,
         deadline: Math.min(
           idleExpiresAt.getTime(),
-          row.absoluteExpiresAt.getTime(),
+          row.rolling ? Infinity : row.absoluteExpiresAt.getTime(),
           bundle.accessExpiresAt!,
         ),
+        cookieExpiresAt: idleExpiresAt,
+      };
+    });
+    if (!result) throw new UnauthorizedException("Browser session expired");
+    if (touch && res && raw) this.setCookie(res, raw, result.cookieExpiresAt);
+    return result;
+  }
+
+  async activity(req: Request, res: Response) {
+    await this.authorize(req, true, res);
+    return this.bootstrap(req, res);
+  }
+
+  async reauthenticate(req: Request, res: Response, password: string) {
+    this.assertOrigin(req, true);
+    const success = await this.transaction(async (tx) => {
+      const row = await this.locked(tx, this.cookie(req));
+      this.csrf(req, row);
+      const bundle = this.unpack(row);
+      const refresh = await this.current(tx, row, bundle);
+      if (
+        row.reauthBlockedUntil &&
+        row.reauthBlockedUntil.getTime() > Date.now()
+      )
+        throw new HttpException("Reauthentication temporarily limited", 429);
+      try {
+        const user = await this.auth.verifyCredentials(
+          { username: refresh.user.username!, password },
+          tx,
+        );
+        if (user.id !== row.userId) throw new UnauthorizedException();
+      } catch (error) {
+        if (!(error instanceof UnauthorizedException)) throw error;
+        const failures =
+          row.reauthBlockedUntil &&
+          row.reauthBlockedUntil.getTime() <= Date.now()
+            ? 1
+            : row.reauthFailures + 1;
+        await tx.browserSession.update({
+          where: { id: row.id },
+          data: {
+            reauthFailures: failures,
+            reauthBlockedUntil:
+              failures >= 5 ? new Date(Date.now() + 10 * 60_000) : null,
+          },
+        });
+        return false;
+      }
+      const authenticatedAt = new Date();
+      bundle.accessToken = this.auth.sessionAccessToken(
+        refresh.user,
+        refresh.id,
+        authenticatedAt,
+      );
+      bundle.accessExpiresAt = this.accessExpiry(bundle.accessToken);
+      await tx.browserSession.update({
+        where: { id: row.id },
+        data: {
+          authenticatedAt,
+          reauthFailures: 0,
+          reauthBlockedUntil: null,
+          bundle: encryptBrowserBundle(this.config, row.id, bundle),
+        },
+      });
+      return true;
+    });
+    if (!success) throw new UnauthorizedException("Reauthentication rejected");
+    return this.activity(req, res);
+  }
+
+  private assertPasswordless(user: {
+    passwordHash: string | null;
+    verifiedAt: Date | null;
+    telegramChatId: bigint | null;
+  }) {
+    if (user.passwordHash)
+      throw new ForbiddenException("Password verification required");
+    if (!user.verifiedAt || !user.telegramChatId)
+      throw new ForbiddenException(
+        "No verified authentication method is available",
+      );
+  }
+
+  async sendStepUpOtp(req: Request, locale: AuthLocale) {
+    this.assertOrigin(req, true);
+    return this.transaction(async (tx) => {
+      const row = await this.locked(tx, this.cookie(req));
+      this.csrf(req, row);
+      const root = await this.current(tx, row, this.unpack(row));
+      this.assertPasswordless(root.user);
+      const newWindow =
+        !row.stepUpOtpWindowAt ||
+        Date.now() - row.stepUpOtpWindowAt.getTime() >= 10 * 60_000;
+      if (!newWindow && row.stepUpOtpSentCount >= 3)
+        throw new HttpException("Too many verification requests", 429);
+      const code = randomInt(100000, 1_000_000).toString();
+      const hash = createHmac("sha256", this.config.key)
+        .update(`step-up:${row.id}:${code}`)
+        .digest("hex");
+      await tx.browserSession.update({
+        where: { id: row.id },
+        data: {
+          stepUpOtpHash: `${this.config.keyId}:${hash}`,
+          stepUpOtpExpiresAt: new Date(Date.now() + 5 * 60_000),
+          stepUpOtpAttempts: 0,
+          stepUpOtpWindowAt: newWindow ? new Date() : row.stepUpOtpWindowAt,
+          stepUpOtpSentCount: newWindow ? 1 : row.stepUpOtpSentCount + 1,
+        },
+      });
+      await this.auth.deliverStepUpOtp(root.user.telegramChatId!, code, locale);
+      return { expiresInSeconds: 300 };
+    });
+  }
+
+  async verifyStepUpOtp(req: Request, res: Response, code: string) {
+    this.assertOrigin(req, true);
+    const accepted = await this.transaction(async (tx) => {
+      const row = await this.locked(tx, this.cookie(req));
+      this.csrf(req, row);
+      const bundle = this.unpack(row);
+      const root = await this.current(tx, row, bundle);
+      this.assertPasswordless(root.user);
+      const [keyId, hash] = (row.stepUpOtpHash ?? "").split(":");
+      const key =
+        keyId === this.config.keyId
+          ? this.config.key
+          : keyId &&
+              Object.prototype.hasOwnProperty.call(
+                this.config.previousKeys ?? {},
+                keyId,
+              )
+            ? this.config.previousKeys![keyId]
+            : undefined;
+      const actual = key
+        ? createHmac("sha256", key)
+            .update(`step-up:${row.id}:${code}`)
+            .digest("hex")
+        : "";
+      const valid =
+        !!key &&
+        !!hash &&
+        /^[a-f0-9]{64}$/.test(hash) &&
+        row.stepUpOtpAttempts < 5 &&
+        !!row.stepUpOtpExpiresAt &&
+        row.stepUpOtpExpiresAt.getTime() > Date.now() &&
+        timingSafeEqual(Buffer.from(hash), Buffer.from(actual));
+      if (!valid) {
+        await tx.browserSession.update({
+          where: { id: row.id },
+          data: { stepUpOtpAttempts: { increment: 1 } },
+        });
+        return false;
+      }
+      const authenticatedAt = new Date();
+      bundle.accessToken = this.auth.sessionAccessToken(
+        root.user,
+        root.id,
+        authenticatedAt,
+      );
+      bundle.accessExpiresAt = this.accessExpiry(bundle.accessToken);
+      await tx.browserSession.update({
+        where: { id: row.id },
+        data: {
+          authenticatedAt,
+          stepUpOtpHash: null,
+          stepUpOtpExpiresAt: null,
+          stepUpOtpAttempts: 0,
+          bundle: encryptBrowserBundle(this.config, row.id, bundle),
+        },
+      });
+      return true;
+    });
+    if (!accepted)
+      throw new UnauthorizedException("Invalid or expired verification code");
+    return this.activity(req, res);
+  }
+
+  async revokeSessions(req: Request, res: Response, sessionId?: string) {
+    this.assertOrigin(req, true);
+    await this.transaction(async (tx) => {
+      const row = await this.locked(tx, this.cookie(req));
+      this.csrf(req, row);
+      await this.current(tx, row, this.unpack(row));
+      if (
+        Date.now() - (row.authenticatedAt ?? row.createdAt).getTime() >
+        10 * 60_000
+      )
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: "RECENT_AUTH_REQUIRED",
+          message: "Recent authentication required",
+        });
+      const revoked = await tx.sessionToken.updateMany({
+        where: {
+          userId: row.userId!,
+          purpose: "REFRESH",
+          ...(sessionId ? { id: sessionId } : {}),
+        },
+        data: { revokedAt: new Date() },
+      });
+      if (sessionId && !revoked.count)
+        throw new NotFoundException("Device session not found");
+      if (!sessionId)
+        await tx.user.update({
+          where: { id: row.userId! },
+          data: { authRevokedAt: new Date() },
+        });
+    });
+    if (!sessionId)
+      res.clearCookie(browserCookieName(this.config), {
+        httpOnly: true,
+        secure: this.config.secure,
+        sameSite: "lax",
+        path: "/",
+      });
+  }
+
+  async devices(req: Request) {
+    this.assertOrigin(req);
+    return this.transaction(async (tx) => {
+      const row = await this.locked(tx, this.cookie(req));
+      await this.current(tx, row, this.unpack(row));
+      const sessions = await tx.sessionToken.findMany({
+        where: {
+          userId: row.userId!,
+          purpose: "REFRESH",
+          revokedAt: null,
+          consumedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        take: 100,
+        select: { id: true, createdAt: true, expiresAt: true },
+      });
+      return {
+        items: sessions.map((s) => ({
+          id: s.id,
+          createdAt: s.createdAt.toISOString(),
+          inactivityExpiresAt: s.expiresAt.toISOString(),
+          current: s.id === row.refreshId,
+        })),
+        limit: 100,
       };
     });
   }

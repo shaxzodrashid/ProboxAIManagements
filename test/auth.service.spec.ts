@@ -207,7 +207,10 @@ describe("AuthService", () => {
 
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: openedUser.id },
-      data: { passwordHash: expect.stringMatching(/^scrypt\$/) },
+      data: {
+        passwordHash: expect.stringMatching(/^scrypt\$/),
+        authRevokedAt: expect.any(Date),
+      },
     });
     expect(prisma.sessionToken.updateMany).toHaveBeenCalledWith({
       where: {
@@ -222,6 +225,7 @@ describe("AuthService", () => {
 
 function prismaMock() {
   const prisma: any = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     user: {
       findUnique: jest.fn(),
       update: jest.fn().mockResolvedValue({}),

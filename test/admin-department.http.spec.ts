@@ -203,6 +203,7 @@ if (databaseUrl) {
             provide: JwtService,
             useValue: {
               verify: (id: string) => ({
+                iat: Math.floor(Date.now() / 1000),
                 id,
                 workspaceId: "stale",
                 type: "access",

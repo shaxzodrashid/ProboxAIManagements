@@ -1,5 +1,25 @@
 # Backend changelog
 
+## 0.3.4 — rolling browser sessions and device authentication
+
+- Add explicitly opted-in rolling browser sessions with a default 90-day
+  inactivity window, foreground activity renewal and no default calendar cap.
+  Clients without the rolling policy header retain capped browser sessions.
+- Rotate browser-managed refresh credentials atomically, retain consumed hashes
+  for replay detection, and support retained encryption keys during key rotation.
+- Add owned-device listing/revocation, account-wide revocation and current device
+  checks for newly issued JWTs and both persisted SSE paths. Direct-client refresh
+  retains its existing fixed, nonrotating contract.
+- Require recent authentication for sensitive administration and device revocation;
+  add password confirmation and session-bound Telegram OTP confirmation for
+  passwordless accounts without introducing a new login or password bypass.
+- Document client activity/deadline handling, step-up, retention and rollback gates.
+
+Two additive migrations are required relative to v0.3.3. Existing sessions retain
+their deadlines; frontend rolling-policy integration remains a separate gate.
+See [rollout notes](Docs/release-0.3.4-rollout.md). Preparation and Git publication
+do not prove production deployment.
+
 ## 0.3.3 — browser authentication and article coordination
 
 - Add anonymous browser registration and password recovery through existing OTP

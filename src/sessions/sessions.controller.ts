@@ -485,6 +485,7 @@ export class SessionsController {
       id,
       after ?? 0,
       user.accessExpiresAt ?? Date.now(),
+      user,
     );
   }
 }

@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.3.3**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.3.4**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -46,6 +46,7 @@ Available since refers to the first tracked Git release containing this bounded 
 | Member-scoped session index for explicit project-board tasks                       | 0.3.0-dev.1     | supported  | [Contract](../Docs/project-session-query-contracts.md)         |
 | Task identity in project session queries                                           | 0.3.0-dev.4     | supported  | [Contract](../Docs/project-session-task-identity-contracts.md) |
 | REST follow-up dispatch recovery and session read availability                     | 0.3.0           | supported  | [Contract](../Docs/rest-followup-recovery-contracts.md)        |
+| Opt-in rolling browser sessions, device revocation and recent authentication       | 0.3.4           | foundation | [Contract](../Docs/rolling-authentication-contracts.md)        |
 | Self-scoped identity and independent names                                         | 0.2.0-dev.1     | supported  | [Contract](../Docs/self-profile-contract.md)                   |
 | Stored self Telegram link readback                                                 | 0.2.0-dev.1     | supported  | [Contract](../Docs/self-telegram-link-contracts.md)            |
 | Canonical assistant text reconstruction                                            | 0.2.0-dev.1     | supported  | [Contract](../Docs/session-assistant-text-contracts.md)        |
@@ -66,6 +67,7 @@ Available since refers to the first tracked Git release containing this bounded 
 
 ## Release references
 
+- **0.3.4**: `refs/tags/v0.3.4`, production, deployment-unverified.
 - **0.3.3**: `refs/tags/v0.3.3`, production, deployment-unverified.
 - **0.3.2**: `refs/tags/v0.3.2`, production, deployment-unverified.
 - **0.3.1**: `refs/tags/v0.3.1`, production, deployment-unverified.

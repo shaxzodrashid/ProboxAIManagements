@@ -462,6 +462,7 @@ model TelegramSession {
 }
 
 model User {
+  authRevokedAt             DateTime?
   articleDraftSpaces        ArticleDraftSpace[]
   customStatusText          String?                           @db.VarChar(300)
   customStatusEmoji         String?                           @db.VarChar(32)
@@ -897,6 +898,8 @@ model AuthOtp {
 }
 
 model SessionToken {
+  credentials     RefreshCredential[]
+  managed         Boolean             @default(false)
   browserSessions BrowserSession[]
   id              String              @id @default(uuid())
   userId          String
@@ -911,19 +914,41 @@ model SessionToken {
   @@index([userId, purpose, expiresAt])
 }
 
+// Only server-side browser refresh uses rotating credentials. The root remains
+// stable so every issued access JWT can be revoked with its device session.
+model RefreshCredential {
+  id         String       @id @default(uuid())
+  sessionId  String
+  session    SessionToken @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  tokenHash  String       @unique
+  consumedAt DateTime?
+  createdAt  DateTime     @default(now())
+
+  @@index([sessionId])
+}
+
 // Opaque browser IDs are hashed. Token/CSRF bundles use independent AEAD encryption.
 model BrowserSession {
-  id                String        @id
-  userId            String?
-  workspaceId       String?
-  refreshId         String?
-  refresh           SessionToken? @relation(fields: [refreshId], references: [id], onDelete: Cascade)
-  bundle            String
-  csrfHash          String
-  createdAt         DateTime      @default(now())
-  idleExpiresAt     DateTime
-  absoluteExpiresAt DateTime
-  revokedAt         DateTime?
+  stepUpOtpHash      String?
+  stepUpOtpExpiresAt DateTime?
+  stepUpOtpAttempts  Int           @default(0)
+  stepUpOtpWindowAt  DateTime?
+  stepUpOtpSentCount Int           @default(0)
+  reauthFailures     Int           @default(0)
+  reauthBlockedUntil DateTime?
+  rolling            Boolean       @default(false)
+  authenticatedAt    DateTime?
+  id                 String        @id
+  userId             String?
+  workspaceId        String?
+  refreshId          String?
+  refresh            SessionToken? @relation(fields: [refreshId], references: [id], onDelete: Cascade)
+  bundle             String
+  csrfHash           String
+  createdAt          DateTime      @default(now())
+  idleExpiresAt      DateTime
+  absoluteExpiresAt  DateTime
+  revokedAt          DateTime?
 
   @@index([absoluteExpiresAt])
   @@index([refreshId])

@@ -54,6 +54,11 @@ describe("login dependency availability HTTP", () => {
     passwordHash: `scrypt$16384$8$1$${salt.toString("base64url")}$${scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString("base64url")}`,
   };
   const prisma = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    $transaction: jest.fn(
+      async (fn: (tx: unknown) => Promise<unknown>): Promise<unknown> =>
+        fn(prisma),
+    ),
     user: { findUnique: jest.fn() },
     sessionToken: { create: jest.fn() },
   };

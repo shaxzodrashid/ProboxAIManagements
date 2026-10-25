@@ -14,6 +14,7 @@ export interface BrowserSessionConfig {
   idleMs: number;
   absoluteMs: number;
   anonymousMs: number;
+  previousKeys?: Record<string, Buffer>;
 }
 
 export function browserSessionConfig(
@@ -60,18 +61,58 @@ export function browserSessionConfig(
       throw new Error(`Invalid ${name}`);
     return value;
   };
+  const previousKeys: Record<string, Buffer> = Object.create(null);
+  let retained: unknown;
+  try {
+    retained = JSON.parse(env.BROWSER_SESSION_PREVIOUS_KEYS ?? "{}");
+  } catch {
+    throw new Error("Invalid retained browser keys");
+  }
+  if (
+    !retained ||
+    Array.isArray(retained) ||
+    typeof retained !== "object" ||
+    Object.keys(retained).length > 5
+  )
+    throw new Error("Invalid retained browser keys");
+  for (const [id, encodedKey] of Object.entries(retained)) {
+    if (
+      !/^[A-Za-z0-9_-]{1,32}$/.test(id) ||
+      id === keyId ||
+      typeof encodedKey !== "string"
+    )
+      throw new Error("Invalid retained browser key");
+    const oldKey = Buffer.from(encodedKey, "base64url");
+    if (
+      oldKey.length !== 32 ||
+      oldKey.toString("base64url") !== encodedKey ||
+      encodedKey === env.JWT_SECRET ||
+      oldKey.equals(Buffer.from(env.JWT_SECRET ?? "", "utf8"))
+    )
+      throw new Error("Invalid retained browser key");
+    previousKeys[id] = oldKey;
+  }
   return {
     enabled,
     origin: origin.origin,
     secure,
     key,
     keyId,
-    idleMs: duration("BROWSER_SESSION_IDLE_MS", 30 * 60_000, 8 * 60 * 60_000),
-    absoluteMs: duration(
-      "BROWSER_SESSION_ABSOLUTE_MS",
-      8 * 60 * 60_000,
-      24 * 60 * 60_000,
+    previousKeys,
+    idleMs: duration(
+      "BROWSER_SESSION_IDLE_MS",
+      90 * 24 * 60 * 60_000,
+      365 * 24 * 60 * 60_000,
     ),
+    absoluteMs:
+      env.BROWSER_SESSION_ABSOLUTE_MS === undefined ||
+      env.BROWSER_SESSION_ABSOLUTE_MS === "0"
+        ? 0
+        : duration(
+            "BROWSER_SESSION_ABSOLUTE_MS",
+            8 * 60 * 60_000,
+            365 * 24 * 60 * 60_000,
+          ),
     anonymousMs: duration(
       "BROWSER_SESSION_ANONYMOUS_MS",
       10 * 60_000,
@@ -113,11 +154,18 @@ export function decryptBrowserBundle<T>(
   value: string,
 ): T {
   const [keyId, iv, tag, data, extra] = value.split(".");
-  if (keyId !== config.keyId || !iv || !tag || !data || extra)
+  const key =
+    keyId === config.keyId
+      ? config.key
+      : keyId &&
+          Object.prototype.hasOwnProperty.call(config.previousKeys ?? {}, keyId)
+        ? config.previousKeys![keyId]
+        : undefined;
+  if (!key || !iv || !tag || !data || extra)
     throw new Error("Invalid browser bundle");
   const cipher = createDecipheriv(
     "aes-256-gcm",
-    config.key,
+    key,
     Buffer.from(iv, "base64url"),
   );
   cipher.setAAD(Buffer.from(`${keyId}:${id}`));

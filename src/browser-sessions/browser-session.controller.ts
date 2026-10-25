@@ -4,6 +4,8 @@ import {
   Controller,
   Get,
   HttpCode,
+  Param,
+  ParseUUIDPipe,
   Post,
   Req,
   Res,
@@ -20,6 +22,12 @@ import {
 } from "@nestjs/swagger";
 import type { Request, Response } from "express";
 import { LoginDto } from "../auth/auth.dto";
+import {
+  ReauthenticateDto,
+  EmptyBrowserBodyDto,
+  SendStepUpOtpDto,
+  VerifyStepUpOtpDto,
+} from "./browser-session.dto";
 import { BrowserSessionService } from "./browser-session.service";
 import {
   ApiAuthenticationErrors,
@@ -51,6 +59,17 @@ export class BrowserSessionResponseDto {
   @ApiProperty({ required: false, format: "date-time" }) idleExpiresAt?: string;
   @ApiProperty({ required: false, format: "date-time" })
   absoluteExpiresAt?: string;
+  @ApiProperty({
+    required: false,
+    enum: ["password", "telegram-otp", "unavailable"],
+  })
+  reauthenticationMethod?: string;
+  @ApiProperty({ required: false, enum: ["rolling", "absolute"] })
+  expiryPolicy?: string;
+  @ApiProperty({ required: false, nullable: true, format: "date-time" })
+  hardExpiresAt?: string | null;
+  @ApiProperty({ required: false, format: "date-time" })
+  authenticatedAt?: string;
 }
 
 const id =
@@ -152,6 +171,108 @@ export class BrowserSessionController {
   }
 
   // Original routes own their DTOs, OpenAPI schemas and resource authorization.
+  @Post("activity")
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      "Report foreground user activity; never send from background timers or SSE",
+  })
+  @ApiOkResponse({ type: BrowserSessionResponseDto })
+  activity(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() _body: EmptyBrowserBodyDto,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.sessions.activity(req, res);
+  }
+
+  @Post("reauthenticate")
+  @HttpCode(200)
+  @ApiOperation({
+    summary: "Confirm the current account password for sensitive operations",
+  })
+  @ApiOkResponse({ type: BrowserSessionResponseDto })
+  reauthenticate(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: ReauthenticateDto,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.sessions.reauthenticate(req, res, dto.password);
+  }
+
+  @Post("reauthenticate/otp/send")
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      "Send a session-bound code only for an already authenticated passwordless account",
+  })
+  sendStepUpOtp(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: SendStepUpOtpDto,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.sessions.sendStepUpOtp(req, dto.locale);
+  }
+
+  @Post("reauthenticate/otp/verify")
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      "Confirm a passwordless account's session-bound code; never replaces a required password",
+  })
+  @ApiOkResponse({ type: BrowserSessionResponseDto })
+  verifyStepUpOtp(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: VerifyStepUpOtpDto,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.sessions.verifyStepUpOtp(req, res, dto.code);
+  }
+
+  @Get("devices")
+  @ApiOperation({
+    summary: "List at most 100 of your active device sessions; no credentials",
+  })
+  devices(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.sessions.devices(req);
+  }
+
+  @Post("devices/:id/revoke")
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      "Revoke one of your device sessions; recent password authentication required",
+  })
+  revokeDevice(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body() _body: EmptyBrowserBodyDto,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.sessions.revokeSessions(req, res, id);
+  }
+
+  @Post("devices/revoke-all")
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      "Revoke all of your sessions, including this one; recent authentication required",
+  })
+  revokeAll(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() _body: EmptyBrowserBodyDto,
+  ) {
+    res.setHeader("Cache-Control", "no-store");
+    return this.sessions.revokeSessions(req, res);
+  }
+
   @All("api/{*path}")
   @ApiExcludeEndpoint()
   async proxy(@Req() req: Request, @Res() res: Response) {
@@ -163,7 +284,11 @@ export class BrowserSessionController {
       : "";
     if (!browserProxyAllowed(req.method, path)) throw new NotFoundException();
     const streaming = path.endsWith("/stream");
-    const identity = await this.sessions.authorize(req, req.method !== "GET");
+    const identity = await this.sessions.authorize(
+      req,
+      req.method !== "GET",
+      res,
+    );
     const stop = new AbortController();
     res.on("close", () => stop.abort());
     const deadline = setTimeout(

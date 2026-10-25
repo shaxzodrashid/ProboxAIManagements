@@ -119,7 +119,11 @@ describe("authorization GET post-authentication availability", () => {
         {
           provide: JwtService,
           useValue: {
-            verify: () => ({ id: "synthetic-actor", type: "access" }),
+            verify: () => ({
+              id: "synthetic-actor",
+              type: "access",
+              iat: Math.floor(Date.now() / 1000),
+            }),
           },
         },
       ],

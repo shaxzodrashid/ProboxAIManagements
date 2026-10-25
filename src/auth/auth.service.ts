@@ -58,6 +58,11 @@ export class AuthService {
   requestRegistrationOtp(phoneNumber: string, locale: AuthLocale) {
     return this.requestOtp(phoneNumber, locale, AuthOtpPurpose.REGISTRATION);
   }
+  deliverStepUpOtp(chatId: bigint, code: string, locale: AuthLocale) {
+    return authenticationDependency(() =>
+      this.telegram.sendStepUpOtp(chatId, code, locale),
+    );
+  }
 
   requestPasswordResetOtp(phoneNumber: string, locale: AuthLocale) {
     return this.requestOtp(phoneNumber, locale, AuthOtpPurpose.PASSWORD_RESET);
@@ -122,7 +127,52 @@ export class AuthService {
     return { message: "Registration completed successfully." };
   }
 
-  async login(dto: LoginDto, db: Prisma.TransactionClient = this.prisma) {
+  async login(
+    dto: LoginDto,
+    db?: Prisma.TransactionClient,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    // Direct clients receive credentials only after the session commit is known.
+    // The BFF supplies its outer transaction so bundle persistence stays atomic.
+    const issued = db
+      ? await this.createLoginSession(dto, db)
+      : await loginDependency(() =>
+          this.prisma.$transaction((tx) => this.createLoginSession(dto, tx)),
+        );
+    return {
+      accessToken: this.sessionAccessToken(
+        issued.user,
+        issued.session.id,
+        issued.session.createdAt,
+      ),
+      refreshToken: issued.refreshToken,
+    };
+  }
+
+  private async createLoginSession(
+    dto: LoginDto,
+    db: Prisma.TransactionClient,
+  ) {
+    const normalized = normalizeUsername(dto.username);
+    await db.$queryRaw`SELECT "id" FROM "User" WHERE "username" = ${normalized} FOR UPDATE`;
+    const user = await this.verifyCredentials(dto, db);
+    const refreshToken = randomToken();
+    const session = await loginDependency(() =>
+      db.sessionToken.create({
+        data: {
+          userId: user.id,
+          purpose: SessionTokenPurpose.REFRESH,
+          tokenHash: hashToken(refreshToken),
+          expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+        },
+      }),
+    );
+    return { user, session, refreshToken };
+  }
+
+  async verifyCredentials(
+    dto: LoginDto,
+    db: Prisma.TransactionClient = this.prisma,
+  ) {
     const username = normalizeUsername(dto.username);
     const user = await loginDependency(() =>
       db.user.findUnique({ where: { username } }),
@@ -138,21 +188,7 @@ export class AuthService {
     )
       throw new UnauthorizedException("Invalid username or password");
 
-    const refreshToken = randomToken();
-    await loginDependency(() =>
-      db.sessionToken.create({
-        data: {
-          userId: user.id,
-          purpose: SessionTokenPurpose.REFRESH,
-          tokenHash: hashToken(refreshToken),
-          expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
-        },
-      }),
-    );
-    return {
-      accessToken: this.signAccessToken(user),
-      refreshToken,
-    };
+    return user;
   }
 
   async refresh(
@@ -170,12 +206,19 @@ export class AuthService {
       token.purpose !== SessionTokenPurpose.REFRESH ||
       token.revokedAt ||
       token.consumedAt ||
+      token.managed ||
       token.expiresAt <= new Date() ||
       token.user.status !== UserStatus.OPEN
     )
       throw new UnauthorizedException("Invalid or expired refresh token");
     try {
-      return { accessToken: this.signAccessToken(token.user) };
+      return {
+        accessToken: this.sessionAccessToken(
+          token.user,
+          token.id,
+          token.createdAt,
+        ),
+      };
     } catch {
       throw authenticationUnavailable();
     }
@@ -206,7 +249,7 @@ export class AuthService {
       await this.consumeTemporaryToken(tx, token.id);
       await tx.user.update({
         where: { id: token.userId },
-        data: { passwordHash },
+        data: { passwordHash, authRevokedAt: new Date() },
       });
       await tx.sessionToken.updateMany({
         where: {
@@ -378,12 +421,25 @@ export class AuthService {
       throw new UnauthorizedException("Invalid or expired temporary token");
   }
 
-  private signAccessToken(user: { id: string; workspaceId: string }) {
+  sessionAccessToken(
+    user: { id: string; workspaceId: string },
+    sessionId?: string,
+    authenticatedAt?: Date,
+  ) {
     return this.jwt.sign(
       {
         id: user.id,
         workspaceId: user.workspaceId,
         type: "access",
+        issued_at: Date.now(),
+        ...(sessionId
+          ? {
+              sid: sessionId,
+              auth_time: Math.floor(
+                (authenticatedAt?.getTime() ?? Date.now()) / 1000,
+              ),
+            }
+          : {}),
       },
       { expiresIn: ACCESS_TOKEN_TTL_SECONDS },
     );

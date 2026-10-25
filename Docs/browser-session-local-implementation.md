@@ -1,5 +1,11 @@
 # Local browser login implementation — 19 October 2026
 
+**24 October update:** the duration, credential-revocation and single-key sections
+below describe the historical implementation. The current local contract is
+[rolling authentication](rolling-authentication-contracts.md), including explicit
+client opt-in, retained keys, session-bound step-up and issued-token revocation.
+Frontend changes are deferred by the user; no rollout or live settings were changed.
+
 The owner approved the protected-cookie/server-held-token design at06:35 UTC.
 This implementation is local and disabled by default. No deployment, production
 migration, persistent key provisioning or live security change was performed.

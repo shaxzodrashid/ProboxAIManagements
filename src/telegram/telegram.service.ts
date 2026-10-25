@@ -135,6 +135,20 @@ export class TelegramService {
       { parse_mode: "HTML" },
     );
   }
+  async sendStepUpOtp(chatId: bigint, code: string, locale: AuthLocale) {
+    if (!this.bot)
+      throw new ServiceUnavailableException("Telegram bot is not configured");
+    const labels = {
+      EN: "ProboxAI: confirm a sensitive action on your signed-in device. Your verification code (valid for five minutes):",
+      RU: "ProboxAI: подтвердите важное действие на устройстве с активным сеансом. Код подтверждения (действителен пять минут):",
+      UZ: "ProboxAI: hisobga kirilgan qurilmada muhim amalni tasdiqlang. Tasdiqlash kodi (besh daqiqa amal qiladi):",
+    };
+    await this.bot.api.sendMessage(
+      chatId.toString(),
+      `${labels[locale]} <span class="tg-spoiler">${code}</span>`,
+      { parse_mode: "HTML" },
+    );
+  }
   async requestContact(chatId: string) {
     if (!this.bot)
       throw new ServiceUnavailableException("Telegram bot is not configured");

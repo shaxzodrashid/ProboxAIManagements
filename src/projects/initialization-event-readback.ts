@@ -9,6 +9,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { Observable } from "rxjs";
 import { AuthenticatedUser } from "../auth/auth.types";
+import { assertSessionAuthority } from "../auth/session-authority";
 import { PrismaService } from "../prisma/prisma.service";
 
 /** Persisted delivery only: in-process notifications are not a correctness source. */
@@ -146,6 +147,7 @@ export class InitializationEventReadback {
             initializationId,
             cursor,
           );
+          await assertSessionAuthority(this.prisma, actor);
           if (stopped) return;
           if (Date.now() >= expiresAt) return subscriber.complete();
           for (const event of events) {
