@@ -159,7 +159,7 @@ export class ProjectsController {
   @ApiOperation({
     summary: "List accessible projects",
     description:
-      "Current projects.read is required. Ordinary lists exclude archived projects; lifecycle=archived returns only archives with the same access checks. Callers with projects.read-all receive all matching workspace projects; others receive membership/public-read projects. isMember reports only persisted membership. Authorization, scope and viewer relationship share one snapshot.",
+      "Current projects.read is required. Ordinary lists exclude archived projects; lifecycle=archived returns only archives with the same access checks. Callers with projects.read-all receive all matching workspace projects; others receive membership/public-read projects. isMember reports only persisted membership. Members/read-all callers also receive member names; only projects.read-all callers receive audience-filtered avatar metadata. Public-read nonmembers receive no roster. Authorization, scope, viewer relationship and photo privacy share one snapshot.",
   })
   @ApiOkResponse({
     description: "Projects ordered by latest update.",

@@ -20,6 +20,7 @@ import {
 } from "./task-boards.dto";
 import { DeadlineInputDto, DeadlineValueDto } from "./task-deadlines.dto";
 import { TaskPriority } from "@prisma/client";
+import { ProfileAvatarResponseDto } from "../accounts/profile-avatar-domain";
 import { PublicIdentityResponseDto } from "../accounts/profile-picker.dto";
 import {
   TASK_TITLE_MAX_LENGTH,
@@ -36,6 +37,12 @@ export class HumanTaskLifecycleDto {
   sourceProjectArchivedAt!: string | null;
 }
 export class HumanTaskResponseDto {
+  @ApiPropertyOptional({
+    minimum: 0,
+    description:
+      "Recorded original-board order label at mutation time; historical receipts may omit it. Neighbor labels may later shift.",
+  })
+  position?: number;
   @ApiProperty({ type: () => HumanTaskLifecycleDto })
   lifecycle!: HumanTaskLifecycleDto;
   @ApiProperty({ type: () => HumanChecklistSectionDto, isArray: true })
@@ -73,15 +80,36 @@ export class HumanTaskResponseDto {
   @ApiProperty({ type: String, format: "date-time" }) updatedAt!: string;
 }
 
+export class TaskAssigneeIdentityDto extends PublicIdentityResponseDto {
+  @ApiProperty({ type: ProfileAvatarResponseDto, nullable: true })
+  avatar!: ProfileAvatarResponseDto | null;
+}
 export class HumanTaskReadResponseDto extends HumanTaskResponseDto {
   @ApiProperty({
-    type: PublicIdentityResponseDto,
+    type: Boolean,
+    nullable: true,
+    description:
+      "Canonical explicit owner confirmation, independent of local column.",
+  })
+  completed!: boolean | null;
+  @ApiProperty({
+    minimum: 0,
+    description:
+      "Board-local order label; sort by position then creation/id descending. Labels can shift after placement.",
+  })
+  declare position: number;
+  @ApiPropertyOptional({
+    description: "Present in unified query; true for destination share.",
+  })
+  shared?: boolean;
+  @ApiProperty({
+    type: TaskAssigneeIdentityDto,
     isArray: true,
     maxItems: 100,
     description:
-      "Current public identities for task assigneeIds, ordered by id; checklist assigneeId reuses the same identities. Inactive or foreign-workspace identities are omitted while retained assignment IDs remain. No alias, private profile, avatar, lifecycle or action eligibility is exposed. Names may change between query pages without changing task ordering/counts. Frozen mutation/audit snapshots exclude this field.",
+      "Current public identities for task assigneeIds, ordered by id; checklist assigneeId reuses the same identities. Inactive or foreign-workspace identities are omitted while retained assignment IDs remain. Avatar is nullable and evaluated against current AVATAR audience and ACTIVE asset. No private profile or action eligibility is exposed. Names may change between query pages without changing task ordering/counts. Frozen mutation/audit snapshots exclude this field.",
   })
-  assigneeIdentities!: PublicIdentityResponseDto[];
+  assigneeIdentities!: TaskAssigneeIdentityDto[];
   @ApiProperty({
     type: BoardStatusResponseDto,
     description:
@@ -197,6 +225,15 @@ export class HumanTaskAssigneesDto extends BoardMutationDto {
   assigneeIds!: string[];
 }
 export class HumanTaskMoveDto extends BoardMutationDto {
+  @ApiPropertyOptional({
+    format: "uuid",
+    nullable: true,
+    description:
+      "Place before this card in destination column; null appends. Omit to retain same-column position or append on column change. Supports original/shared neighbors.",
+  })
+  @ValidateIf((_o, v) => v !== undefined && v !== null)
+  @IsUUID("4")
+  declare beforeTaskId?: string | null;
   @ApiProperty({ format: "uuid" }) @IsUUID("4") statusId!: string;
 }
 export class HumanChecklistCreateDto extends HumanChecklistPlacementDto {

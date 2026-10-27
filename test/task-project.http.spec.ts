@@ -264,7 +264,14 @@ if (databaseUrl) {
         expect(list.headers["cache-control"]).toBe("no-store");
         const item = list.body.find((row: any) => row.id === project.id);
         expect(item.isMember).toBe(isMember);
-        expect(item).not.toHaveProperty("members");
+        expect(Object.hasOwn(item, "members")).toBe(isMember);
+        if (isMember)
+          expect(item.members).toEqual([
+            {
+              userId: managerId,
+              user: { id: managerId, fullName: "HTTP test user" },
+            },
+          ]);
         const detail = await call()
           .get(`/projects/${project.id}`)
           .set("Authorization", `Bearer ${userId}`)
@@ -272,6 +279,216 @@ if (databaseUrl) {
         expect(detail.headers["cache-control"]).toBe("no-store");
         expect(detail.body.isMember).toBe(isMember);
         expect(Object.hasOwn(detail.body, "members")).toBe(isMember);
+      }
+    });
+    it("lists member names and viewer-authorized photos without private profile or storage metadata", async () => {
+      const project = await membershipProject();
+      const owner = await prisma.user.create({
+        data: {
+          workspaceId,
+          fullName: "Grace Hopper",
+          phoneNumber: "+998907000099",
+          status: "OPEN",
+          bio: "Private biography",
+        },
+      });
+      const asset = await prisma.profileAvatarAsset.create({
+        data: {
+          ownerId: owner.id,
+          requestId: randomUUID(),
+          inputHash: "private-input-hash",
+          objectKey: "private-object-key-" + randomUUID(),
+          sha256: "private-image-hash",
+          size: 100,
+          width: 64,
+          height: 64,
+          state: "ACTIVE",
+          expiresAt: new Date("2026-01-01T00:00:00Z"),
+        },
+      });
+      await prisma.user.update({
+        where: { id: owner.id },
+        data: { avatarAssetId: asset.id },
+      });
+      await prisma.projectMember.create({
+        data: {
+          projectId: project.id,
+          userId: owner.id,
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+        },
+      });
+      const policyKey = { ownerId: owner.id, field: "AVATAR" as const };
+      const assignment = await prisma.userRoleAssignment.findFirstOrThrow({
+        where: { userId: managerId },
+      });
+      await prisma.permission.upsert({
+        where: { key: "projects.read-all" },
+        create: {
+          key: "projects.read-all",
+          name: "Read all",
+          category: "test",
+          description: "test",
+        },
+        update: {},
+      });
+      const photoGrant = {
+        roleId: assignment.roleId,
+        permissionKey: "projects.read-all",
+      };
+      const photo = {
+        assetId: asset.id,
+        width: 64,
+        height: 64,
+        url: `/api/v1/profiles/${owner.id}/avatar/${asset.id}`,
+      };
+      const read = async (expectedAvatar: typeof photo | null) => {
+        const response = await call()
+          .get("/projects")
+          .set("Authorization", `Bearer ${managerId}`)
+          .expect(200);
+        const item = response.body.find((row: any) => row.id === project.id);
+        expect(item._count.members).toBe(2);
+        expect(item.members).toEqual([
+          {
+            userId: owner.id,
+            user: {
+              id: owner.id,
+              fullName: "Grace Hopper",
+              avatar: expectedAvatar,
+            },
+          },
+          {
+            userId: managerId,
+            user: { id: managerId, fullName: "HTTP test user", avatar: null },
+          },
+        ]);
+        expect(JSON.stringify(item.members)).not.toMatch(
+          /phoneNumber|bio|objectKey|inputHash|sha256|audiencePolicies|contactsOwned|roleAssignments|status/,
+        );
+      };
+      const policy = async (
+        mode: "EVERYONE" | "CONTACTS" | "CUSTOM" | "NO_ONE",
+      ) =>
+        prisma.profileAudiencePolicy.upsert({
+          where: { ownerId_field: policyKey },
+          create: { ...policyKey, mode },
+          update: { mode },
+        });
+      try {
+        const namesOnly = await call()
+          .get("/projects")
+          .set("Authorization", `Bearer ${managerId}`)
+          .expect(200);
+        expect(
+          namesOnly.body.find((row: any) => row.id === project.id).members,
+        ).toEqual([
+          {
+            userId: owner.id,
+            user: { id: owner.id, fullName: "Grace Hopper" },
+          },
+          {
+            userId: managerId,
+            user: { id: managerId, fullName: "HTTP test user" },
+          },
+        ]);
+        await prisma.rolePermission.create({ data: photoGrant });
+        await read(null); // Missing policy is private.
+        await policy("EVERYONE");
+        await read(photo); // ACTIVE assets do not expire at the staging deadline.
+        await prisma.rolePermission.delete({
+          where: { roleId_permissionKey: photoGrant },
+        });
+        const revoked = await call()
+          .get("/projects")
+          .set("Authorization", `Bearer ${managerId}`)
+          .expect(200);
+        for (const member of revoked.body.find(
+          (row: any) => row.id === project.id,
+        ).members)
+          expect(member.user).not.toHaveProperty("avatar");
+        await prisma.rolePermission.create({ data: photoGrant });
+        await policy("NO_ONE");
+        await read(null);
+        await policy("CONTACTS");
+        await prisma.profileContact.create({
+          data: { ownerId: managerId, contactAccountId: owner.id },
+        });
+        await read(null); // Viewer -> owner is not owner -> viewer.
+        await prisma.profileContact.create({
+          data: { ownerId: owner.id, contactAccountId: managerId },
+        });
+        await read(photo);
+        await prisma.profileContact.delete({
+          where: {
+            ownerId_contactAccountId: {
+              ownerId: owner.id,
+              contactAccountId: managerId,
+            },
+          },
+        });
+        await read(null);
+        await policy("CUSTOM");
+        await read(null);
+        await prisma.profileAudienceAccountRecipient.create({
+          data: { ...policyKey, accountId: readerId },
+        });
+        await read(null);
+        await prisma.profileAudienceAccountRecipient.create({
+          data: { ...policyKey, accountId: managerId },
+        });
+        await read(photo);
+        await prisma.profileAudienceAccountRecipient.deleteMany({
+          where: policyKey,
+        });
+        await read(null);
+        await prisma.profileAudienceWorkspaceRecipient.create({
+          data: { ...policyKey, workspaceId },
+        });
+        await read(photo);
+        await prisma.user.update({
+          where: { id: owner.id },
+          data: { status: "BANNED" },
+        });
+        await read(null);
+        await prisma.user.update({
+          where: { id: owner.id },
+          data: { status: "OPEN" },
+        });
+        await prisma.user.update({
+          where: { id: owner.id },
+          data: { avatarAssetId: null },
+        });
+        await read(null);
+        await prisma.user.update({
+          where: { id: owner.id },
+          data: { avatarAssetId: asset.id },
+        });
+        await prisma.project.update({
+          where: { id: project.id },
+          data: { archivedAt: new Date() },
+        });
+        const archived = await call()
+          .get("/projects?lifecycle=archived")
+          .set("Authorization", `Bearer ${managerId}`)
+          .expect(200);
+        expect(
+          archived.body.find((row: any) => row.id === project.id).members[0]
+            .user.avatar,
+        ).toEqual(photo);
+        const publicRead = await call()
+          .get("/projects?lifecycle=archived")
+          .set("Authorization", `Bearer ${readerId}`)
+          .expect(200);
+        expect(
+          publicRead.body.find((row: any) => row.id === project.id),
+        ).not.toHaveProperty("members");
+      } finally {
+        await prisma.rolePermission.deleteMany({ where: photoGrant });
+        await prisma.user.update({
+          where: { id: owner.id },
+          data: { avatarAssetId: null },
+        });
+        await prisma.profileAvatarAsset.delete({ where: { id: asset.id } });
       }
     });
     it("does not infer membership from creator identity and observes add/remove on the next read", async () => {
@@ -373,14 +590,19 @@ if (databaseUrl) {
           .expect(200);
         expect(detail.body.isMember).toBe(false);
         expect(detail.body.members).toHaveLength(1);
-        expect(
-          (
-            await call()
-              .get("/projects")
-              .set("Authorization", `Bearer ${readerId}`)
-              .expect(200)
-          ).body.find((row: any) => row.id === project.id).isMember,
-        ).toBe(false);
+        const listItem = (
+          await call()
+            .get("/projects")
+            .set("Authorization", `Bearer ${readerId}`)
+            .expect(200)
+        ).body.find((row: any) => row.id === project.id);
+        expect(listItem.isMember).toBe(false);
+        expect(listItem.members).toEqual([
+          {
+            userId: managerId,
+            user: { id: managerId, fullName: "HTTP test user", avatar: null },
+          },
+        ]);
       } finally {
         await prisma.rolePermission.deleteMany({
           where: {

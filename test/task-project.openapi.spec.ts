@@ -100,8 +100,23 @@ describe("operation-specific task and project OpenAPI", () => {
       s.ProjectScalarResponseDto.properties.appliedTemplateVersionId,
     ).toMatchObject({ type: "string", nullable: true });
     expect(s.ProjectScalarResponseDto.properties).not.toHaveProperty("members");
-    expect(s.ProjectListItemResponseDto.properties).not.toHaveProperty(
-      "members",
+    expect(s.ProjectListItemResponseDto.properties.members).toMatchObject({
+      type: "array",
+      items: { $ref: "#/components/schemas/ProjectListMemberResponseDto" },
+    });
+    expect(s.ProjectListItemResponseDto.required).not.toContain("members");
+    expect(
+      Object.keys(s.ProjectListMemberResponseDto.properties).sort(),
+    ).toEqual(["user", "userId"]);
+    expect(Object.keys(s.ProjectListMemberUserDto.properties).sort()).toEqual([
+      "avatar",
+      "fullName",
+      "id",
+    ]);
+    expect(s.ProjectListMemberUserDto.required).not.toContain("avatar");
+    expect(s.ProjectListMemberUserDto.properties.avatar.nullable).toBe(true);
+    expect(s.ProfileAvatarResponseDto.required).toEqual(
+      expect.arrayContaining(["assetId", "width", "height", "url"]),
     );
     expect(s.ProjectResponseDto.required).not.toContain("members");
     expect(s.ProjectResponseDto.required).toContain("initializations");

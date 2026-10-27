@@ -275,6 +275,8 @@ if (url) {
         id: taskId,
         ownerId: owner,
         title: "Human title",
+        completed: null,
+        position: 0,
         projectArchivedAt: null,
       });
       expect(Object.keys(detail).sort()).toEqual(
@@ -292,6 +294,8 @@ if (url) {
           "assigneeIdentities",
           "checklist",
           "checklistSections",
+          "completed",
+          "position",
           "lifecycle",
           "deadline",
           "projectArchivedAt",

@@ -1,3 +1,7 @@
+import {
+  boardEventGeneration,
+  taskBoardEvents,
+} from "../src/tasks/task-board-events";
 import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { JwtService } from "@nestjs/jwt";
@@ -7,7 +11,7 @@ import {
   humanTaskSnapshot,
   humanJson,
 } from "../src/tasks/human-task-state";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { SharedTasksController } from "../src/tasks/shared-tasks.controller";
 import { SharedTasksService } from "../src/tasks/shared-tasks.service";
@@ -319,6 +323,340 @@ if (url) {
         .set("Authorization", "Bearer " + id)
         .set("If-Match", `"${rev ?? (await revision())}"`)
         .send({ requestId, ...body });
+
+    it("queries originals and shares with local statuses, unified counts and generation recovery", async () => {
+      await (await change()).expect(200);
+      const local = await db.task.create({
+        data: {
+          workspaceId: w,
+          creatorId: owner,
+          managerId: owner,
+          title: "Local card",
+          description: "Local",
+          humanState: { create: { priority: "HIGH" } },
+          boardEntry: {
+            create: {
+              boardId: targetBoard.id,
+              statusId: targetBoard.statuses[0].id,
+            },
+          },
+        },
+      });
+      const query = (params: object = {}, id = viewer) =>
+        http()
+          .get(`/projects/${target}/tasks/query`)
+          .set("Authorization", "Bearer " + id)
+          .query(params);
+      expect((await query()).body.total).toBe(1);
+      const all = await query({
+        scope: "all",
+        sort: "position",
+        limit: 1,
+      }).expect(200);
+      expect(all.body.total).toBe(2);
+      expect(all.body.statusCounts).toEqual([
+        { statusId: targetBoard.statuses[0].id, count: 2 },
+      ]);
+      expect(
+        all.body.priorityCounts.find((r: any) => r.priority === "UNSET").count,
+      ).toBe(1);
+      const next = await query({
+        scope: "all",
+        sort: "position",
+        limit: 1,
+        cursor: all.body.nextCursor,
+      }).expect(200);
+      const cards = [...all.body.items, ...next.body.items];
+      expect(new Set(cards.map((r: any) => r.id)).size).toBe(2);
+      expect(cards.find((r: any) => r.id === taskId)).toMatchObject({
+        projectId: target,
+        shared: true,
+        statusId: targetBoard.statuses[0].id,
+      });
+      expect(JSON.stringify(cards)).not.toContain(source);
+      expect(
+        (await query({ scope: "all", statusIds: sourceBoard.statuses[1].id }))
+          .body.total,
+      ).toBe(0);
+      expect((await query({ scope: "all", q: "canonical" })).body.total).toBe(
+        1,
+      );
+      expect(
+        (await query({ scope: "all", priorities: "HIGH" })).body.items[0].id,
+      ).toBe(local.id);
+      await query({ scope: "all" }, foreign).expect(404);
+      await (await change("unshare")).expect(200);
+      await query({
+        scope: "all",
+        sort: "position",
+        limit: 1,
+        cursor: all.body.nextCursor,
+      }).expect(409);
+      expect((await query({ scope: "all" })).body.total).toBe(1);
+    });
+    it("preserves legacy sharing request hashes when placement is omitted", async () => {
+      const rev = await revision(),
+        requestId = randomUUID();
+      (await change("share", owner, target, {}, rev, requestId)).expect(200);
+      const legacyHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            actorId: owner,
+            projectId: source,
+            taskId,
+            targetProjectId: target,
+            revision: rev,
+            action: "SHARE",
+            requestId,
+            statusId: targetBoard.statuses[0].id,
+          }),
+        )
+        .digest("hex");
+      const receipt = await db.taskSharingOperation.findUniqueOrThrow({
+        where: { taskId_requestId: { taskId, requestId } },
+      });
+      expect(receipt.inputHash).toBe(legacyHash);
+      (await change("share", owner, target, {}, rev, requestId)).expect(200);
+    });
+    it("persists cross-kind placement, rejects stale targets and replays identical moves", async () => {
+      await (await change()).expect(200);
+      const local = await db.task.create({
+        data: {
+          workspaceId: w,
+          creatorId: owner,
+          managerId: owner,
+          title: "Local neighbor",
+          description: "Local",
+          humanState: { create: {} },
+          boardEntry: {
+            create: {
+              boardId: targetBoard.id,
+              statusId: targetBoard.statuses[0].id,
+            },
+          },
+        },
+      });
+      const rev = await revision(),
+        requestId = randomUUID();
+      const moved = await change(
+        "move",
+        assignee,
+        target,
+        { beforeTaskId: local.id },
+        rev,
+        requestId,
+      );
+      moved.expect(200);
+      const replay = await change(
+        "move",
+        assignee,
+        target,
+        { beforeTaskId: local.id },
+        rev,
+        requestId,
+      );
+      replay.expect(200);
+      expect(replay.body).toEqual(moved.body);
+      (
+        await change(
+          "move",
+          assignee,
+          target,
+          { beforeTaskId: null },
+          rev,
+          requestId,
+        )
+      ).expect(409);
+      const query = () =>
+        http()
+          .get(`/projects/${target}/tasks/query?scope=all&sort=position`)
+          .set("Authorization", "Bearer " + viewer);
+      expect((await query()).body.items.map((r: any) => r.id)).toEqual([
+        taskId,
+        local.id,
+      ]);
+      (
+        await change("move", assignee, target, { beforeTaskId: randomUUID() })
+      ).expect(409);
+      expect(await revision()).toBe(rev + 1);
+      (await change("move", viewer, target, { beforeTaskId: null })).expect(
+        403,
+      );
+      (await change("move", assignee, target)).expect(200);
+      expect((await query()).body.items.map((r: any) => r.id)).toEqual([
+        taskId,
+        local.id,
+      ]);
+      const current = await revision();
+      const races = await Promise.all([
+        change("move", assignee, target, { beforeTaskId: null }, current),
+        change("move", assignee, target, { beforeTaskId: local.id }, current),
+      ]);
+      expect(races.map((r) => r.status).sort()).toEqual([200, 409]);
+      expect(
+        (await db.taskBoardEntry.findUniqueOrThrow({ where: { taskId } }))
+          .statusId,
+      ).toBe(sourceBoard.statuses[1].id);
+    });
+
+    it("projects avatar metadata using owner-directed privacy and active lifecycle on both sides", async () => {
+      await (await change()).expect(200);
+      const asset = await db.profileAvatarAsset.create({
+        data: {
+          ownerId: assignee,
+          requestId: randomUUID(),
+          inputHash: "test",
+          objectKey: randomUUID(),
+          sha256: "test",
+          size: 1,
+          width: 1,
+          height: 1,
+          state: "ACTIVE",
+          expiresAt: new Date(Date.now() + 60000),
+        },
+      });
+      await db.user.update({
+        where: { id: assignee },
+        data: { avatarAssetId: asset.id },
+      });
+      await db.profileAudiencePolicy.upsert({
+        where: { ownerId_field: { ownerId: assignee, field: "AVATAR" } },
+        create: { ownerId: assignee, field: "AVATAR", mode: "EVERYONE" },
+        update: { mode: "EVERYONE" },
+      });
+      const query = () =>
+        http()
+          .get(`/projects/${target}/tasks/query?scope=all`)
+          .set("Authorization", "Bearer " + viewer);
+      try {
+        const visible = await query().expect(200);
+        expect(
+          visible.body.items[0].assigneeIdentities[0].avatar,
+        ).toMatchObject({
+          assetId: asset.id,
+          url: `/api/v1/profiles/${assignee}/avatar/${asset.id}`,
+        });
+        await db.profileAudiencePolicy.update({
+          where: { ownerId_field: { ownerId: assignee, field: "AVATAR" } },
+          data: { mode: "CONTACTS" },
+        });
+        expect(
+          (await query()).body.items[0].assigneeIdentities[0].avatar,
+        ).toBeNull();
+        await db.profileContact.create({
+          data: { ownerId: assignee, contactAccountId: viewer },
+        });
+        expect(
+          (await query()).body.items[0].assigneeIdentities[0].avatar.assetId,
+        ).toBe(asset.id);
+        await db.profileContact.delete({
+          where: {
+            ownerId_contactAccountId: {
+              ownerId: assignee,
+              contactAccountId: viewer,
+            },
+          },
+        });
+        await db.profileAudiencePolicy.update({
+          where: { ownerId_field: { ownerId: assignee, field: "AVATAR" } },
+          data: {
+            mode: "CUSTOM",
+            accountRecipients: { create: { accountId: viewer } },
+          },
+        });
+        expect(
+          (await query()).body.items[0].assigneeIdentities[0].avatar.assetId,
+        ).toBe(asset.id);
+        await db.user.update({
+          where: { id: assignee },
+          data: { avatarAssetId: null },
+        });
+        await db.profileAvatarAsset.update({
+          where: { id: asset.id },
+          data: { state: "DELETE_PENDING" },
+        });
+        expect(
+          (await query()).body.items[0].assigneeIdentities[0].avatar,
+        ).toBeNull();
+        await db.user.update({
+          where: { id: assignee },
+          data: { status: "BANNED" },
+        });
+        expect((await query()).body.items[0].assigneeIdentities).toEqual([]);
+      } finally {
+        await db.user.update({
+          where: { id: assignee },
+          data: { avatarAssetId: null, status: "OPEN" },
+        });
+        await db.profileAvatarAsset.delete({ where: { id: asset.id } });
+        await db.profileAudiencePolicy.delete({
+          where: { ownerId_field: { ownerId: assignee, field: "AVATAR" } },
+        });
+      }
+    });
+    it("invalidates only admitted board state and closes on membership revocation", async () => {
+      const actor = {
+        id: viewer,
+        workspaceId: w,
+        roles: [],
+        permissions: [],
+        type: "access" as const,
+      };
+      const initial = await boardEventGeneration(db as any, actor, target);
+      await db.taskHumanState.update({
+        where: { taskId },
+        data: { revision: { increment: 1 } },
+      });
+      expect(await boardEventGeneration(db as any, actor, target)).toBe(
+        initial,
+      );
+      await (await change()).expect(200);
+      const shared = await boardEventGeneration(db as any, actor, target);
+      await db.project.update({
+        where: { id: source },
+        data: { archivedAt: new Date() },
+      });
+      expect(await boardEventGeneration(db as any, actor, target)).not.toBe(
+        shared,
+      );
+      await db.project.update({
+        where: { id: source },
+        data: { archivedAt: null },
+      });
+      expect(shared).not.toBe(initial);
+      await db.taskHumanState.update({
+        where: { taskId },
+        data: { revision: { increment: 1 } },
+      });
+      expect(await boardEventGeneration(db as any, actor, target)).not.toBe(
+        shared,
+      );
+      const events: any[] = [];
+      const closed = new Promise<void>((resolve) => {
+        taskBoardEvents(db as any, actor, target, shared).subscribe({
+          next: (e) => events.push(e),
+          complete: resolve,
+        });
+      });
+      await db.projectMember.delete({
+        where: { projectId_userId: { projectId: target, userId: viewer } },
+      });
+      try {
+        await closed;
+        expect(events).toHaveLength(1);
+      } finally {
+        await db.projectMember.create({
+          data: { projectId: target, userId: viewer },
+        });
+      }
+      await expect(
+        boardEventGeneration(
+          db as any,
+          { ...actor, accessExpiresAt: 1 },
+          target,
+        ),
+      ).rejects.toThrow();
+    });
     const sharedContent = (p = target, id = viewer) =>
       http()
         .get(base(p) + "/shared-content")

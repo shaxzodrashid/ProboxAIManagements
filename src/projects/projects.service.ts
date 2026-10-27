@@ -78,6 +78,11 @@ type UploadedProjectFile = {
 };
 
 import { projectInitializationSummarySelect } from "./project-initialization-summary";
+import { audienceAllows } from "../accounts/profile-audience";
+import {
+  avatarMetadata,
+  avatarSelect,
+} from "../accounts/profile-avatar-domain";
 const projectMemberUserSelect = {
   id: true,
   fullName: true,
@@ -178,6 +183,10 @@ export class ProjectsService {
       this.prisma.$transaction(
         async (tx) => {
           actor = await this.currentProjectReader(actor, tx);
+          const canReadPhotos = hasPermission(
+            actor,
+            Permissions.PROJECTS_READ_ALL,
+          );
           const projects = await tx.project.findMany({
             where: {
               workspaceId: actor.workspaceId,
@@ -201,16 +210,96 @@ export class ProjectsService {
               },
               _count: { select: { members: true } },
               members: {
-                where: { userId: actor.id },
-                select: { userId: true },
+                select: {
+                  userId: true,
+                  user: {
+                    select: { id: true, fullName: true },
+                  },
+                },
+                orderBy: [{ createdAt: "asc" }, { userId: "asc" }],
               },
             },
             orderBy: { updatedAt: "desc" },
           });
-          return projects.map(({ members, ...project }) => ({
-            ...project,
-            isMember: members.length > 0,
-          }));
+          const memberIds = [
+            ...new Set(
+              projects.flatMap((project) =>
+                project.members.map((member) => member.userId),
+              ),
+            ),
+          ];
+          // Fetch photo/audience metadata once per unique member, and only for
+          // read-all callers, in the same authorization/roster snapshot.
+          const photoUsers =
+            canReadPhotos && memberIds.length
+              ? await tx.user.findMany({
+                  where: {
+                    id: { in: memberIds },
+                    workspaceId: actor.workspaceId,
+                    status: "OPEN",
+                  },
+                  select: {
+                    id: true,
+                    avatarAsset: { select: avatarSelect },
+                    audiencePolicies: {
+                      where: { field: "AVATAR" },
+                      select: {
+                        mode: true,
+                        accountRecipients: {
+                          where: { accountId: actor.id },
+                          select: { accountId: true },
+                        },
+                        workspaceRecipients: {
+                          where: { workspaceId: actor.workspaceId },
+                          select: { workspaceId: true },
+                        },
+                      },
+                    },
+                    contactsOwned: {
+                      where: { contactAccountId: actor.id },
+                      select: { ownerId: true },
+                    },
+                  },
+                })
+              : [];
+          const avatars = new Map(
+            photoUsers.map((user) => [
+              user.id,
+              audienceAllows(
+                user.audiencePolicies[0],
+                actor,
+                user.contactsOwned.length > 0,
+              )
+                ? avatarMetadata(user.avatarAsset, user.id)
+                : null,
+            ]),
+          );
+          return projects.map(({ members, ...project }) => {
+            const isMember = members.some(
+              (member) => member.userId === actor.id,
+            );
+            const canReadRoster = isMember || canReadPhotos;
+            return {
+              ...project,
+              isMember,
+              ...(canReadRoster
+                ? {
+                    members: members.map(({ userId, user }) => ({
+                      userId,
+                      user: {
+                        id: user.id,
+                        fullName: user.fullName,
+                        ...(canReadPhotos
+                          ? {
+                              avatar: avatars.get(user.id) ?? null,
+                            }
+                          : {}),
+                      },
+                    })),
+                  }
+                : {}),
+            };
+          });
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
       ),

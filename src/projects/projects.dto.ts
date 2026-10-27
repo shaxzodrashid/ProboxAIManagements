@@ -18,6 +18,7 @@ import {
   ProjectInitializationStatus,
   ProjectFileTrashStatus,
 } from "@prisma/client";
+import { ProfileAvatarResponseDto } from "../accounts/profile-avatar-domain";
 
 export class ProjectUploadConfigurationResponseDto {
   @ApiProperty({ type: "integer", minimum: 1, maximum: 1073741824 })
@@ -345,6 +346,22 @@ export class ProjectMemberCountDto {
   @ApiProperty({ example: 3 }) members!: number;
 }
 
+export class ProjectListMemberUserDto extends ProjectCreatorDto {
+  @ApiPropertyOptional({
+    type: ProfileAvatarResponseDto,
+    nullable: true,
+    description:
+      "Present only for projects.read-all callers. Current ACTIVE profile photo allowed by the AVATAR audience; null for hidden, unset or inactive accounts. Membership alone never exposes photos and read-all does not override photo privacy.",
+  })
+  avatar?: ProfileAvatarResponseDto | null;
+}
+
+export class ProjectListMemberResponseDto {
+  @ApiProperty({ format: "uuid" }) userId!: string;
+  @ApiProperty({ type: ProjectListMemberUserDto })
+  user!: ProjectListMemberUserDto;
+}
+
 export class ProjectScalarResponseDto {
   @ApiProperty({ type: String, nullable: true, format: "date-time" })
   archivedAt!: string | null;
@@ -417,6 +434,13 @@ export class ProjectListItemResponseDto extends ProjectScalarResponseDto {
   @ApiProperty({ type: ProjectDepartmentResponseDto })
   department!: ProjectDepartmentResponseDto;
   @ApiProperty({ type: ProjectMemberCountDto }) _count!: ProjectMemberCountDto;
+  @ApiPropertyOptional({
+    type: ProjectListMemberResponseDto,
+    isArray: true,
+    description:
+      "Complete persisted roster, ordered by membership createdAt then userId. Present only for project members or projects.read-all callers; omitted for public-read nonmembers. Each user exposes id and fullName; only projects.read-all callers also receive audience-filtered avatar metadata.",
+  })
+  members?: ProjectListMemberResponseDto[];
   @ApiProperty({
     type: ProjectInitializationSummaryResponseDto,
     isArray: true,

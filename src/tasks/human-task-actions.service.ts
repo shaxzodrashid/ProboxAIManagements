@@ -1,3 +1,4 @@
+import { placeTaskCard } from "./task-card-order";
 import { Injectable } from "@nestjs/common";
 import { Prisma, TaskPriority } from "@prisma/client";
 import { createHash } from "node:crypto";
@@ -68,6 +69,7 @@ function normalized(input: Input): Input {
     "parentId",
     "sectionId",
     "beforeItemId",
+    "beforeTaskId",
   ])
     if (typeof value[key] === "string") value[key] = value[key].toLowerCase();
   if (Array.isArray(value.assigneeIds))
@@ -517,6 +519,7 @@ export class HumanTaskActionsService {
           await tx.taskBoardEntry.create({
             data: { taskId, boardId: status.boardId, statusId: status.id },
           });
+          await placeTaskCard(tx, status.boardId, status.id, taskId, null);
           await tx.taskAssignee.create({ data: { taskId, userId: actor.id } });
         } else if (action === "DETAILS") {
           if (
@@ -594,6 +597,17 @@ export class HumanTaskActionsService {
             where: { taskId },
             data: { statusId: status.id },
           });
+          if (
+            input.beforeTaskId !== undefined ||
+            task.boardEntry!.statusId !== status.id
+          )
+            await placeTaskCard(
+              tx,
+              status.boardId,
+              status.id,
+              taskId,
+              input.beforeTaskId == null ? null : String(input.beforeTaskId),
+            );
         } else if (action === "COMMENT") {
           if (
             typeof input.body !== "string" ||

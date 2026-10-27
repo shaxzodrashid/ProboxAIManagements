@@ -80,9 +80,49 @@ const reads = new RegExp(
 const writes = new RegExp(
   `^sessions(?:/directory-preflight|/${id}/(?:turns|interrupt))?$`,
 );
+const projectTask = `projects/${id}/tasks/${id}`;
+const board = `projects/${id}/task-board`;
+const taskDeadline = `tasks/${id}/deadline`;
+const taskRoutes: Record<string, string[]> = {
+  GET: [
+    `projects/${id}/tasks(?:/query|/events/stream|/${id})?`,
+    `${projectTask}/(?:comments|audit|operations/${id}|shared-state|sharing|sharing-operations/${id})`,
+    `${board}(?:/edit|/audit|/operations/${id})?`,
+    `tasks/creations/${id}`,
+    `${taskDeadline}(?:/edit|/audit|/operations/${id})?`,
+  ],
+  POST: [
+    "tasks",
+    `${projectTask}/(?:link|archive|checklist|comments|completion/confirm)`,
+    `${board}/statuses`,
+  ],
+  PATCH: [
+    `${projectTask}/(?:details|checklist/${id})`,
+    `${board}/statuses/${id}`,
+  ],
+  PUT: [
+    `${projectTask}/(?:assignees|workflow-status|shared-workflow-status|checklist/order|checklist/${id}/completion|shares/${id})`,
+    `${board}/statuses/order`,
+    taskDeadline,
+  ],
+  DELETE: [
+    `${projectTask}/(?:content|checklist/${id}|shares/${id})`,
+    `${board}/statuses/${id}`,
+  ],
+};
+
 export function browserProxyAllowed(method: string, path: string) {
+  if (
+    taskRoutes[method]?.some((pattern) => new RegExp(`^${pattern}$`).test(path))
+  )
+    return true;
   if (method === "POST" && path === "sessions/creations") return true;
   if (method === "POST" && path === "projects/creation-submissions")
+    return true;
+  if (
+    method === "GET" &&
+    new RegExp(`^profiles/${id}/avatar/${id}$`).test(path)
+  )
     return true;
   if (
     method === "GET" &&
@@ -323,7 +363,11 @@ export class BrowserSessionController {
     try {
       const headers: Record<string, string> = {
         Authorization: `Bearer ${identity.accessToken}`,
-        Accept: streaming ? "text/event-stream" : "application/json",
+        Accept: streaming
+          ? "text/event-stream"
+          : path.startsWith("profiles/")
+            ? "image/png"
+            : "application/json",
       };
       for (const key of ["if-match", "last-event-id"]) {
         const value = req.headers[key];
@@ -348,7 +392,12 @@ export class BrowserSessionController {
         },
       );
       res.status(upstream.status);
-      for (const key of ["content-type", "retry-after", "etag"]) {
+      for (const key of [
+        "content-type",
+        "x-content-type-options",
+        "retry-after",
+        "etag",
+      ]) {
         const value = upstream.headers.get(key);
         if (value) res.setHeader(key, value);
       }

@@ -9,6 +9,8 @@ import {
   humanTaskReadSelection,
   humanTaskReadSnapshot,
 } from "./human-task-state";
+import { workflowStatusSnapshot } from "./task-workflow-status";
+import { projectTaskAvatars } from "./task-avatars";
 import { HumanTaskQueryDto, QueryPriorities } from "./human-task-query.dto";
 const fail = (status: number, message: string) =>
   operationError(
@@ -25,6 +27,7 @@ type Cursor = {
   asOf: string;
 };
 const expressions: Record<string, string> = {
+  position: "e.position",
   priority:
     "CASE hs.priority WHEN 'URGENT' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 1 ELSE NULL END",
   deadlineDate: "d.value->>'date'",
@@ -38,6 +41,8 @@ export async function queryHumanTasks(
   projectId: string,
   query: HumanTaskQueryDto,
 ) {
+  if (actor.type !== undefined && actor.type !== "access")
+    throw fail(403, "Human task access required");
   projectId = projectId.toLowerCase();
   const priorities = [...(query.priorities ?? [])].sort(),
     statusIds = [...(query.statusIds ?? [])]
@@ -67,6 +72,7 @@ export async function queryHumanTasks(
         statusIds,
         query.assigneeId?.toLowerCase() ?? null,
         sort,
+        query.scope ?? "original",
       ]),
     )
     .digest("hex");
@@ -113,7 +119,8 @@ export async function queryHumanTasks(
             },
             select: {
               archivedAt: true,
-              taskBoard: { select: { revision: true } },
+              status: true,
+              taskBoard: { select: { id: true, revision: true } },
             },
           }),
         );
@@ -159,8 +166,8 @@ export async function queryHumanTasks(
             )
             .join(", ") + ", t.id DESC",
         );
-        const base = Prisma.sql`FROM "Task" t JOIN "TaskBoardEntry" e ON e."taskId"=t.id JOIN "TaskBoardStatus" s ON s.id=e."statusId" JOIN "TaskBoard" b ON b.id=s."boardId" AND b.id=e."boardId" LEFT JOIN "TaskHumanState" hs ON hs."taskId"=t.id LEFT JOIN "TaskDeadline" d ON d."taskId"=t.id WHERE ${Prisma.join(clauses, " AND ")}`;
-        const version = Prisma.sql`jsonb_build_array(t.id,t.title,t.description,t."createdAt",hs.priority,hs.revision,e."statusId",d.revision,d.value)::text`;
+        const base = Prisma.sql`FROM "Task" t JOIN (${query.scope === "all" ? Prisma.sql`SELECT "taskId", "boardId", "statusId", position FROM "TaskBoardEntry" UNION ALL SELECT "taskId", "boardId", "statusId", position FROM "TaskSharedBoardEntry"` : Prisma.sql`SELECT "taskId", "boardId", "statusId", position FROM "TaskBoardEntry"`}) e ON e."taskId"=t.id JOIN "TaskBoardStatus" s ON s.id=e."statusId" JOIN "TaskBoard" b ON b.id=s."boardId" AND b.id=e."boardId" JOIN "TaskBoardEntry" oe ON oe."taskId"=t.id JOIN "TaskBoard" ob ON ob.id=oe."boardId" JOIN "Project" op ON op.id=ob."projectId" LEFT JOIN "TaskHumanState" hs ON hs."taskId"=t.id LEFT JOIN "TaskDeadline" d ON d."taskId"=t.id WHERE ${Prisma.join(clauses, " AND ")}`;
+        const version = Prisma.sql`jsonb_build_array(t.id,t.title,t.description,t."createdAt",hs.priority,hs.revision,e."statusId",e.position,d.revision,d.value,op."archivedAt",op.status)::text`;
         // Bound digest materialization without transferring all task content.
         // Counting/ranking still scan the filtered set under query time budgets.
         const [budget] = await tx.$queryRaw<Array<{ bytes: bigint }>>(
@@ -176,7 +183,7 @@ export async function queryHumanTasks(
         const [summary] = await tx.$queryRaw<
           Array<{ total: bigint; generation: string }>
         >(
-          Prisma.sql`SELECT count(*) AS total, encode(sha256(convert_to(coalesce(string_agg(${version}, ',' ORDER BY t.id), '') || ${JSON.stringify([project.archivedAt, project.taskBoard?.revision ?? null])}, 'UTF8')), 'hex') AS generation ${base}`,
+          Prisma.sql`SELECT count(*) AS total, encode(sha256(convert_to(coalesce(string_agg(${version}, ',' ORDER BY t.id), '') || ${JSON.stringify([project.archivedAt, project.status, project.taskBoard?.revision ?? null])}, 'UTF8')), 'hex') AS generation ${base}`,
         );
         const total = Number(summary!.total);
         if (!Number.isSafeInteger(total))
@@ -206,9 +213,47 @@ export async function queryHumanTasks(
           select: humanTaskReadSelection,
         });
         const byId = new Map(rows.map((row) => [row.id, row]));
-        const items = page.map((row) =>
-          humanTaskReadSnapshot(byId.get(row.id)!),
-        );
+        const shared =
+          query.scope === "all" && project.taskBoard
+            ? await tx.taskSharedBoardEntry.findMany({
+                where: {
+                  boardId: project.taskBoard.id,
+                  taskId: { in: page.map((r) => r.id) },
+                },
+                select: {
+                  taskId: true,
+                  position: true,
+                  status: {
+                    select: {
+                      id: true,
+                      name: true,
+                      color: true,
+                      position: true,
+                    },
+                  },
+                },
+              })
+            : [];
+        const items = page.map((row) => {
+          const entry = shared.find((e) => e.taskId === row.id);
+          const task = byId.get(row.id)!;
+          const snapshot = humanTaskReadSnapshot(
+            task,
+            entry ? project.taskBoard!.id : undefined,
+          );
+          return entry
+            ? {
+                ...snapshot,
+                projectId,
+                statusId: entry.status.id,
+                workflowStatus: workflowStatusSnapshot(entry.status),
+                position: entry.position,
+                shared: true,
+                projectArchivedAt: project.archivedAt,
+              }
+            : { ...snapshot, shared: false };
+        });
+        await projectTaskAvatars(tx, actor, items);
         const priorityCounts = QueryPriorities.map((priority) => ({
           priority,
           count: counts
@@ -238,6 +283,9 @@ export async function queryHumanTasks(
           : null;
         return {
           items,
+          generation: createHash("sha256")
+            .update(scope + summary!.generation)
+            .digest("hex"),
           total,
           priorityCounts,
           statusCounts,

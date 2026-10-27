@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.5",
+      "gitRef": "refs/tags/v0.3.5",
+      "channel": "production",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.4",
       "gitRef": "refs/tags/v0.3.4",
       "channel": "production",
@@ -133,6 +139,20 @@
     }
   ],
   "features": [
+    {
+      "id": "project-list-member-rosters",
+      "title": "Project list member names and audience-authorized read-all photos",
+      "since": "0.3.5",
+      "state": "supported",
+      "contract": "Docs/frontend/projects.md"
+    },
+    {
+      "id": "browser-project-task-board",
+      "title": "Unified task board queries, card placement, invalidation streams and assignee avatars",
+      "since": "0.3.5",
+      "state": "foundation",
+      "contract": "Docs/frontend/tasks.md"
+    },
     {
       "id": "browser-auth-creation-transport",
       "title": "Browser registration, recovery and keyed project creation transport",

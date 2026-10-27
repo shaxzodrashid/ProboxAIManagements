@@ -1,3 +1,4 @@
+import { projectTaskAvatars } from "./task-avatars";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { AuthenticatedUser } from "../auth/auth.types";
@@ -19,6 +20,7 @@ const taskSelect = {
 } satisfies Prisma.TaskSelect;
 const entrySelect = {
   taskId: true,
+  position: true,
   boardId: true,
   status: { select: { id: true, name: true, color: true, position: true } },
   task: { select: taskSelect },
@@ -35,6 +37,7 @@ function content(
     ...humanTaskReadSnapshot(entry.task, entry.boardId),
     projectId: project.id,
     statusId: entry.status.id,
+    position: entry.position,
     workflowStatus: workflowStatusSnapshot(entry.status),
     projectArchivedAt: project.archivedAt,
     completed: entry.task.humanState!.completed,
@@ -203,8 +206,10 @@ export class SharedTaskContentService {
         take: limit + 1,
         select: entrySelect,
       });
+      const items = rows.slice(0, limit).map((row) => content(row, project));
+      await projectTaskAvatars(tx, actor, items);
       return {
-        items: rows.slice(0, limit).map((row) => content(row, project)),
+        items,
         hasMore: rows.length > limit,
         nextAfterTaskId: rows.length > limit ? rows[limit - 1]!.taskId : null,
       };
@@ -213,10 +218,12 @@ export class SharedTaskContentService {
   get(actor: AuthenticatedUser, projectId: string, taskId: string) {
     return this.read(async (tx) => {
       const project = await this.project(tx, actor, projectId);
-      return content(
+      const item = content(
         await this.entry(tx, actor, project.taskBoard!.id, taskId),
         project,
       );
+      await projectTaskAvatars(tx, actor, [item]);
+      return item;
     });
   }
   history(

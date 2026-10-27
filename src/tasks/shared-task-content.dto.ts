@@ -31,7 +31,7 @@ export class SharedTaskContentDto extends HumanTaskReadResponseDto {
     description:
       "Canonical creator-confirmed completion, independent of this board's local workflow.",
   })
-  completed!: boolean | null;
+  declare completed: boolean | null;
 }
 export class SharedTaskListDto {
   @ApiProperty({ type: SharedTaskContentDto, isArray: true })

@@ -1,3 +1,15 @@
+import { HumanTasksController } from "../../src/tasks/human-tasks.controller";
+import { HumanTasksService } from "../../src/tasks/human-tasks.service";
+import { HumanTaskActionsController } from "../../src/tasks/human-task-actions.controller";
+import { HumanTaskActionsService } from "../../src/tasks/human-task-actions.service";
+import { TaskBoardsController } from "../../src/tasks/task-boards.controller";
+import { TaskBoardsService } from "../../src/tasks/task-boards.service";
+import { SharedTasksController } from "../../src/tasks/shared-tasks.controller";
+import { SharedTasksService } from "../../src/tasks/shared-tasks.service";
+import { SharedTaskContentController } from "../../src/tasks/shared-task-content.controller";
+import { SharedTaskContentService } from "../../src/tasks/shared-task-content.service";
+import { TaskDeadlinesController } from "../../src/tasks/task-deadlines.controller";
+import { TaskDeadlinesService } from "../../src/tasks/task-deadlines.service";
 import { DepartmentsController } from "../../src/departments/departments.controller";
 import { DepartmentsService } from "../../src/departments/departments.service";
 import { ConfigurationTemplatesController } from "../../src/configuration-templates/configuration-templates.controller";
@@ -232,8 +244,8 @@ export async function createFrontendSessionHarness(
               where: { workspaceId, status: { in: ["RUNNING", "QUEUED"] } },
             })) === 0,
         );
-        await prisma.project.deleteMany({ where: { workspaceId } });
         await prisma.task.deleteMany({ where: { workspaceId } });
+        await prisma.project.deleteMany({ where: { workspaceId } });
         await prisma.department.deleteMany({ where: { workspaceId } });
         await prisma.user.deleteMany({ where: { workspaceId } });
         await prisma.role.deleteMany({ where: { workspaceId } });
@@ -370,6 +382,12 @@ export async function createFrontendSessionHarness(
     projects.onModuleInit = () => {};
     const module = await Test.createTestingModule({
       controllers: [
+        HumanTasksController,
+        HumanTaskActionsController,
+        TaskBoardsController,
+        SharedTasksController,
+        SharedTaskContentController,
+        TaskDeadlinesController,
         ArticleReviewsController,
         ArticleProposalsController,
         ArticleResolutionController,
@@ -388,6 +406,12 @@ export async function createFrontendSessionHarness(
         PersonalModelPreferencesController,
       ],
       providers: [
+        HumanTasksService,
+        HumanTaskActionsService,
+        TaskBoardsService,
+        SharedTasksService,
+        SharedTaskContentService,
+        TaskDeadlinesService,
         ArticleReviewsService,
         ArticleProposalsService,
         ArticleResolutionService,

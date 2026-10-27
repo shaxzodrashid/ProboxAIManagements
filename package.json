@@ -1,6 +1,6 @@
 {
   "name": "proboxai",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "packageManager": "pnpm@10.13.1",
   "private": true,
   "description": "ProboxAI programmatic coding-session control plane",

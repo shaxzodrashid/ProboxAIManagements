@@ -471,9 +471,17 @@ integration("rolling per-device authentication HTTP", () => {
         (await c.call("devices/auth-preservation-refresh/revoke", "POST", {}))
           .status,
       ).toBe(400);
+      const otherUser = await f.prisma.user.create({
+        data: {
+          workspaceId: f.manifest.workspaceId,
+          fullName: "Other fixture account",
+          phoneNumber: randomBytes(16).toString("hex"),
+          status: "OPEN",
+        },
+      });
       const other = await f.prisma.sessionToken.create({
         data: {
-          userId: "auth-preservation-user",
+          userId: otherUser.id,
           purpose: "REFRESH",
           tokenHash: randomBytes(32).toString("hex"),
           expiresAt: new Date(Date.now() + day),
@@ -497,6 +505,7 @@ integration("rolling per-device authentication HTTP", () => {
         ).toBeNull();
       } finally {
         await f.prisma.sessionToken.delete({ where: { id: other.id } });
+        await f.prisma.user.delete({ where: { id: otherUser.id } });
       }
     } finally {
       await f.prisma.userRoleAssignment.createMany({ data: rows });

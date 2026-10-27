@@ -9,6 +9,21 @@ import {
 } from "./support/frontend-session-harness";
 
 describe("project browser allowlist", () => {
+  it("allows authenticated avatar reads without opening profile mutations or other profile data", () => {
+    const accountId = randomUUID(),
+      assetId = randomUUID();
+    const path = `profiles/${accountId}/avatar/${assetId}`;
+    expect(browserProxyAllowed("GET", path)).toBe(true);
+    for (const method of ["POST", "PUT", "DELETE", "PATCH"])
+      expect(browserProxyAllowed(method, path)).toBe(false);
+    for (const path of [
+      `profiles/${accountId}`,
+      `profiles/${accountId}/avatar/not-an-id`,
+      `profiles/${accountId}/avatar/${assetId}/extra`,
+      "users/me/avatar-uploads",
+    ])
+      expect(browserProxyAllowed("GET", path)).toBe(false);
+  });
   it("allows only creation, readback and read-only selectors", () => {
     const id = randomUUID();
     for (const [method, endpoint] of [

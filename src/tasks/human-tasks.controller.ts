@@ -1,5 +1,6 @@
 import {
   Controller,
+  Sse,
   Get,
   Header,
   Param,
@@ -59,7 +60,7 @@ export class HumanTasksController {
   @ApiOperation({
     summary: "Query bounded human tasks with scoped summaries",
     description:
-      "Current OPEN project membership is sufficient. Filters, counts and current public assignee identities share one page snapshot; no execution content or private profile lookup. Default50/max100, highest priority/newest creation first. Exact deadline sorting puts timed values first by pinned instant, then date-only by calendar date, unset last. Direction applies within each bucket. Existing deadlineDate calendar comparator and array list remain compatible. Generation changes return409 on continuation; refresh. Public names/lifecycle are current per-page display metadata and do not advance task query generation.",
+      "Current OPEN project membership is sufficient. scope=all combines originals and explicit destination shares with local status; omit scope for compatible original-only reads. sort=position uses persisted local card order. Filters, counts and current public assignee identities share one page snapshot; no execution content or private profile lookup. Default50/max100, highest priority/newest creation first. Exact deadline sorting puts timed values first by pinned instant, then date-only by calendar date, unset last. Direction applies within each bucket. Existing deadlineDate calendar comparator and array list remain compatible. Generation changes return409 on continuation; refresh. Public names/lifecycle are current per-page display metadata and do not advance task query generation.",
   })
   @ApiOkResponse({ type: HumanTaskQueryResponseDto })
   @ApiConflictResponse({
@@ -78,6 +79,19 @@ export class HumanTasksController {
     @Query() query: HumanTaskQueryDto,
   ) {
     return this.tasks.query(actor, projectId, query);
+  }
+  @Sse("events/stream")
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({
+    summary: "Stream caller-scoped board invalidations",
+    description:
+      "SSE board.invalidated carries an opaque generation only; initial event always requires REST reconciliation. Polls persisted committed state every second with fresh OPEN membership/session checks; no replay or task/audit payload. Heartbeats while unchanged. Reconnect and refresh REST on close. Does not grant board configuration or execution access.",
+  })
+  events(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param("projectId", new ParseUUIDPipe({ version: "4" })) projectId: string,
+  ) {
+    return this.tasks.events(actor, projectId);
   }
   @Get(":taskId")
   @Header("Cache-Control", "no-store")

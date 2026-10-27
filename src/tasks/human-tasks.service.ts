@@ -1,3 +1,5 @@
+import { boardEventGeneration, taskBoardEvents } from "./task-board-events";
+import { projectTaskAvatars } from "./task-avatars";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { AuthenticatedUser } from "../auth/auth.types";
@@ -13,6 +15,14 @@ import { HumanTaskQueryDto } from "./human-task-query.dto";
 @Injectable()
 export class HumanTasksService {
   constructor(private readonly prisma: PrismaService) {}
+  async events(actor: AuthenticatedUser, projectId: string) {
+    const generation = await boardEventGeneration(
+      this.prisma,
+      actor,
+      projectId,
+    );
+    return taskBoardEvents(this.prisma, actor, projectId, generation);
+  }
   query(actor: AuthenticatedUser, projectId: string, query: HumanTaskQueryDto) {
     return queryHumanTasks(this.prisma, actor, projectId, query);
   }
@@ -62,6 +72,7 @@ export class HumanTasksService {
           ],
         });
         const result = entries.map(({ task }) => humanTaskReadSnapshot(task));
+        await projectTaskAvatars(tx, actor, result);
         if (taskId) {
           if (!result.length) throw new NotFoundException("Task not found");
           return result[0];

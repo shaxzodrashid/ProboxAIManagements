@@ -1186,6 +1186,7 @@ model TaskBoardStatus {
 
 // Only deliberate future task attachment creates an entry; legacy tasks remain unlinked.
 model TaskBoardEntry {
+  position Int             @default(0)
   taskId   String          @id
   task     Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
   boardId  String
@@ -1197,6 +1198,7 @@ model TaskBoardEntry {
 
 // Additional explicit associations preserve the existing original board/execution context.
 model TaskSharedBoardEntry {
+  position    Int             @default(0)
   taskId      String
   task        Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
   boardId     String

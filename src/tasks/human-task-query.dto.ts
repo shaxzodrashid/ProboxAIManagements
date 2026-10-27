@@ -24,6 +24,8 @@ export const QueryPriorities = [
   "UNSET",
 ] as const;
 export const QuerySorts = [
+  "position",
+  "-position",
   "priority",
   "-priority",
   "deadlineDate",
@@ -36,6 +38,16 @@ export const QuerySorts = [
 const csv = ({ value }: { value: unknown }) =>
   typeof value === "string" ? value.split(",") : value;
 export class HumanTaskQueryDto {
+  @ApiPropertyOptional({
+    enum: ["original", "all"],
+    default: "original",
+    description:
+      "all includes destination shares with local workflow and unified counts.",
+  })
+  @IsOptional()
+  @IsIn(["original", "all"])
+  scope?: "original" | "all";
+
   @ApiPropertyOptional({
     maxLength: 200,
     description:
@@ -128,6 +140,11 @@ export class HumanStatusCountDto {
   @ApiProperty({ minimum: 1 }) count!: number;
 }
 export class HumanTaskQueryResponseDto {
+  @ApiProperty({
+    description:
+      "Opaque caller/filter-bound observed generation; not an authorization token.",
+  })
+  generation!: string;
   @ApiProperty({ type: HumanTaskReadResponseDto, isArray: true, maxItems: 100 })
   items!: HumanTaskReadResponseDto[];
   @ApiProperty({

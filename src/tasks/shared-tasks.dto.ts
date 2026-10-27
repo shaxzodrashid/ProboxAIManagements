@@ -1,16 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { IsUUID } from "class-validator";
-import { BoardMutationDto } from "./task-boards.dto";
-import { HumanTaskLifecycleDto } from "./human-tasks.dto";
+import { HumanTaskMoveDto, HumanTaskLifecycleDto } from "./human-tasks.dto";
 
-export class ShareTaskDto extends BoardMutationDto {
+export class ShareTaskDto extends HumanTaskMoveDto {
   @ApiProperty({
     format: "uuid",
     description:
       "Explicit destination-board column. Sharing never maps or copies another board's workflow column.",
   })
   @IsUUID("4")
-  statusId!: string;
+  declare statusId: string;
 }
 export class SharedTaskQueryDto {}
 export class SharedTaskOperationDto {

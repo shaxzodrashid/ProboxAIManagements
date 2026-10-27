@@ -514,6 +514,7 @@ if (databaseUrl) {
           firstName: "Nodira",
           lastName: "",
           username: "nodira_staff",
+          avatar: null,
         },
         {
           id: peer,
@@ -521,6 +522,7 @@ if (databaseUrl) {
           firstName: null,
           lastName: null,
           username: null,
+          avatar: null,
         },
       ].sort((a, b) => a.id.localeCompare(b.id));
       const detail = (await read().expect(200)).body;
@@ -612,6 +614,7 @@ if (databaseUrl) {
           firstName: null,
           lastName: null,
           username: null,
+          avatar: null,
         },
       ]);
       expect((await read(employee)).status).toBe(404);
@@ -679,7 +682,7 @@ if (databaseUrl) {
       ).components!.schemas!;
       expect(
         s.HumanTaskReadResponseDto.properties.assigneeIdentities.items.$ref,
-      ).toBe("#/components/schemas/PublicIdentityResponseDto");
+      ).toBe("#/components/schemas/TaskAssigneeIdentityDto");
       expect(s.HumanTaskReadResponseDto.required).toContain(
         "assigneeIdentities",
       );
@@ -689,9 +692,14 @@ if (databaseUrl) {
       expect(s.HumanTaskResponseDto.properties).not.toHaveProperty(
         "assigneeIdentities",
       );
-      expect(
-        Object.keys(s.PublicIdentityResponseDto.properties).sort(),
-      ).toEqual(["displayName", "firstName", "id", "lastName", "username"]);
+      expect(Object.keys(s.TaskAssigneeIdentityDto.properties).sort()).toEqual([
+        "avatar",
+        "displayName",
+        "firstName",
+        "id",
+        "lastName",
+        "username",
+      ]);
     });
     const editWorkflowStatus = (statusId: string, input: object) =>
       http()
@@ -2272,7 +2280,12 @@ if (databaseUrl) {
       expect(saved.status).toBe(200);
       expect(saved.headers["cache-control"]).toBe("no-store");
       expect(saved.body.action).toBe("CHECKLIST_REORDER");
-      const { workflowStatus, assigneeIdentities, ...frozenBefore } = before;
+      const {
+        workflowStatus,
+        assigneeIdentities,
+        completed: _completed,
+        ...frozenBefore
+      } = before;
       expect(saved.body.before).toEqual(frozenBefore);
       expect(saved.body.after).not.toHaveProperty("workflowStatus");
       expect(saved.body.after.checklist.map((i: any) => i.id)).toEqual([
@@ -2287,6 +2300,7 @@ if (databaseUrl) {
         });
       expect((await read()).body).toEqual({
         ...saved.body.after,
+        completed: _completed,
         workflowStatus,
         assigneeIdentities,
       });

@@ -1,3 +1,4 @@
+import { placeTaskCard } from "./task-card-order";
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
@@ -312,6 +313,12 @@ export class SharedTasksService {
           action,
           requestId,
           statusId,
+          ...("beforeTaskId" in dto && dto.beforeTaskId !== undefined
+            ? {
+                beforeTaskId:
+                  (dto.beforeTaskId as string | null)?.toLowerCase() ?? null,
+              }
+            : {}),
         }),
       )
       .digest("hex");
@@ -387,12 +394,28 @@ export class SharedTasksService {
           }))
         )
           throw fail(404, "Destination workflow status not found");
-        if (action === "MOVE_LOCAL")
+        if (action === "MOVE_LOCAL") {
+          const previous = await tx.taskSharedBoardEntry.findUniqueOrThrow({
+            where,
+          });
           await tx.taskSharedBoardEntry.update({
             where,
             data: { statusId: statusId! },
           });
-        else {
+          if (
+            ("beforeTaskId" in dto && dto.beforeTaskId !== undefined) ||
+            previous.statusId !== statusId
+          )
+            await placeTaskCard(
+              tx,
+              boardId,
+              statusId!,
+              taskId,
+              "beforeTaskId" in dto && dto.beforeTaskId !== undefined
+                ? ((dto.beforeTaskId as string | null)?.toLowerCase() ?? null)
+                : null,
+            );
+        } else {
           const existing = await tx.taskSharedBoardEntry.findUnique({ where });
           if (existing && existing.statusId !== statusId)
             throw fail(
@@ -413,6 +436,15 @@ export class SharedTasksService {
                 createdById: actor.id,
               },
             });
+            await placeTaskCard(
+              tx,
+              boardId,
+              statusId!,
+              taskId,
+              "beforeTaskId" in dto && dto.beforeTaskId !== undefined
+                ? ((dto.beforeTaskId as string | null)?.toLowerCase() ?? null)
+                : null,
+            );
           }
         }
       }

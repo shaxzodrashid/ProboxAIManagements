@@ -115,6 +115,15 @@ An illustrative list response for an empty, ready project:
       "slug": "it"
     },
     "_count": { "members": 1 },
+    "members": [
+      {
+        "userId": "44444444-4444-4444-8444-444444444444",
+        "user": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "fullName": "Ada Lovelace"
+        }
+      }
+    ],
     "initializations": []
   }
 ]
@@ -125,7 +134,7 @@ Their relationship fields differ:
 
 | Response      | Additional fields                                                                                                                             |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| List item     | `isMember`, `creator`, `department`, `_count.members`, `initializations`                                                                      |
+| List item     | `isMember`, `creator`, `department`, `_count.members`, `initializations`; `members` only for members or callers with `projects.read-all`      |
 | Detail        | `isMember`, `creator`, `department`, `initializations`; `members` only for members or callers with `projects.read-all`; no `_count` guarantee |
 | Legacy create | `creator`, `department`, `members`; `initializations` present only for templated creation; no `isMember` guarantee                            |
 | Update        | Project scalars only; no relationships or `isMember`                                                                                          |
@@ -136,6 +145,46 @@ membership indicator, not as a complete capability check. A missing `members`
 property means the roster was withheld; do not display it as an empty roster.
 `_count.members` counts persisted relationships, which may include inactive users;
 it is not the active candidate count.
+
+### Member names and photos in the directory
+
+Authorized active and archived list items include the complete persisted `members`
+array, ordered by membership `createdAt` ascending, then `userId` ascending. Each
+entry has `userId` and `user: { id, fullName }`. Only callers with
+`projects.read-all` additionally receive `user.avatar`; for everyone else that
+field is omitted, including project members. Use `fullName` for the accessible
+name/tooltip and a name-based fallback when `avatar` is absent or null. The
+list projection does not expose roles, contact data or private profile fields.
+Public-read nonmembers receive no `members` property; distinguish a withheld
+roster from an explicitly empty array. This addition does not change detail,
+create or membership-mutation response shapes.
+
+A visible `user.avatar` for a `projects.read-all` caller has this shape:
+
+```json
+{
+  "assetId": "55555555-5555-4555-8555-555555555555",
+  "width": 512,
+  "height": 512,
+  "url": "/api/v1/profiles/44444444-4444-4444-8444-444444444444/avatar/55555555-5555-4555-8555-555555555555"
+}
+```
+
+For `projects.read-all` callers, `avatar` is null for an unset/non-ACTIVE photo, a non-OPEN account, or when the
+current viewer is outside the owner's AVATAR audience. Missing policies are
+private. CONTACTS is owner-to-viewer; CUSTOM honors explicit account and workspace
+recipients. Project membership and `projects.read-all` never bypass photo privacy.
+The current roster, viewer authority and photo audience are read in the same
+Repeatable Read snapshot. No image storage request is made by listing projects.
+
+The URL is an application route, not a storage URL. Bearer clients use authenticated
+fetch for restricted photos. Browser clients map the validated `/api/v1/` route to
+`/api/v1/browser/api/` and use the existing same-origin session cookie, for example
+`/api/v1/browser/api/profiles/<accountId>/avatar/<assetId>`. This exact GET route is
+allowlisted and returns binary `image/png` with `no-store` and `nosniff`; it exposes
+no profile mutations. Never put bearer tokens in image URLs. Image reads recheck
+the current photo and audience, so a later removal/privacy change can return 404;
+fall back to the member's name/initials and discard old image state at logout.
 
 `initializations` in list/detail is an array of zero or one latest attempt, selected
 by `attempt` descending. Its safe summary contains exactly:

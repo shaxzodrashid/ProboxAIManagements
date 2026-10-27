@@ -29,6 +29,7 @@ export const humanTaskSelection = {
   },
   boardEntry: {
     select: {
+      position: true,
       statusId: true,
       boardId: true,
       status: {
@@ -71,6 +72,9 @@ export type HumanTask = Prisma.TaskGetPayload<{
 /** Live public identity is selected only for fresh reads, never mutation history. */
 export const humanTaskReadSelection = {
   ...humanTaskSelection,
+  humanState: {
+    select: { ...humanTaskSelection.humanState.select, completed: true },
+  },
   assignees: {
     ...humanTaskSelection.assignees,
     select: {
@@ -100,6 +104,7 @@ export function humanTaskSnapshot(
     description: task.description,
     ownerId: task.creatorId,
     statusId: task.boardEntry!.statusId,
+    position: task.boardEntry!.position,
     revision: task.humanState?.revision ?? 0,
     priority: task.humanState?.priority ?? null,
     lifecycle: {
@@ -140,6 +145,7 @@ export function humanTaskReadSnapshot(
 ) {
   return {
     ...humanTaskSnapshot(task, currentBoardId),
+    completed: task.humanState?.completed ?? null,
     workflowStatus: workflowStatusSnapshot(task.boardEntry!.status),
     assigneeIdentities: task.assignees
       .filter(

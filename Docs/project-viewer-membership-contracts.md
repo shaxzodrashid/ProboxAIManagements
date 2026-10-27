@@ -18,13 +18,15 @@ Existing visibility is preserved: workspace projects are visible through actual
 membership, `readAccessEnabled`, or `projects.read-all`. A foreign workspace
 detail is 404; a same-workspace private project without access is 403 and omitted
 from the list. Detail includes its existing member roster only for a member or
-a caller with `projects.read-all`. A public nonmember receives no roster. List
-never includes a member roster or its internally filtered own-member relation;
-the existing aggregate member count remains. Existing updatedAt descending list
+a caller with `projects.read-all`. A public nonmember receives no roster. As of
+the October 26 directory extension, list uses the same roster visibility rule and
+returns minimal member names and audience-filtered avatars; see the
+[frontend contract](frontend/projects.md#member-names-and-photos-in-the-directory).
+The existing aggregate member count remains. Existing updatedAt descending list
 order and lifecycle coverage remain unchanged.
 
 This closes only the factual membership marker subset. MAIN02 remains partial:
-no ranking, favorites, new visibility rules, capability indicators, avatars or
+no ranking, favorites, new visibility rules, capability indicators or
 project/task relationship inference are introduced. There is no migration or
 data backfill. No provider calls or filesystem writes are required by these reads.
 

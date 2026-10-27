@@ -1,5 +1,25 @@
 # Backend changelog
 
+## 0.3.5 — project task boards and member rosters
+
+- Add opt-in unified original/shared task queries with destination-local status,
+  filtered counts, generation-bound pagination and canonical completion readback.
+  Existing queries retain their original-only default.
+- Persist card positions and support revision-safe placement on original/shared
+  workflow moves, including neighbor validation and durable retry recovery.
+- Add authenticated board SSE invalidations backed by persisted state, with
+  current membership, session revocation and credential expiry checks.
+- Expose fresh audience-authorized assignee avatars and project member rosters.
+  Project-list photos require projects.read-all plus profile audience permission;
+  ordinary project members receive roster names without photo metadata.
+- Extend the browser proxy for task-board operations and avatar content, retaining
+  authentication, CSRF and upstream permission checks; document frontend behavior.
+
+One additive card-position migration is required relative to v0.3.4. Deploy the
+backend and browser proxy together; frontend rollout and SSE capacity acceptance
+remain separate. See [rollout notes](Docs/release-0.3.5-rollout.md). Preparation and
+Git publication do not prove production deployment.
+
 ## 0.3.4 — rolling browser sessions and device authentication
 
 - Add explicitly opted-in rolling browser sessions with a default 90-day
