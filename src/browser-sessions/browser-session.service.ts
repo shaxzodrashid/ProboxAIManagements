@@ -55,13 +55,15 @@ export class BrowserSessionService {
 
   assertOrigin(req: Request, unsafe = false) {
     if (!this.config.enabled) throw new NotFoundException();
+    const allowed = this.config.origins ?? [this.config.origin];
+    const origin = req.headers.origin;
     if (
       req.headers.authorization ||
       req.headers["sec-fetch-site"] === "cross-site" ||
       (unsafe
-        ? req.headers.origin !== this.config.origin
+        ? typeof origin !== "string" || !allowed.includes(origin)
         : req.headers.origin !== undefined &&
-          req.headers.origin !== this.config.origin)
+          (typeof origin !== "string" || !allowed.includes(origin)))
     )
       throw new ForbiddenException("Browser request origin rejected");
     if (unsafe && !req.is("application/json"))

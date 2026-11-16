@@ -1,5 +1,7 @@
 # Complete browser authentication and project creation
 
+**15 November update:** Multiple explicit frontend origins are supported via `BROWSER_SESSION_ORIGINS`, with legacy single-origin compatibility. See [origin allowlist configuration](browser-session-origins.md) for proxy and HTTPS requirements.
+
 Implemented locally on 22 October 2026. This supersedes the browser-route restrictions in the earlier frontend authentication/projects guide snapshots. Production deployment and enablement are separate operator actions.
 
 The existing browser session service remains disabled by default. Enabling requires `BROWSER_SESSIONS_ENABLED=true`, an exact HTTPS `BROWSER_SESSION_ORIGIN`, an independent 32-byte base64url `BROWSER_SESSION_KEY` and the existing BrowserSession migration. The new verification grant is kept in the existing encrypted session bundle; this change needs no new migration. Never rotate the encryption key merely to restart the service.

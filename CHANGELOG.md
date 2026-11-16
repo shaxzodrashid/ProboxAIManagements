@@ -1,5 +1,22 @@
 # Backend changelog
 
+## 0.3.6 — newest-first session history and browser origins
+
+- Add opt-in backward pagination to persisted session history. Read the newest
+  events first, then request older pages within the first page's fixed high-water
+  boundary. Preserve assigned-manager authorization and explicit missing-history
+  errors; existing ascending history and SSE contracts remain unchanged.
+- Support multiple exact browser frontend origins through
+  `BROWSER_SESSION_ORIGINS`, with precedence over the legacy singular setting.
+  Retain same-origin proxies, CSRF, JSON, Fetch Metadata and secure cookie checks;
+  reject mixed HTTP/HTTPS and require HTTPS for all production origins.
+- Add origin validation, backward-history and HTTP pagination regression coverage.
+
+No new migrations or dependencies relative to v0.3.5. Additional frontend origins
+require explicit backend configuration and same-origin proxy routing. See
+[rollout notes](Docs/release-0.3.6-rollout.md). Preparation and Git publication do
+not prove production deployment.
+
 ## 0.3.5 — project task boards and member rosters
 
 - Add opt-in unified original/shared task queries with destination-local status,

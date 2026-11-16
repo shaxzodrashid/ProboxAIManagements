@@ -481,6 +481,26 @@ export class TurnAcceptanceResponseDto {
 
 export class SessionHistoryQueryDto {
   @ApiPropertyOptional({
+    enum: ["backward"],
+    description:
+      "Return the newest retained page first, descending by sequence. Omit for the existing ascending history behavior; backward pagination is unsupported on SSE.",
+  })
+  @IsOptional()
+  @IsIn(["backward"])
+  direction?: "backward";
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 2147483648,
+    description:
+      "Exclusive upper sequence cursor for backward history. Defaults to highWaterSequence + 1 on the first page; continue with nextCursor.",
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(2147483648)
+  before?: number;
+  @ApiPropertyOptional({
     minimum: 0,
     maximum: 2147483647,
     description:
@@ -515,6 +535,16 @@ export class SessionHistoryResponseDto {
   @ApiProperty({ type: SessionResponseDto }) session!: SessionResponseDto;
   @ApiProperty({ type: PersistedSessionEventDto, isArray: true })
   events!: PersistedSessionEventDto[];
+  @ApiPropertyOptional({
+    enum: ["backward"],
+    description: "Present only when direction=backward was requested.",
+  })
+  direction?: "backward";
+  @ApiPropertyOptional({
+    description:
+      "Exclusive upper cursor used for this backward page; feed nextCursor into before to read older events.",
+  })
+  before?: number;
   @ApiProperty() after!: number;
   @ApiProperty() nextCursor!: number;
   @ApiProperty() highWaterSequence!: number;

@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.6",
+      "gitRef": "refs/tags/v0.3.6",
+      "channel": "production",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.5",
       "gitRef": "refs/tags/v0.3.5",
       "channel": "production",
@@ -139,6 +145,20 @@
     }
   ],
   "features": [
+    {
+      "id": "session-history-backward-pagination",
+      "title": "Newest-first persisted session history with fixed-boundary older pages",
+      "since": "0.3.6",
+      "state": "supported",
+      "contract": "Docs/session-assistant-text-contracts.md"
+    },
+    {
+      "id": "browser-session-multiple-origins",
+      "title": "Exact browser frontend origin allowlist with secure same-origin proxies",
+      "since": "0.3.6",
+      "state": "supported",
+      "contract": "Docs/browser-session-origins.md"
+    },
     {
       "id": "project-list-member-rosters",
       "title": "Project list member names and audience-authorized read-all photos",

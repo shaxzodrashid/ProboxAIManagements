@@ -1918,6 +1918,120 @@ async function until(fn: () => Promise<boolean>) {
       await eventHistory(member).expect(403);
       await eventHistory(denied).expect(403);
     });
+    it("pages newest-first history backward under a fixed high-water boundary", async () => {
+      await prisma.sessionEvent.createMany({
+        data: Array.from({ length: 225 }, (_, index) => ({
+          sessionId,
+          sequence: index + 1,
+          type: "fixture.event",
+          rawPayload: { fixtureSequence: index + 1 },
+          payloadHash: `fixture-${index + 1}`,
+        })),
+      });
+      await prisma.proboxAiSession.update({
+        where: { id: sessionId },
+        data: { lastSequence: 225 },
+      });
+
+      const first = (
+        await eventHistory(owner, "?direction=backward").expect(200)
+      ).body;
+      expect(first).toMatchObject({
+        direction: "backward",
+        before: 226,
+        after: 0,
+        nextCursor: 126,
+        highWaterSequence: 225,
+        hasMore: true,
+      });
+      expect(first.events.map((event: any) => event.sequence)).toEqual(
+        Array.from({ length: 100 }, (_, index) => 225 - index),
+      );
+
+      await prisma.sessionEvent.create({
+        data: {
+          sessionId,
+          sequence: 226,
+          type: "fixture.event",
+          rawPayload: { fixtureSequence: 226 },
+          payloadHash: "fixture-226",
+        },
+      });
+      await prisma.proboxAiSession.update({
+        where: { id: sessionId },
+        data: { lastSequence: 226 },
+      });
+
+      const second = (
+        await eventHistory(
+          owner,
+          "?direction=backward&before=126&untilSequence=225",
+        ).expect(200)
+      ).body;
+      expect(second).toMatchObject({
+        direction: "backward",
+        before: 126,
+        nextCursor: 26,
+        highWaterSequence: 225,
+        hasMore: true,
+      });
+      expect(second.events.map((event: any) => event.sequence)).toEqual(
+        Array.from({ length: 100 }, (_, index) => 125 - index),
+      );
+      expect(second.events.some((event: any) => event.sequence === 226)).toBe(
+        false,
+      );
+
+      const third = (
+        await eventHistory(
+          owner,
+          "?direction=backward&before=26&untilSequence=225",
+        ).expect(200)
+      ).body;
+      expect(third).toMatchObject({
+        direction: "backward",
+        before: 26,
+        after: 0,
+        nextCursor: 1,
+        highWaterSequence: 225,
+        hasMore: false,
+      });
+      expect(third.events.map((event: any) => event.sequence)).toEqual(
+        Array.from({ length: 25 }, (_, index) => 25 - index),
+      );
+
+      await eventHistory(owner, "?direction=backward&after=0").expect(400);
+      await eventHistory(owner, "?before=126").expect(400);
+      const latest = (
+        await eventHistory(owner, "?direction=backward&before=227").expect(200)
+      ).body;
+      expect(latest.highWaterSequence).toBe(226);
+      expect(latest.events[0].sequence).toBe(226);
+      await eventHistory(owner, "?direction=backward&before=228").expect(409);
+      await eventHistory(
+        owner,
+        "?direction=backward&before=227&untilSequence=225",
+      ).expect(409);
+      await eventHistory(member, "?direction=backward").expect(403);
+      await http()
+        .get(`/sessions/${sessionId}/events/stream?direction=backward`)
+        .set("Authorization", "Bearer " + owner)
+        .expect(400);
+    });
+    it("returns an empty first backward page for sessions with no events", async () => {
+      const empty = (
+        await eventHistory(owner, "?direction=backward").expect(200)
+      ).body;
+      expect(empty).toMatchObject({
+        direction: "backward",
+        before: 1,
+        after: 0,
+        nextCursor: 0,
+        highWaterSequence: 0,
+        hasMore: false,
+        events: [],
+      });
+    });
     it("serializes concurrent event sequences and hash linkage", async () => {
       await startControlled();
       await Promise.all(

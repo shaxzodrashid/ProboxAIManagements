@@ -38,6 +38,20 @@ ITEM_COMPLETED is completion of this message item, not success/completion of the
 
 Existing server sequence holes remain 409 SESSION_HISTORY_UNAVAILABLE, never an empty successful page; clients must show unavailable history and reconcile session state. REST pagination retains the fixed high-water boundary; SSE resumes after the processed cursor. All sequences, including neutral omitted events, count toward continuity. Lost updates cannot cause duplicate concatenated text because each verified message is a self-contained snapshot.
 
+`GET /sessions/:id/events` preserves its ascending `after` contract when
+`direction` is omitted. `direction=backward` opts into descending sequence order
+for history only; it cannot be combined with `after`. The first backward page
+uses the current repeatable-read `highWaterSequence` and an exclusive
+`before=highWaterSequence+1` boundary. Each response includes `direction`, the
+effective `before`, `after: 0`, the same fixed `highWaterSequence`, and
+`nextCursor` equal to the oldest returned sequence (or `0` when empty). Continue
+with `before=nextCursor` and the returned `untilSequence=highWaterSequence` to
+read older events without admitting arrivals after page one. `hasMore` means an
+older event exists. A `before` cursor without `direction=backward`, or mixing
+`after` with backward mode, returns a 400. Backward direction/cursors are rejected by
+SSE; its ascending replay-to-live behavior is unchanged. Current assigned
+manager, workspace and `sessions.read` authorization applies to every REST page.
+
 Current OPEN/workspace, assigned-manager and sessions.read checks remain unchanged. SSE rechecks current grants each batch and closes at token expiry. This contract adds no account, project/file or tool-detail disclosure.
 
 ## Verification and changed files

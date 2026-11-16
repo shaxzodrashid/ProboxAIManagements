@@ -1690,6 +1690,99 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
         ),
     );
   }
+
+  async historyBackward(
+    actorId: string,
+    sessionId: string,
+    before?: number,
+    limit = 100,
+    untilSequence?: number,
+  ) {
+    if (
+      (before !== undefined &&
+        (!Number.isSafeInteger(before) || before < 1 || before > 2147483648)) ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 100
+    )
+      throw new BadRequestException(
+        "Invalid backward event cursor or page size",
+      );
+    return readDependency("readSessionHistoryBackward", () =>
+      this.prisma.$transaction(
+        async (tx) => {
+          const session = await this.assertManager(
+            actorId,
+            sessionId,
+            "sessions.read",
+            tx,
+          );
+          if (
+            untilSequence !== undefined &&
+            (!Number.isSafeInteger(untilSequence) ||
+              untilSequence < 0 ||
+              untilSequence > session.lastSequence)
+          )
+            throw new ConflictException("Invalid fixed history boundary");
+          const highWaterSequence = untilSequence ?? session.lastSequence;
+          const pageBefore = before ?? highWaterSequence + 1;
+          if (pageBefore > highWaterSequence + 1)
+            throw new ConflictException(
+              "Event cursor is ahead of persisted history",
+            );
+          const expectedFirstSequence = Math.min(
+            pageBefore - 1,
+            highWaterSequence,
+          );
+          const rows = await tx.sessionEvent.findMany({
+            select: publicSessionEventSelect,
+            where: {
+              sessionId,
+              sequence: { lte: expectedFirstSequence },
+            },
+            orderBy: { sequence: "desc" },
+            take: limit + 1,
+          });
+          if (
+            rows.some(
+              (event, index) =>
+                event.sequence !== expectedFirstSequence - index,
+            ) ||
+            (!rows.length && expectedFirstSequence > 0)
+          )
+            throw new ConflictException({
+              code: "SESSION_HISTORY_UNAVAILABLE",
+              message:
+                "Persisted history has unavailable sequences; reconcile the session snapshot",
+              highWaterSequence,
+            });
+          const hasMore = rows.length > limit;
+          const events = rows.slice(0, limit);
+          const nextCursor = events.at(-1)?.sequence ?? 0;
+          if (!hasMore && nextCursor > 1)
+            throw new ConflictException({
+              code: "SESSION_HISTORY_UNAVAILABLE",
+              message:
+                "Persisted history has unavailable sequences; reconcile the session snapshot",
+              highWaterSequence,
+            });
+          return {
+            session: sessionResponse(session),
+            events: events.map(eventResponse),
+            direction: "backward" as const,
+            before: pageBefore,
+            after: 0,
+            nextCursor,
+            highWaterSequence,
+            hasMore,
+            historyAvailability: "RETAINED_WITH_EXPLICIT_OMISSIONS",
+          };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
+    );
+  }
+
   async retainedTurns(
     actor: AuthenticatedUser,
     sessionId: string,

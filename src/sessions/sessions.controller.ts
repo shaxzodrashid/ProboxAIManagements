@@ -419,7 +419,7 @@ export class SessionsController {
   @ApiOperation({
     summary: "Read bounded persisted session history",
     description:
-      "Assigned manager only. Snapshot and high-water sequence share one transaction; advance using nextCursor. Explicit omission markers preserve ordering. No actor field represents the viewer as event author.",
+      "Assigned manager with sessions.read only. Omit direction to preserve ascending after pagination. direction=backward returns the latest page first in descending sequence order; use nextCursor as the next exclusive before and highWaterSequence as untilSequence. Backward mode cannot combine with after and is REST-only. Each page shares its session snapshot and fixed high-water boundary in one repeatable-read transaction; missing sequences return 409. Explicit omission markers preserve ordering. No actor field represents the viewer as event author.",
   })
   @ApiOkResponse({ type: SessionHistoryResponseDto })
   @ApiAuthenticationErrors()
@@ -430,6 +430,23 @@ export class SessionsController {
     @Param("id", new ParseUUIDPipe({ version: "4" })) id: string,
     @Query() query: SessionHistoryQueryDto,
   ) {
+    if (query.direction === "backward") {
+      if (query.after !== undefined)
+        throw new BadRequestException(
+          "The after cursor cannot be combined with backward history",
+        );
+      return this.sessions.historyBackward(
+        user.id,
+        id,
+        query.before,
+        query.limit,
+        query.untilSequence,
+      );
+    }
+    if (query.before !== undefined)
+      throw new BadRequestException(
+        "The before cursor requires direction=backward",
+      );
     return this.sessions.history(
       user.id,
       id,
@@ -464,6 +481,10 @@ export class SessionsController {
     @Query() query: SessionHistoryQueryDto,
     @Headers("last-event-id") lastEventId?: string,
   ): Promise<Observable<MessageEvent>> {
+    if (query.direction !== undefined || query.before !== undefined)
+      throw new BadRequestException(
+        "Backward pagination is supported only on history reads",
+      );
     if (query.untilSequence !== undefined)
       throw new BadRequestException(
         "Fixed boundary is supported only on history reads",

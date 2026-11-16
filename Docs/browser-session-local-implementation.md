@@ -1,5 +1,7 @@
 # Local browser login implementation — 19 October 2026
 
+**15 November update:** Multiple explicit frontend origins are supported via `BROWSER_SESSION_ORIGINS`, with legacy single-origin compatibility. See [origin allowlist configuration](browser-session-origins.md) for proxy and HTTPS requirements.
+
 **24 October update:** the duration, credential-revocation and single-key sections
 below describe the historical implementation. The current local contract is
 [rolling authentication](rolling-authentication-contracts.md), including explicit

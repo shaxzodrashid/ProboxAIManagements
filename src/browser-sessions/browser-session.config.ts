@@ -8,6 +8,7 @@ import {
 export interface BrowserSessionConfig {
   enabled: boolean;
   origin: string;
+  origins?: readonly string[];
   key: Buffer;
   keyId: string;
   secure: boolean;
@@ -22,24 +23,50 @@ export function browserSessionConfig(
 ): BrowserSessionConfig {
   const enabled = env.BROWSER_SESSIONS_ENABLED === "true";
   if (!enabled) return { enabled: false } as BrowserSessionConfig;
-  const origin = new URL(env.BROWSER_SESSION_ORIGIN ?? "");
-  if (
-    origin.origin !== env.BROWSER_SESSION_ORIGIN ||
-    origin.username ||
-    origin.password
-  )
-    throw new Error("BROWSER_SESSION_ORIGIN must be one exact origin");
-  const secure = origin.protocol === "https:";
-  if (
-    !secure &&
-    !(
-      env.NODE_ENV !== "production" &&
-      origin.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname)
-    )
-  )
+  // The plural setting takes precedence; the singular setting remains compatible.
+  const configured = env.BROWSER_SESSION_ORIGINS?.trim();
+  const values = configured
+    ? configured.split(",").map((value) => value.trim())
+    : [env.BROWSER_SESSION_ORIGIN ?? ""];
+  const origins = [
+    ...new Set(
+      values.map((value) => {
+        let origin: URL;
+        try {
+          origin = new URL(value);
+        } catch {
+          throw new Error(
+            "Browser session origins must be exact HTTP(S) origins",
+          );
+        }
+        if (
+          origin.origin !== value ||
+          origin.username ||
+          origin.password ||
+          origin.hostname.includes("*") ||
+          !["https:", "http:"].includes(origin.protocol)
+        )
+          throw new Error(
+            "Browser session origins must be exact HTTP(S) origins",
+          );
+        if (
+          origin.protocol !== "https:" &&
+          !(
+            env.NODE_ENV !== "production" &&
+            ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname)
+          )
+        )
+          throw new Error(
+            "Browser sessions require HTTPS; HTTP is local development only",
+          );
+        return origin.origin;
+      }),
+    ),
+  ];
+  const secure = origins.some((origin) => origin.startsWith("https:"));
+  if (secure && origins.some((origin) => origin.startsWith("http:")))
     throw new Error(
-      "Browser sessions require HTTPS; HTTP is local development only",
+      "Browser session origins cannot mix HTTP and HTTPS; use HTTPS localhost with hosted origins",
     );
   const encoded = env.BROWSER_SESSION_KEY ?? "";
   const key = Buffer.from(encoded, "base64url");
@@ -94,7 +121,8 @@ export function browserSessionConfig(
   }
   return {
     enabled,
-    origin: origin.origin,
+    origin: origins[0]!,
+    origins,
     secure,
     key,
     keyId,
