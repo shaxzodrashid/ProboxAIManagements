@@ -6,7 +6,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { Prisma, SessionEvent } from "@prisma/client";
 import { InlineKeyboard } from "grammy";
 import { basename } from "node:path";
 import { PrismaService } from "../prisma/prisma.service";
@@ -18,10 +18,12 @@ import {
   requirePermissions,
 } from "./telegram-identity.service";
 import { Permissions as P } from "../authorization/permission.catalog";
+import { AuthenticatedUser } from "../auth/auth.types";
+import { escapeMarkdownV2, markdownV2Messages } from "./telegram-markdown";
+import { sessionWidgetHtml } from "./telegram-session-widget";
 import {
   fileReferences,
   record,
-  splitMessage,
   ToolState,
   toolSummary,
   trackTool,
@@ -57,14 +59,22 @@ export class TelegramSessionPresenter {
     else this.toolMessageId = sent.message_id;
   }
 
-  async assistant(text: string, keyboards: InlineKeyboard[] = []) {
+  async assistant(
+    text: string,
+    keyboards: InlineKeyboard[] = [],
+    replyTo?: number,
+  ) {
     await this.flushTools(true);
-    const chunks = splitMessage(text, 3900);
-    for (let i = 0; i < chunks.length; i++)
+    const chunks = markdownV2Messages(text);
+    for (const [index, chunk] of chunks.entries())
       await this.telegram.sendMessage(
         this.chatId,
-        `${this.label}\n${chunks[i]!}`,
-        i === chunks.length - 1 ? keyboards[0] : undefined,
+        `${this.label}\n${chunk.plain}`,
+        index === chunks.length - 1 ? keyboards[0] : undefined,
+        {
+          markdown: `*${escapeMarkdownV2(this.label)}*\n${chunk.markdown}`,
+          replyTo,
+        },
       );
     for (const keyboard of keyboards.slice(1))
       await this.telegram.sendMessage(
@@ -74,6 +84,10 @@ export class TelegramSessionPresenter {
       );
   }
 }
+
+type RelayBinding = Prisma.TelegramSessionGetPayload<{
+  include: { session: { include: { task: true } } };
+}>;
 
 @Injectable()
 export class TelegramSessionRelay implements OnModuleInit, OnModuleDestroy {
@@ -128,11 +142,7 @@ export class TelegramSessionRelay implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async deliver(
-    binding: Prisma.TelegramSessionGetPayload<{
-      include: { session: { include: { task: true } } };
-    }>,
-  ) {
+  private async deliver(binding: RelayBinding) {
     const actor = await this.identities.actor(binding.chatId);
     try {
       if (!actor || actor.id !== binding.userId)
@@ -152,13 +162,6 @@ export class TelegramSessionRelay implements OnModuleInit, OnModuleDestroy {
       });
       return;
     }
-    const presenter = new TelegramSessionPresenter(
-      this.telegram,
-      binding.chatId,
-      `Session ${binding.sessionId.slice(0, 8)}`,
-      binding.toolState as ToolState,
-      binding.toolMessageId,
-    );
     const events = await this.prisma.sessionEvent.findMany({
       where: {
         sessionId: binding.sessionId,
@@ -167,6 +170,47 @@ export class TelegramSessionRelay implements OnModuleInit, OnModuleDestroy {
       orderBy: { sequence: "asc" },
       take: 100,
     });
+    let tracker = binding.trackerMessageId;
+    const first = events[0];
+    const queued =
+      first?.type === "session.state" && !first.turnId ? events[1] : first;
+    // Existing relay history keeps its original delivery behavior. Adopt a
+    // tracker when this binding reaches a fresh turn's queued state.
+    if (
+      !tracker &&
+      this.telegram.widgetsEnabled &&
+      queued?.type === "session.state" &&
+      queued.turnId &&
+      record(queued.rawPayload).turnStatus === "QUEUED"
+    ) {
+      const sent = await this.telegram.sendWidget(
+        binding.chatId,
+        sessionWidgetHtml,
+        `Session #${binding.sessionId.slice(0, 8)} · Live tracker\nThe final result arrives separately in this chat. /status shows the saved state.`,
+        new InlineKeyboard()
+          .text("View session", `s:${binding.sessionId}`)
+          .text("Menu", "home"),
+        binding.sessionId,
+      );
+      if (sent) {
+        tracker = sent.message_id;
+        await this.prisma.telegramSession.update({
+          where: { sessionId: binding.sessionId },
+          data: { trackerMessageId: tracker },
+        });
+      }
+    }
+    if (tracker) {
+      await this.deliverTracked(binding, actor, events, tracker);
+      return;
+    }
+    const presenter = new TelegramSessionPresenter(
+      this.telegram,
+      binding.chatId,
+      `Session ${binding.sessionId.slice(0, 8)}`,
+      binding.toolState as ToolState,
+      binding.toolMessageId,
+    );
     let sequence = binding.lastSequence;
     let toolsChanged = false;
     const save = () =>
@@ -189,32 +233,12 @@ export class TelegramSessionRelay implements OnModuleInit, OnModuleDestroy {
           item.type === "agent_message" &&
           typeof item.text === "string"
         ) {
-          const keyboards: InlineKeyboard[] = [];
-          if (actor.permissions.includes(P.PROJECT_FILES_READ)) {
-            const references = fileReferences(item.text, binding.session.cwd);
-            let count = 0;
-            for (let i = 0; i < references.length; i++) {
-              const relative = references[i]!;
-              try {
-                await this.projects.downloadFile(
-                  actor,
-                  binding.projectId,
-                  relative,
-                );
-              } catch {
-                continue;
-              }
-              if (count % 20 === 0) keyboards.push(new InlineKeyboard());
-              keyboards
-                .at(-1)!
-                .text(
-                  `📎 ${basename(relative)}`.slice(0, 60),
-                  `f:${event.id}:${i}`,
-                )
-                .row();
-              count++;
-            }
-          }
+          const keyboards = await this.fileKeyboards(
+            actor,
+            binding,
+            event.id,
+            item.text,
+          );
           await presenter.assistant(item.text, keyboards);
           toolsChanged = false;
         } else if (
@@ -259,16 +283,127 @@ export class TelegramSessionRelay implements OnModuleInit, OnModuleDestroy {
           .row()
           .text("Menu", "home"),
       );
-      await this.prisma.telegramSession.updateMany({
-        where: {
-          sessionId: session.id,
-          session: {
-            status: { notIn: ["QUEUED", "RUNNING"] },
-            lastSequence: sequence,
-          },
-        },
-        data: { finished: true },
-      });
+      await this.finish(session.id, sequence);
     }
+  }
+
+  private async deliverTracked(
+    binding: RelayBinding,
+    actor: AuthenticatedUser,
+    events: SessionEvent[],
+    tracker: number,
+  ) {
+    let sequence = binding.lastSequence;
+    const save = () =>
+      this.prisma.telegramSession.update({
+        where: { sessionId: binding.sessionId },
+        data: { lastSequence: sequence },
+      });
+    for (const event of events) {
+      const state = record(event.rawPayload);
+      if (
+        event.type !== "session.state" ||
+        state.authoritative !== true ||
+        !event.turnId ||
+        !["COMPLETED", "FAILED", "INTERRUPTED"].includes(
+          String(state.turnStatus),
+        )
+      ) {
+        continue;
+      }
+      const label = `Session #${binding.sessionId.slice(0, 8)}`;
+      const answer =
+        state.turnStatus === "COMPLETED"
+          ? await this.prisma.sessionEvent.findFirst({
+              where: {
+                sessionId: binding.sessionId,
+                turnId: event.turnId,
+                sequence: { lt: event.sequence },
+                type: "item.completed",
+                rawPayload: { path: ["item", "type"], equals: "agent_message" },
+              },
+              orderBy: { sequence: "desc" },
+              select: { id: true, rawPayload: true },
+            })
+          : null;
+      const item = record(record(answer?.rawPayload).item);
+      if (answer && typeof item.text === "string" && item.text.trim()) {
+        const presenter = new TelegramSessionPresenter(
+          this.telegram,
+          binding.chatId,
+          `Answer · #${binding.sessionId.slice(0, 8)}`,
+        );
+        await presenter.assistant(
+          item.text,
+          await this.fileKeyboards(actor, binding, answer.id, item.text),
+          tracker,
+        );
+      } else {
+        const result =
+          state.turnStatus === "COMPLETED"
+            ? "Completed without a text answer."
+            : state.stopConfirmation === "STOP_UNCONFIRMED"
+              ? "Runner exit is unconfirmed. Follow-ups are blocked."
+              : state.turnStatus === "INTERRUPTED"
+                ? "The turn was interrupted."
+                : "The turn failed.";
+        await this.telegram.sendMessage(
+          binding.chatId,
+          `${label}\n${result}`,
+          undefined,
+          {
+            markdown: `*${escapeMarkdownV2(label)}*\n${escapeMarkdownV2(result)}`,
+            replyTo: tracker,
+          },
+        );
+      }
+      sequence = event.sequence;
+      await save();
+    }
+    const last = events.at(-1)?.sequence ?? sequence;
+    if (last > sequence) {
+      sequence = last;
+      await save();
+    }
+    await this.finish(binding.sessionId, sequence);
+  }
+
+  private async finish(sessionId: string, sequence: number) {
+    await this.prisma.telegramSession.updateMany({
+      where: {
+        sessionId,
+        session: {
+          status: { notIn: ["QUEUED", "RUNNING"] },
+          lastSequence: sequence,
+        },
+      },
+      data: { finished: true },
+    });
+  }
+
+  private async fileKeyboards(
+    actor: AuthenticatedUser,
+    binding: RelayBinding,
+    eventId: string,
+    text: string,
+  ) {
+    const keyboards: InlineKeyboard[] = [];
+    if (!actor.permissions.includes(P.PROJECT_FILES_READ)) return keyboards;
+    const references = fileReferences(text, binding.session.cwd);
+    let count = 0;
+    for (const [index, relative] of references.entries()) {
+      try {
+        await this.projects.downloadFile(actor, binding.projectId, relative);
+      } catch {
+        continue;
+      }
+      if (count % 20 === 0) keyboards.push(new InlineKeyboard());
+      keyboards
+        .at(-1)!
+        .text(`📎 ${basename(relative)}`.slice(0, 60), `f:${eventId}:${index}`)
+        .row();
+      count++;
+    }
+    return keyboards;
   }
 }

@@ -33,6 +33,8 @@ import { ModelCatalogService } from "./model-catalog.service";
 import { personalSessionSelection } from "./personal-model-preferences.service";
 import { KeyedCreateSessionDto } from "./session-creation.dto";
 import {
+  archiveEventResponse,
+  archiveMetadataEventResponse,
   archiveRunnerEvent,
   archiveHash,
   historyJson,
@@ -45,7 +47,6 @@ import {
 import * as path from "node:path";
 import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
 import { readDependency } from "../prisma/read-dependency";
-import { archiveEventResponse } from "./session-history";
 import { sessionDetailPage } from "./session-detail";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { SessionListQueryDto } from "./session-list.dto";
@@ -1502,7 +1503,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     event: RunnerEvent,
   ) {
     const projected = safeRunnerEvent(event);
-    await this.prisma.$transaction(async (tx) => {
+    const committed = await this.prisma.$transaction(async (tx) => {
       // Admission/interruption take workspace and task before session. Runner
       // writes must share that order rather than hold session ahead of them.
       await this.lockRun(tx, sessionId);
@@ -1568,6 +1569,13 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
           },
         });
       }
+      return recorded;
+    });
+    // Wake local subscribers only after commit. Other workers recover through polling.
+    this.liveEvents.publish(sessionId, {
+      id: committed.sequence,
+      type: committed.type,
+      data: null,
     });
   }
 
@@ -1658,7 +1666,9 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
               });
             return {
               session: sessionResponse(session),
-              events: events.map(eventResponse),
+              events: events.map(
+                includeArchive ? archiveMetadataEventResponse : eventResponse,
+              ),
               after,
               nextCursor,
               highWaterSequence,
@@ -1878,7 +1888,15 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
       let stopped = false;
       let cursor = after;
       let timer: NodeJS.Timeout | undefined;
+      let polling = false;
+      let pendingWake = false;
       const poll = async () => {
+        if (stopped) return;
+        if (polling) {
+          pendingWake = true;
+          return;
+        }
+        polling = true;
         try {
           if (Date.now() >= expiresAt) {
             subscriber.complete();
@@ -1900,7 +1918,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
               () => {
                 void poll();
               },
-              batch.hasMore ? 0 : 500,
+              batch.hasMore || pendingWake ? 0 : 500,
             );
         } catch (error) {
           if (!stopped)
@@ -1911,12 +1929,20 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
                     "Session event delivery unavailable; reconcile persisted history",
                   ),
             );
+        } finally {
+          polling = false;
+          pendingWake = false;
         }
       };
+      const wake = this.liveEvents.stream(sessionId).subscribe(() => {
+        if (timer) clearTimeout(timer);
+        void poll();
+      });
       void poll();
       return () => {
         stopped = true;
         if (timer) clearTimeout(timer);
+        wake.unsubscribe();
       };
     });
   }

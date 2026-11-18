@@ -1,5 +1,5 @@
 import {
-  safeRunnerEvent,
+  metadataRunnerEvent as safeRunnerEvent,
   eventResponse,
   record,
 } from "../src/sessions/safe-session-event";

@@ -67,6 +67,7 @@ describe("Telegram session rendering", () => {
       42n,
       "Task\nDone",
       undefined,
+      { markdown: "*Task*\nDone", replyTo: undefined },
     );
   });
 

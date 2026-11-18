@@ -370,8 +370,10 @@ task execution.
 
 Deploy the `20260927000000_telegram_sessions` migration with
 `pnpm prisma:deploy`, regenerate Prisma, build, and restart the service. Register
-the existing webhook with both `message` and `callback_query` in
-`allowed_updates`, and the configured webhook secret. Keep one application
+the existing webhook with `message`, `callback_query` and `widget_query` in
+`allowed_updates`, and the configured webhook secret. Apply the
+`20261118000000_telegram_session_tracker` migration before starting the new
+build. Keep one application
 instance for the process-local runner and Telegram worker. Do not start a
 second worker against the same database while the first is running.
 
@@ -382,6 +384,14 @@ are not replayed during normal polling. Delivery is at least once: a crash after
 Telegram accepts a message but before its cursor is saved can repeat that
 message. Ambiguous command failures are not automatically retried; check
 `/status` or `/sessions` before submitting another task.
+
+In current Telegram clients, the bot posts a live tracker when a turn is
+queued. `/sessions` opens recent sessions and `/status` opens the selected
+session. The bot posts a completed turn's MarkdownV2 answer separately as a
+reply to the tracker. It uses the last completed assistant message for that
+turn. Widgets refresh while visible and show activity categories without tool
+inputs or outputs. Set `TELEGRAM_WIDGETS_ENABLED=true` after registering
+`widget_query` to enable widgets. The default uses text navigation.
 
 The shared API/bot catalog follows **our custom Codex fork**, including OpenAI,
 Anthropic, Google DeepMind, Amazon Bedrock and Amazon Bedrock Runtime. The

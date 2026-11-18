@@ -63,18 +63,23 @@ export class ArticleCanonicalService {
     });
     if (documents.length !== forest.readingOrder.length)
       throw resolutionUnavailable();
+    const titles = [];
     for (const d of documents) {
       if (!d.head || d.head.documentId !== d.id) throw resolutionUnavailable();
-      await validatePublishedVersion(tx, d.head, projectId);
+      const comparison = await validatePublishedVersion(tx, d.head, projectId);
+      titles.push({ id: d.id, title: comparison.after.article!.title });
     }
-    return { revision: space?.revision ?? 0, forest, documents };
+    return { revision: space?.revision ?? 0, forest, documents, titles };
   }
   tree(actor: AuthenticatedUser, projectId: string) {
     return readDependency("readPublishedArticleTree", () =>
       this.prisma.$transaction(async (tx) => {
         await this.scope(tx, actor, projectId);
-        const { revision, forest } = await this.publishedTree(tx, projectId);
-        return { revision, forest };
+        const { revision, forest, titles } = await this.publishedTree(
+          tx,
+          projectId,
+        );
+        return { revision, forest, documents: titles };
       }),
     );
   }

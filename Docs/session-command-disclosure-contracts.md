@@ -1,5 +1,71 @@
 # Provisional command disclosure — 17 October 2026
 
+## Current contract — 16 November 2026
+
+The user's 16 November request supersedes the strict metadata-only policy below
+for already authorized execution-session readers. Commands and their output,
+MCP arguments/results/progress, file read specifications, per-file diffs and
+image read previews are now requested product behavior. This does not broaden
+manager/workspace/permission grants or expose hidden reasoning.
+
+New public tool snapshots use `projectionVersion: 4` and `data.toolDetails`:
+
+| Field                             | Meaning                                                                    |
+| --------------------------------- | -------------------------------------------------------------------------- |
+| `version`, `policy`, `updateMode` | `1`, `AUTHORIZED_SESSION_DETAIL_V1`, `SNAPSHOT`                            |
+| `label`, `cwd`                    | Command/tool/path and working directory, when reported                     |
+| `input`                           | Command plus parsed read/search actions, MCP arguments, or image path      |
+| `output`, `error`, `progress`     | Reported output/result/error and latest MCP progress                       |
+| `exitCode`                        | Signed terminal item code when reported; never run success                 |
+| `changes`                         | Bounded `{ path, kind, diff }` records                                     |
+| `images`                          | Up to four inline raster `{ src, label }` previews; no remote loads or SVG |
+| `truncated`, `previewUnavailable` | Explicit display-limit and preview failures                                |
+| `runCompletion`                   | `USE_SERVER_STATE`                                                         |
+
+Text fields are capped at 65,536 UTF-16 units with a shared 131,072-unit
+projection budget, structural depth/collection bounds and best-effort configured
+secret/credential redaction. Images are limited to 512 KiB of encoded content
+each. Local image reads are captured as bounded WebP thumbnails only after the
+resolved path passes the existing workspace root policy. Preview generation has
+file size and pixel limits. Missing output remains distinct from a reported empty
+string. Limits are not a guarantee of exhaustive secret detection.
+
+REST and SSE share the projection. Public readback can recover known tool fields
+from verified, policy-v1 retained archives (hash, source, matching event type,
+bounded envelope); it never returns the archive object or rewrites old rows.
+Unretained or unverifiable historical detail remains unavailable. Legacy v1/v3
+metadata continues to be read conservatively when no valid archive exists.
+No database schema migration or archive backfill is required.
+The separate `/sessions/:id/archive` export keeps its strict metadata policy
+for tool archives.
+
+Set `PROBOXAI_RUNNER_TRANSPORT=app-server` to use `proboxai app-server` over
+stdio JSON-RPC.
+It initializes, starts/resumes the configured thread with its saved provider,
+model, cwd and sandbox, then starts one turn with its saved reasoning effort.
+Command and assistant deltas become ordered replacement snapshots; lifecycle,
+MCP progress/results, file changes including diffs, and image-view events are
+normalized at the runner boundary. Hidden reasoning and other threads are
+excluded. Managed runs do not grant interactive approval/elicitation requests.
+Unexpected EOF or startup errors are failures, not completion. There is no
+automatic fallback that could accidentally execute a turn twice.
+
+`PROBOXAI_RUNNER_TRANSPORT=exec` is the default JSONL transport for
+compatibility; it cannot supply events the provider's exec adapter omits. The
+app-server protocol was checked against the local Codex source and transcript
+tests; compatibility with the actual deployed binary and a live provider turn
+still require deployment acceptance.
+
+Committed runner events wake local SSE readers immediately, with the existing
+authorized history replay and cross-worker 500 ms polling fallback. The browser
+reconnects from its last sequence and replaces snapshots on the same action row.
+An open action reveals input/output, errors, changes and image previews. Saved
+session settings are displayed from the server; the current model catalog cannot
+substitute another provider/model or change the recorded effort.
+
+The remainder of this document preserves the historical v3 decision and its
+original verification evidence. Its metadata-only statements do not describe v4.
+
 The user provisionally approved strict safe-only disclosure to already authorized
 execution managers. This policy is revisitable. It is not approval for arbitrary
 terminal content, redaction-and-show, wider access or new archive retention.

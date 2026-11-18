@@ -1,4 +1,6 @@
 import { Prisma, SessionEvent } from "@prisma/client";
+import { toolDisclosure } from "./tool-disclosure";
+import { archiveHash } from "./session-history";
 export const publicSessionEventSelect = {
   projectionVersion: true,
   id: true,
@@ -11,6 +13,9 @@ export const publicSessionEventSelect = {
   payloadHash: true,
   previousHash: true,
   createdAt: true,
+  archivePayload: true,
+  archiveHash: true,
+  archivePolicyVersion: true,
 } satisfies Prisma.SessionEventSelect;
 import { RunnerEvent } from "./proboxai-runner.service";
 import { commandDisclosure } from "./command-disclosure";
@@ -40,7 +45,7 @@ function boundedText(value: string) {
   return { text: redacted.slice(0, 16384), truncated: redacted.length > 16384 };
 }
 /** Content projection, not an exhaustive secret detector. Raw tool details and reasoning are excluded. */
-export function safeRunnerEvent(event: RunnerEvent) {
+export function metadataRunnerEvent(event: RunnerEvent) {
   const item = record(event.payload.item);
   if (["item.started", "item.updated", "item.completed"].includes(event.type)) {
     const candidate =
@@ -116,13 +121,95 @@ export function safeRunnerEvent(event: RunnerEvent) {
     },
   };
 }
+/** Current user-authorized disclosure. Legacy metadata is still read under its original schema. */
+export function safeRunnerEvent(event: RunnerEvent) {
+  const item = record(event.payload.item);
+  const base = metadataRunnerEvent(event);
+  if (
+    ["item.started", "item.updated", "item.completed"].includes(event.type) &&
+    (toolTypes.has(String(item.type)) || item.type === "image_view")
+  ) {
+    return {
+      type: event.type,
+      payload: {
+        projectionVersion: 4,
+        item: {
+          id:
+            typeof item.id === "string" &&
+            /^[a-zA-Z0-9_-]{1,128}$/.test(item.id) &&
+            boundedText(item.id).text === item.id
+              ? item.id
+              : null,
+          type: String(item.type),
+          status: statuses.has(String(item.status))
+            ? String(item.status)
+            : event.type === "item.completed"
+              ? "completed"
+              : "in_progress",
+        },
+        toolDetails: toolDisclosure(item),
+      },
+    };
+  }
+  if (
+    item.type === "agent_message" &&
+    typeof item.text === "string" &&
+    event.payload.snapshot === true &&
+    ["item.started", "item.updated", "item.completed"].includes(event.type)
+  ) {
+    const projected = boundedText(item.text);
+    const completed = metadataRunnerEvent({ ...event, type: "item.completed" });
+    return {
+      type: event.type,
+      payload: {
+        ...record(completed.payload),
+        projectionVersion: 4,
+        snapshot: true,
+        truncated: projected.truncated,
+      },
+    };
+  }
+  return base;
+}
 export function eventResponse(
   e: Omit<
     SessionEvent,
     "archivePayload" | "archiveHash" | "archivePolicyVersion"
-  >,
+  > &
+    Partial<
+      Pick<
+        SessionEvent,
+        "archivePayload" | "archiveHash" | "archivePolicyVersion"
+      >
+    >,
 ) {
-  const legacy = ![1, 2, 3].includes(e.projectionVersion);
+  const stored = record(e.archivePayload),
+    archivedItem = record(record(stored.data).item);
+  // Old public rows omitted details, but verified retained archives can now supply
+  // the same bounded projection. Never return or rewrite the archive itself.
+  if (
+    e.projectionVersion !== 4 &&
+    e.archivePolicyVersion === 1 &&
+    stored.policyVersion === 1 &&
+    stored.source === "RUNNER_REPORTED" &&
+    stored.type === e.type &&
+    toolTypes.has(String(archivedItem.type)) &&
+    JSON.stringify(stored).length <= 4 * 1024 * 1024 &&
+    e.archiveHash === archiveHash(stored)
+  ) {
+    const current = safeRunnerEvent({
+      type: e.type,
+      payload: record(stored.data),
+      rawLine: "",
+    });
+    return eventResponse({
+      ...e,
+      projectionVersion: 4,
+      rawPayload: current.payload as Prisma.JsonObject,
+      archivePayload: undefined,
+    });
+  }
+  const legacy = ![1, 2, 3, 4].includes(e.projectionVersion);
   // Historical partial text has no verified update semantics. Preserve its
   // bounded display frame without upgrading it to a completed snapshot.
   const historicalItem = record(record(e.rawPayload).item);
@@ -135,7 +222,7 @@ export function eventResponse(
     legacy ||
     e.projectionVersion === 3 ||
     toolTypes.has(String(historicalItem.type))
-      ? safeRunnerEvent({
+      ? metadataRunnerEvent({
           type: e.type,
           payload: record(e.rawPayload),
           rawLine: "",
@@ -143,13 +230,48 @@ export function eventResponse(
       : { type: e.type, payload: e.rawPayload };
   const item = record(record(projected.payload).item);
   let data = record(projected.payload);
-  if (
+  if (e.projectionVersion === 4 && record(e.rawPayload).toolDetails) {
+    const d = record(record(e.rawPayload).toolDetails);
+    const previews = Array.isArray(d.images)
+      ? d.images.map((v) => {
+          const p = record(v),
+            match =
+              typeof p.src === "string"
+                ? /^data:(image\/(?:png|jpeg|webp|gif));base64,(.*)$/.exec(
+                    p.src,
+                  )
+                : null;
+          return { mimeType: match?.[1], data: match?.[2], label: p.label };
+        })
+      : [];
+    const safe = safeRunnerEvent({
+      type: e.type,
+      rawLine: "",
+      payload: {
+        item: {
+          ...historicalItem,
+          command: d.label,
+          cwd: d.cwd,
+          arguments: d.input,
+          output: d.output,
+          error: d.error,
+          progress: d.progress,
+          exit_code: d.exitCode,
+          changes: d.changes,
+          previews,
+          previewUnavailable: d.previewUnavailable,
+        },
+      },
+    });
+    data = record(safe.payload);
+    if (d.truncated === true) record(data.toolDetails).truncated = true;
+  } else if (
     historicalItem.type === "command_execution" &&
     ["item.started", "item.updated", "item.completed"].includes(e.type)
   ) {
     // Rebuild the public envelope on every read. Historical raw commands never
     // acquire new disclosure rights; v3 can only retain its stored safe subset.
-    const safe = safeRunnerEvent({
+    const safe = metadataRunnerEvent({
       type: e.type,
       payload: {
         item: {
@@ -177,7 +299,7 @@ export function eventResponse(
     }
   }
   if (historicalText || item.type === "agent_message") {
-    const safe = safeRunnerEvent({
+    const safe = metadataRunnerEvent({
       type: "item.completed",
       payload: { item: historicalText ? historicalItem : item },
       rawLine: "",
@@ -186,7 +308,10 @@ export function eventResponse(
     const truncated =
       record(safe).truncated === true ||
       record(e.rawPayload).truncated === true;
-    const verified = e.projectionVersion === 2 && e.type === "item.completed";
+    const streaming =
+      e.projectionVersion === 4 && record(e.rawPayload).snapshot === true;
+    const verified =
+      (e.projectionVersion === 2 && e.type === "item.completed") || streaming;
     data = {
       ...record(safe),
       truncated,
@@ -202,12 +327,19 @@ export function eventResponse(
           eventId: safeItem.id && e.turnId ? null : e.id,
         },
         revision: e.sequence,
-        phase: verified ? "ITEM_COMPLETED" : "PROVISIONAL",
+        phase:
+          streaming && e.type !== "item.completed"
+            ? "IN_PROGRESS"
+            : verified
+              ? "ITEM_COMPLETED"
+              : "PROVISIONAL",
         continuation: truncated
           ? "TRUNCATED"
-          : verified
-            ? "ITEM_COMPLETE"
-            : "UNKNOWN",
+          : streaming && e.type !== "item.completed"
+            ? "IN_PROGRESS"
+            : verified
+              ? "ITEM_COMPLETE"
+              : "UNKNOWN",
         runCompletion: "USE_SERVER_STATE",
       },
     };

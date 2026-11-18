@@ -11,6 +11,7 @@ function setup() {
     lastSequence: 0,
     toolState: {},
     toolMessageId: null,
+    trackerMessageId: null as number | null,
     finished: false,
     session: { cwd: "/opt/apps/project", task: { title: "Fix" } },
   };
@@ -20,6 +21,7 @@ function setup() {
     id: `event-${sequence}`,
     sequence,
     type,
+    turnId: "turn-1",
     rawPayload: { item },
   });
   const rows = [
@@ -58,13 +60,29 @@ function setup() {
       findMany: jest.fn(async ({ where }) =>
         rows.filter((row) => row.sequence > where.sequence.gt),
       ),
+      findFirst: jest.fn().mockResolvedValue({
+        id: "event-4",
+        rawPayload: {
+          item: {
+            type: "agent_message",
+            text: "**Done**: [report](report.txt)",
+          },
+        },
+      }),
     },
     proboxAiSession: { findUniqueOrThrow: jest.fn(async () => final) },
   };
   let id = 0;
   const telegram = {
+    widgetsEnabled: false,
+    sendWidget: jest.fn().mockResolvedValue({ message_id: 78 }),
     sendMessage: jest.fn(
-      async (_chat: bigint, _text: string, _keyboard?: unknown) => ({
+      async (
+        _chat: bigint,
+        _text: string,
+        _keyboard?: unknown,
+        _format?: unknown,
+      ) => ({
         message_id: ++id,
       }),
     ),
@@ -96,6 +114,85 @@ function setup() {
 }
 
 describe("Telegram persisted session relay", () => {
+  it("tracks the accepted turn inline and sends only its separate final answer", async () => {
+    const h = setup();
+    h.telegram.widgetsEnabled = true;
+    h.rows.unshift({
+      id: "queued",
+      sequence: 1,
+      turnId: "turn-1",
+      type: "session.state",
+      rawPayload: { item: undefined },
+    });
+    Object.assign(h.rows[0]!.rawPayload, {
+      authoritative: true,
+      turnStatus: "QUEUED",
+    });
+    h.rows.forEach((row, index) => (row.sequence = index + 1));
+    h.rows.push({
+      id: "terminal",
+      sequence: 7,
+      turnId: "turn-1",
+      type: "session.state",
+      rawPayload: { item: undefined },
+    });
+    Object.assign(h.rows.at(-1)!.rawPayload, {
+      authoritative: true,
+      turnStatus: "COMPLETED",
+    });
+    h.final.lastSequence = 7;
+    await h.createRelay().tick();
+    expect(h.telegram.sendWidget).toHaveBeenCalledTimes(1);
+    expect(h.telegram.sendMessage).toHaveBeenCalledTimes(1);
+    expect(h.telegram.sendMessage).toHaveBeenCalledWith(
+      42n,
+      "Answer · #session-\n**Done**: [report](report.txt)",
+      expect.anything(),
+      {
+        markdown:
+          "*Answer · \\#session\\-*\n*Done*: \\[report\\]\\(report\\.txt\\)",
+        replyTo: 78,
+      },
+    );
+    expect(h.binding.lastSequence).toBe(7);
+    expect(h.binding.finished).toBe(true);
+    await h.createRelay().tick();
+    expect(h.telegram.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a tracked answer pending when sending fails after earlier events were drained", async () => {
+    const h = setup();
+    h.binding.trackerMessageId = 78;
+    h.binding.lastSequence = 5;
+    h.rows.push({
+      id: "terminal",
+      sequence: 6,
+      turnId: "turn-1",
+      type: "session.state",
+      rawPayload: { item: undefined },
+    });
+    Object.assign(h.rows.at(-1)!.rawPayload, {
+      authoritative: true,
+      turnStatus: "COMPLETED",
+    });
+    h.final.lastSequence = 6;
+    h.telegram.sendMessage.mockRejectedValueOnce(new Error("offline"));
+    await h.createRelay().tick();
+    expect(h.binding.lastSequence).toBe(5);
+    expect(h.binding.finished).toBe(false);
+    await h.createRelay().tick();
+    expect(h.binding.lastSequence).toBe(6);
+    expect(h.binding.finished).toBe(true);
+    expect(h.prisma.sessionEvent.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          turnId: "turn-1",
+          sequence: { lt: 6 },
+        }),
+      }),
+    );
+  });
+
   it("coalesces tool events, sends the final with file buttons, and does not replay delivered events", async () => {
     const h = setup();
     await h.createRelay().tick();

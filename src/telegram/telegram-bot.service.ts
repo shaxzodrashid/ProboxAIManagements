@@ -25,6 +25,8 @@ import { Permissions as P } from "../authorization/permission.catalog";
 import { fileReferences, record } from "./telegram-rendering";
 import { TelegramModelPanel } from "./telegram-model-panel";
 import { lockWorkspace } from "../prisma/workspace-lock";
+import { sessionWidgetHtml } from "./telegram-session-widget";
+import { TelegramWidgetQueries } from "./telegram-widget-queries";
 
 @Injectable()
 export class TelegramBotService {
@@ -32,6 +34,7 @@ export class TelegramBotService {
   // Serialize one user's commands, but never hold the webhook open for a Codex turn.
   private readonly queues = new Map<string, Promise<void>>();
   private readonly modelPanels: TelegramModelPanel;
+  private readonly widgetQueries: TelegramWidgetQueries;
   constructor(
     private readonly prisma: PrismaService,
     private readonly projects: ProjectsService,
@@ -40,6 +43,13 @@ export class TelegramBotService {
     private readonly telegram: TelegramService,
     private readonly identities: TelegramIdentityService,
   ) {
+    this.widgetQueries = new TelegramWidgetQueries(
+      prisma,
+      identities,
+      sessions,
+      projects,
+      telegram,
+    );
     this.modelPanels = new TelegramModelPanel(
       catalog,
       telegram,
@@ -73,6 +83,14 @@ export class TelegramBotService {
   }
 
   async handle(update: Update): Promise<boolean> {
+    if ("widget_query" in update) {
+      try {
+        await this.widgetQueries.handle(update.widget_query);
+      } catch {
+        this.logger.warn("Telegram widget query could not be answered");
+      }
+      return true;
+    }
     const callback =
       "callback_query" in update ? update.callback_query : undefined;
     const message = "message" in update ? update.message : callback?.message;
@@ -279,8 +297,26 @@ export class TelegramBotService {
       );
       return;
     }
-    if (command === "/sessions" || action === "sessions") {
+    if (
+      command === "/sessions" ||
+      action === "sessions" ||
+      action === "session-list"
+    ) {
       requirePermissions(actor, P.SESSIONS_READ);
+      if (
+        action !== "session-list" &&
+        actor.permissions.includes(P.PROJECTS_READ) &&
+        this.telegram.widgetsEnabled &&
+        (await this.telegram.sendWidget(
+          chatId,
+          sessionWidgetHtml,
+          "Recent ProboxAI sessions",
+          new InlineKeyboard()
+            .text("Choose session", "session-list")
+            .text("Menu", "home"),
+        ))
+      )
+        return;
       const bindings = await this.prisma.telegramSession.findMany({
         where: { userId: actor.id, chatId },
         include: { session: { include: { task: true } } },
@@ -357,6 +393,20 @@ export class TelegramBotService {
       }
       await this.binding(actor.id, chatId, state.sessionId);
       const session = await this.sessions.get(actor.id, state.sessionId);
+      const status = `Session: ${session.id}\nState: ${session.status}\n${session.providerId} · ${session.model} · ${session.effectiveReasoningEffort}\n${this.stopEvidence(session.stopConfirmation, session.recoveryReason)}`;
+      if (
+        command !== "/stop" &&
+        actor.permissions.includes(P.PROJECTS_READ) &&
+        this.telegram.widgetsEnabled &&
+        (await this.telegram.sendWidget(
+          chatId,
+          sessionWidgetHtml,
+          status,
+          this.recoveryKeyboard(),
+          session.id,
+        ))
+      )
+        return;
       if (command === "/stop")
         await this.sessions.interrupt(
           actor.id,
@@ -367,7 +417,7 @@ export class TelegramBotService {
         chatId,
         command === "/stop"
           ? "Interruption requested. This does not confirm the process has stopped. Check Status for the latest saved state."
-          : `Session: ${session.id}\nState: ${session.status}\n${session.providerId} · ${session.model} · ${session.effectiveReasoningEffort}\n${this.stopEvidence(session.stopConfirmation, session.recoveryReason)}`,
+          : status,
         this.recoveryKeyboard(),
       );
       return;

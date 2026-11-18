@@ -446,16 +446,17 @@ model TelegramUpdate {
 }
 
 model TelegramSession {
-  sessionId     String          @id
-  session       ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  userId        String
-  chatId        BigInt
-  projectId     String
-  lastSequence  Int             @default(0)
-  toolMessageId Int?
-  toolState     Json            @default("{}")
-  finished      Boolean         @default(false)
-  createdAt     DateTime        @default(now())
+  sessionId        String          @id
+  session          ProboxAiSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId           String
+  chatId           BigInt
+  projectId        String
+  lastSequence     Int             @default(0)
+  toolMessageId    Int?
+  trackerMessageId Int?
+  toolState        Json            @default("{}")
+  finished         Boolean         @default(false)
+  createdAt        DateTime        @default(now())
 
   @@index([finished, createdAt])
   @@index([userId, projectId])

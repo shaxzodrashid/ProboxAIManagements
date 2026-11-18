@@ -93,6 +93,8 @@ function setup() {
     interrupt: jest.fn(),
   };
   const telegram = {
+    widgetsEnabled: false,
+    sendWidget: jest.fn().mockResolvedValue({ message_id: 100 }),
     sendMessage: jest.fn().mockResolvedValue({ message_id: 1 }),
     editMessage: jest.fn().mockResolvedValue(true),
     answerCallback: jest.fn(),
@@ -349,6 +351,29 @@ describe("Telegram navigation and truthful action states", () => {
       "home",
     ]);
     expect(h.prisma.telegramConversation.update).not.toHaveBeenCalled();
+  });
+  it("opens recent sessions as a widget and keeps text navigation available", async () => {
+    const h = setup();
+    h.telegram.widgetsEnabled = true;
+    await h.bot.handle(h.message("/sessions"));
+    expect(h.telegram.sendWidget).toHaveBeenCalledWith(
+      42n,
+      expect.stringContaining("Recent sessions"),
+      "Recent ProboxAI sessions",
+      expect.objectContaining({
+        inline_keyboard: [
+          [
+            { text: "Choose session", callback_data: "session-list" },
+            { text: "Menu", callback_data: "home" },
+          ],
+        ],
+      }),
+    );
+    expect(h.telegram.sendMessage).not.toHaveBeenCalled();
+    await h.bot.handle(h.callback("session-list"));
+    h.telegram.sendWidget.mockResolvedValueOnce(null);
+    await h.bot.handle(h.message("/sessions", 3));
+    expect(h.telegram.sendMessage).toHaveBeenCalledTimes(2);
   });
   it("keeps permission checks on the new read-navigation callbacks", async () => {
     const h = setup();

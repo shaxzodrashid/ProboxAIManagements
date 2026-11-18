@@ -5,12 +5,14 @@ import {
   spawn,
 } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, appendFile } from "node:fs/promises";
+import { mkdir, appendFile, realpath, open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { StringDecoder } from "node:string_decoder";
 import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
 import { archiveRunnerEvent, historyText } from "./session-history";
+import { runAppServerSession } from "./app-server-session";
+import sharp from "sharp";
 
 const execFileAsync = promisify(execFile);
 
@@ -86,6 +88,14 @@ export class ProboxAiRunner {
       );
     if (options.threadId) args.push("resume", options.threadId);
     args.push("--", options.prompt);
+    const live = process.env.PROBOXAI_RUNNER_TRANSPORT === "app-server";
+    const runnerArgs = live
+      ? [
+          "app-server",
+          "-c",
+          `model_provider=${JSON.stringify(options.providerId)}`,
+        ]
+      : args;
     const archivePath = options.archiveToDatabase
       ? undefined
       : await this.archivePath(options.sessionId);
@@ -98,14 +108,14 @@ export class ProboxAiRunner {
       throw new Error("Runner working directory is unavailable");
     if (this.processes.has(options.sessionId))
       throw new Error("Session runner is already tracked");
-    const child = spawn(bin, args, {
+    const child = spawn(bin, runnerArgs, {
       stdio: "pipe",
       shell: false,
       env: this.safeEnvironment(),
       windowsHide: true,
       cwd: options.cwd,
     });
-    child.stdin.end();
+    if (!live) child.stdin.end();
     this.processes.set(options.sessionId, child);
     this.generations.set(options.sessionId, options.turnId);
     if (child.pid)
@@ -121,16 +131,35 @@ export class ProboxAiRunner {
       if (this.processes.get(options.sessionId) === child)
         this.processes.delete(options.sessionId);
     });
-    const consume = this.consumeJsonLines(child, archivePath, onEvent);
+    const consume = live
+      ? runAppServerSession(
+          child,
+          options,
+          async (event) => {
+            if (archivePath)
+              await appendFile(
+                archivePath,
+                JSON.stringify(archiveRunnerEvent(event)) + "\n",
+                "utf8",
+              );
+            await onEvent(event);
+          },
+          (item) => this.prepareItem(item, options.cwd),
+        )
+      : this.consumeJsonLines(child, archivePath, onEvent);
     const stderr = this.consumeStderr(child, archivePath, onEvent);
     const exit = new Promise<number>((resolveExit, reject) => {
       child.once("error", reject);
       child.once("close", (code) => resolveExit(code ?? -1));
     });
     try {
-      const [exitCode] = await Promise.all([exit, consume, stderr]);
+      const [processCode, turnCode] = await Promise.all([
+        exit,
+        consume,
+        stderr,
+      ]);
       await this.captureFinalDiff(options, archivePath, onEvent);
-      return exitCode;
+      return live && typeof turnCode === "number" ? turnCode : processCode;
     } catch (error) {
       child.kill();
       throw error;
@@ -148,6 +177,52 @@ export class ProboxAiRunner {
           "NOT_STARTED",
         );
       }
+    }
+  }
+
+  private async prepareItem(item: Record<string, unknown>, cwd: string) {
+    if (item.type !== "image_view" || typeof item.path !== "string")
+      return item;
+    try {
+      const path = await realpath(resolve(cwd, item.path));
+      this.paths.assertAllowedPath(path);
+      const file = await open(path, "r");
+      let bytes: Buffer;
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile() || stat.size > 16 * 1024 * 1024)
+          throw new Error("Image exceeds preview limit");
+        bytes = await file.readFile();
+      } finally {
+        await file.close();
+      }
+      const preview = await sharp(bytes, {
+        limitInputPixels: 40_000_000,
+        animated: false,
+      })
+        .rotate()
+        .resize({
+          width: 960,
+          height: 640,
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+        .webp({ quality: 75 })
+        .toBuffer();
+      if (preview.length > 350 * 1024)
+        throw new Error("Preview exceeds delivery limit");
+      return {
+        ...item,
+        previews: [
+          {
+            data: preview.toString("base64"),
+            mimeType: "image/webp",
+            label: item.path,
+          },
+        ],
+      };
+    } catch {
+      return { ...item, previewUnavailable: true };
     }
   }
 

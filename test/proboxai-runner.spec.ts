@@ -70,6 +70,7 @@ describe("ProboxAiRunner managed-session environment", () => {
 });
 
 describe("ProboxAiRunner start", () => {
+  const previousTransport = process.env.PROBOXAI_RUNNER_TRANSPORT;
   const archiveDirectories: string[] = [];
   const previousArchiveDirectory = process.env.PROBOXAI_ARCHIVE_DIR;
   it("refuses invalid directory at the final spawn boundary without starting a child", async () => {
@@ -106,6 +107,7 @@ describe("ProboxAiRunner start", () => {
   });
 
   beforeEach(async () => {
+    process.env.PROBOXAI_RUNNER_TRANSPORT = "exec";
     jest.clearAllMocks();
     const archiveDirectory = await mkdtemp(join(tmpdir(), "proboxai-runner-"));
     archiveDirectories.push(archiveDirectory);
@@ -122,6 +124,9 @@ describe("ProboxAiRunner start", () => {
   });
 
   afterAll(async () => {
+    if (previousTransport === undefined)
+      delete process.env.PROBOXAI_RUNNER_TRANSPORT;
+    else process.env.PROBOXAI_RUNNER_TRANSPORT = previousTransport;
     if (previousArchiveDirectory === undefined)
       delete process.env.PROBOXAI_ARCHIVE_DIR;
     else process.env.PROBOXAI_ARCHIVE_DIR = previousArchiveDirectory;

@@ -121,7 +121,9 @@ export function browserProxyAllowed(method: string, path: string) {
     return true;
   if (
     method === "GET" &&
-    new RegExp(`^profiles/${id}/avatar/${id}$`).test(path)
+    new RegExp(
+      `^(?:profiles/${id}/avatar/${id}|users/me/avatar-uploads/${id}/content)$`,
+    ).test(path)
   )
     return true;
   if (
@@ -140,6 +142,14 @@ export function browserProxyAllowed(method: string, path: string) {
     return true;
   if (path === "users/me/model-preferences")
     return method === "GET" || method === "PUT";
+  if (path === "users/me/profile/changes") return method === "PUT";
+  if (
+    method === "GET" &&
+    new RegExp(
+      `^(?:users/me/profile/(?:edit|operations/${id})|projects/${id}/(?:files|article-tree|article-documents/${id}/publication))$`,
+    ).test(path)
+  )
+    return true;
   if (
     method === "GET" &&
     new RegExp(
@@ -365,7 +375,8 @@ export class BrowserSessionController {
         Authorization: `Bearer ${identity.accessToken}`,
         Accept: streaming
           ? "text/event-stream"
-          : path.startsWith("profiles/")
+          : path.startsWith("profiles/") ||
+              path.startsWith("users/me/avatar-uploads/")
             ? "image/png"
             : "application/json",
       };

@@ -1,5 +1,20 @@
 # Backend changelog
 
+## 0.3.7 — session activity, Telegram tracking and browser workspace access
+
+- Include bounded tool activity snapshots in authorized session history and
+  SSE, with command output, MCP details, file diffs and supported image previews.
+  Wake local SSE readers when runner events commit. The app-server transport
+  adds live provider deltas when explicitly enabled.
+- Add opt-in Telegram live trackers and recent-session widgets. Send each
+  completed turn's final answer separately with MarkdownV2 formatting.
+- Allow authorized browser access to revisioned profile edits and receipts,
+  avatar previews, project directory reads and published article content.
+  Published article trees also include document titles.
+
+One additive Telegram tracker migration is required relative to v0.3.6.
+See [app2 rollout and activation checks](Docs/release-0.3.7-rollout.md).
+
 ## 0.3.6 — newest-first session history and browser origins
 
 - Add opt-in backward pagination to persisted session history. Read the newest

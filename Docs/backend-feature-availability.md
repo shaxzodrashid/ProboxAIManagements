@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.3.6**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.3.7**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -24,6 +24,7 @@ Available since refers to the first tracked Git release containing this bounded 
 | Unified task board queries, card placement, invalidation streams and assignee avatars | 0.3.5           | foundation | [Contract](../Docs/frontend/tasks.md)                          |
 | Browser cookie sessions with CSRF and bounded proxy admission                         | 0.3.0           | foundation | [Contract](../Docs/browser-session-local-implementation.md)    |
 | Exact browser frontend origin allowlist with secure same-origin proxies               | 0.3.6           | supported  | [Contract](../Docs/browser-session-origins.md)                 |
+| Browser access to profile edits, project directory and published Spaces               | 0.3.7           | supported  | [Contract](../Docs/release-0.3.7-rollout.md)                   |
 | Active-human group metadata and creator-only retry/readback                           | 0.2.0-dev.1     | foundation | [Contract](../Docs/chat-group-metadata-contracts.md)           |
 | Independent checklist deadlines and whole-list ordering                               | 0.2.0-dev.1     | supported  | [Contract](../Docs/checklist-order-contracts.md)               |
 | Inactive domain rules for owner-approved delegated bio edits                          | 0.3.0-dev.7     | foundation | [Contract](../Docs/delegated-bio-foundation-contracts.md)      |
@@ -58,6 +59,7 @@ Available since refers to the first tracked Git release containing this bounded 
 | Newest-first persisted session history with fixed-boundary older pages                | 0.3.6           | supported  | [Contract](../Docs/session-assistant-text-contracts.md)        |
 | Bounded assigned session index                                                        | 0.2.0-dev.1     | supported  | [Contract](../Docs/session-index-contracts.md)                 |
 | Durable session intents, protected history and bounded retained projections           | 0.3.0           | foundation | [Contract](../Docs/session-intent-history-contracts.md)        |
+| Authorized tool activity snapshots with opt-in app-server streaming                   | 0.3.7           | supported  | [Contract](../Docs/session-command-disclosure-contracts.md)    |
 | Shared checklist tree admission and validation                                        | 0.3.0           | foundation | [Contract](../Docs/shared-checklist-tree-contracts.md)         |
 | Shared human task reads and revision-safe collaboration                               | 0.3.0           | foundation | [Contract](../Docs/shared-human-task-contracts.md)             |
 | One shared manual availability with self revision and retry recovery                  | 0.3.0-dev.8     | supported  | [Contract](../Docs/shared-manual-status-contracts.md)          |
@@ -66,11 +68,13 @@ Available since refers to the first tracked Git release containing this bounded 
 | Opt-in task creation retry and readback                                               | 0.3.0-dev.5     | supported  | [Contract](../Docs/task-creation-recovery-contracts.md)        |
 | Human task edits preserve existing creation text limits                               | 0.3.0-dev.6     | supported  | [Contract](../Docs/task-text-limit-contracts.md)               |
 | Current workflow label and palette on member task reads                               | 0.3.0-dev.2     | supported  | [Contract](../Docs/task-workflow-display-contracts.md)         |
+| Telegram turn answers with opt-in live tracker and recent-session widgets             | 0.3.7           | supported  | [Contract](../Docs/release-0.3.7-rollout.md)                   |
 | Department/template response, validation and concurrency contracts                    | 0.2.0-dev.1     | supported  | [Contract](../Docs/template-department-contract-fixes.md)      |
 | Bounded native Windows directory restoration                                          | 0.3.0           | foundation | [Contract](../Docs/windows-directory-restore-contracts.md)     |
 
 ## Release references
 
+- **0.3.7**: `refs/tags/v0.3.7`, production, not-deployed.
 - **0.3.6**: `refs/tags/v0.3.6`, production, not-deployed.
 - **0.3.5**: `refs/tags/v0.3.5`, production, not-deployed.
 - **0.3.4**: `refs/tags/v0.3.4`, production, deployment-unverified.

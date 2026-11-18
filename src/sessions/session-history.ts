@@ -194,6 +194,7 @@ export function historyJson(value: unknown, depth = 0): Prisma.InputJsonValue {
   return result;
 }
 const visibleItems = new Set([
+  "image_view",
   "agent_message",
   "command_execution",
   "file_change",
@@ -265,6 +266,15 @@ export function archiveHash(payload: unknown) {
 export function toolHistoryDisclosure(): "STRICT_METADATA" | "REDACTED_DETAIL" {
   return "STRICT_METADATA";
 }
+export function archiveMetadataEventResponse(event: SessionEvent) {
+  const hasToolDetails =
+    event.projectionVersion === 4 && record(event.rawPayload).toolDetails;
+  return eventResponse({
+    ...event,
+    archivePayload: null,
+    projectionVersion: hasToolDetails ? 1 : event.projectionVersion,
+  });
+}
 export function archiveEventResponse(event: SessionEvent) {
   const stored = record(event.archivePayload),
     item = record(record(stored.data).item);
@@ -275,6 +285,7 @@ export function archiveEventResponse(event: SessionEvent) {
       "mcp_tool_call",
       "collab_tool_call",
       "web_search",
+      "image_view",
     ].includes(String(item.type)) ||
     ["workspace.diff", "runner.stderr"].includes(String(stored.type));
   const data =
@@ -282,13 +293,13 @@ export function archiveEventResponse(event: SessionEvent) {
       ? {
           source: "LEGACY_SAFE_PROJECTION",
           retainedDetail: false,
-          projection: eventResponse(event).data,
+          projection: archiveMetadataEventResponse(event).data,
         }
       : toolText && toolHistoryDisclosure() === "STRICT_METADATA"
         ? {
             omitted: true,
             omissionReason: "STRICT_TOOL_DISCLOSURE",
-            projection: eventResponse(event).data,
+            projection: archiveMetadataEventResponse(event).data,
           }
         : historyJson(event.archivePayload);
   return {

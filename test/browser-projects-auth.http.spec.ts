@@ -44,6 +44,43 @@ describe("project browser allowlist", () => {
     ])
       expect(browserProxyAllowed(method!, endpoint!)).toBe(false);
   });
+  it("allowlists the directory, published articles and revisioned self-profile flows", () => {
+    const id = randomUUID();
+    expect(browserProxyAllowed("GET", `projects/${id}/files`)).toBe(true);
+    expect(browserProxyAllowed("GET", `projects/${id}/article-tree`)).toBe(
+      true,
+    );
+    expect(
+      browserProxyAllowed(
+        "GET",
+        `projects/${id}/article-documents/${id}/publication`,
+      ),
+    ).toBe(true);
+    expect(browserProxyAllowed("GET", `projects/${id}/article-drafts`)).toBe(
+      false,
+    );
+    expect(
+      browserProxyAllowed("POST", `projects/${id}/article-documents`),
+    ).toBe(false);
+    expect(browserProxyAllowed("GET", "users/me/profile/edit")).toBe(true);
+    expect(
+      browserProxyAllowed("GET", `users/me/avatar-uploads/${id}/content`),
+    ).toBe(true);
+    expect(browserProxyAllowed("POST", "users/me/avatar-uploads")).toBe(false);
+    expect(browserProxyAllowed("PUT", "users/me/profile/changes")).toBe(true);
+    expect(
+      browserProxyAllowed("GET", `users/me/profile/operations/${id}`),
+    ).toBe(true);
+    expect(
+      browserProxyAllowed("GET", "users/me/profile/operations/latest"),
+    ).toBe(false);
+    expect(browserProxyAllowed("PUT", "users/me/profile/edit")).toBe(false);
+    expect(browserProxyAllowed("GET", "users/me/profile/changes")).toBe(false);
+    expect(browserProxyAllowed("POST", `projects/${id}/files`)).toBe(false);
+    expect(browserProxyAllowed("GET", `projects/${id}/files/download`)).toBe(
+      false,
+    );
+  });
 });
 const integration =
   process.env.PROFILE_TEST_DATABASE_URL === fixtureDatabaseUrl

@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.7",
+      "gitRef": "refs/tags/v0.3.7",
+      "channel": "production",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.6",
       "gitRef": "refs/tags/v0.3.6",
       "channel": "production",
@@ -145,6 +151,27 @@
     }
   ],
   "features": [
+    {
+      "id": "session-live-tool-activity",
+      "title": "Authorized tool activity snapshots with opt-in app-server streaming",
+      "since": "0.3.7",
+      "state": "supported",
+      "contract": "Docs/session-command-disclosure-contracts.md"
+    },
+    {
+      "id": "telegram-session-tracking",
+      "title": "Telegram turn answers with opt-in live tracker and recent-session widgets",
+      "since": "0.3.7",
+      "state": "supported",
+      "contract": "Docs/release-0.3.7-rollout.md"
+    },
+    {
+      "id": "browser-workspace-content",
+      "title": "Browser access to profile edits, project directory and published Spaces",
+      "since": "0.3.7",
+      "state": "supported",
+      "contract": "Docs/release-0.3.7-rollout.md"
+    },
     {
       "id": "session-history-backward-pagination",
       "title": "Newest-first persisted session history with fixed-boundary older pages",

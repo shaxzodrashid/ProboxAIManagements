@@ -123,10 +123,15 @@ if (url) requireFixtureDatabase(url);
       expect(next.data.offset).toBe(64);
       expect(JSON.stringify(data)).not.toContain("fixture-hidden");
       expect(f.runner.starts).toHaveLength(0);
-      // Public/archive policy remains restrictive for existing clients.
-      expect(
-        JSON.stringify((await get(`/sessions/${sessionId}/archive`)).data),
-      ).not.toContain("synthetic-output");
+      const history = (await get(`/sessions/${sessionId}/events`)).data;
+      expect(history.events[0].data.toolDetails).toMatchObject({
+        label: "echo controlled-fixture",
+        output: "synthetic-output\n".repeat(4000).slice(0, 65536),
+        truncated: true,
+      });
+      // The separate archive export retains its strict metadata policy.
+      const archive = (await get(`/sessions/${sessionId}/archive`)).data;
+      expect(JSON.stringify(archive).includes("synthetic-output")).toBe(false);
     });
     it.each([
       "?offset=-1",

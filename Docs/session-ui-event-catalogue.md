@@ -1,5 +1,12 @@
 # Session UI event catalogue — 2026-10-11
 
+**16 November update:** the [current tool disclosure and streaming contract](session-command-disclosure-contracts.md#current-contract--16-november-2026)
+supersedes the metadata-only limitations below. V4 provides bounded command/MCP
+input/output/progress, read specifications, file diffs and raster image previews.
+The default managed app-server transport supplies live snapshots; REST and SSE
+share the projection, including verified archive recovery. Prior entries below
+retain their historical discovery dates and are not current feature exclusions.
+
 **17 October provisional command update:** [Command disclosure contracts](session-command-disclosure-contracts.md)
 supersede the command-detail exclusion below only for the exact allowlisted labels
 and validated terminal exit codes in new v3 command events. Output text remains

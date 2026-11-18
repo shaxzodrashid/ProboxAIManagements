@@ -6,7 +6,6 @@ export function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-// Plain text avoids Telegram Markdown failures for arbitrary code/model output.
 export function splitMessage(text: string, limit = 4000): string[] {
   const chunks: string[] = [];
   while (text.length > limit) {
@@ -62,6 +61,15 @@ const TOOL_LABELS: Record<string, string> = {
   collab_tool_call: "Agent task",
   web_search: "Web search",
 };
+
+export function toolActivityLabel(type: string, item: Record<string, unknown>) {
+  if (type === "turn.started") return "Runner started";
+  const label = TOOL_LABELS[String(item.type)];
+  if (!label) return null;
+  if (["failed", "declined"].includes(String(item.status)))
+    return label + (item.status === "declined" ? " declined" : " failed");
+  return label + (type === "item.completed" ? " finished" : " started");
+}
 
 export function trackTool(
   state: ToolState,

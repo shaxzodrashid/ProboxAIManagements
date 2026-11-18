@@ -459,12 +459,16 @@ if (url) requireFixtureDatabase(url);
       const tool = events.find((event) =>
         JSON.stringify(event.archivePayload).includes("command_execution"),
       )!;
+      expect(tool.projectionVersion).toBe(4);
       const toolPage = await call(
         "GET",
         `/sessions/${receipt.sessionId}/archive?after=${tool.sequence - 1}&limit=1`,
       );
       expect(toolPage.archiveEvents[0].data.omissionReason).toBe(
         "STRICT_TOOL_DISCLOSURE",
+      );
+      expect(toolPage.archiveEvents[0].data.projection).not.toHaveProperty(
+        "toolDetails",
       );
       const turns = await call("GET", `/sessions/${receipt.sessionId}/turns`);
       expect(turns.items[0].usageProvenance).toEqual(

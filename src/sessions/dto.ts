@@ -367,8 +367,11 @@ export class AssistantTextUpdateDto {
       "Session sequence; ignore duplicate/older revisions for this identity.",
   })
   revision!: number;
-  @ApiProperty({ enum: ["ITEM_COMPLETED", "PROVISIONAL"] }) phase!: string;
-  @ApiProperty({ enum: ["ITEM_COMPLETE", "TRUNCATED", "UNKNOWN"] })
+  @ApiProperty({ enum: ["ITEM_COMPLETED", "IN_PROGRESS", "PROVISIONAL"] })
+  phase!: string;
+  @ApiProperty({
+    enum: ["ITEM_COMPLETE", "IN_PROGRESS", "TRUNCATED", "UNKNOWN"],
+  })
   continuation!: string;
   @ApiProperty({
     enum: ["USE_SERVER_STATE"],
@@ -422,6 +425,17 @@ export class PersistedSessionEventDto {
     type: "object",
     additionalProperties: true,
     properties: {
+      toolDetails: {
+        type: "object",
+        additionalProperties: true,
+        description:
+          "Version 1 AUTHORIZED_SESSION_DETAIL_V1 replacement snapshot: label, cwd, input, output, error, exitCode, changes(path/kind/diff), inline raster images(src/label), truncated and previewUnavailable. Text is redacted best effort and bounded; item completion is not run completion. Present for v4 tool projections and verified historical archives.",
+        properties: {
+          version: { type: "integer", enum: [1] },
+          policy: { type: "string", enum: ["AUTHORIZED_SESSION_DETAIL_V1"] },
+          updateMode: { type: "string", enum: ["SNAPSHOT"] },
+        },
+      },
       commandDetails: {
         allOf: [{ $ref: getSchemaPath(CommandDisclosureDto) }],
         description:

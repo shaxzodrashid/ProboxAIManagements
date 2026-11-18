@@ -1834,7 +1834,7 @@ async function until(fn: () => Promise<boolean>) {
       await until(async () => pending.has(sessionId));
       return accepted.body;
     };
-    it("replays bounded ordered output and explicit omissions with snapshot pagination", async () => {
+    it("replays bounded ordered assistant and tool snapshots with snapshot pagination", async () => {
       const accepted = await startControlled();
       await pending.get(sessionId)!.event({
         type: "item.completed",
@@ -1856,7 +1856,7 @@ async function until(fn: () => Promise<boolean>) {
             type: "command_execution",
             command: "pnpm test",
             exit_code: 0,
-            aggregated_output: "private output",
+            aggregated_output: "fixture output\npassword=fixture-secret",
             status: "completed",
           },
         },
@@ -1892,23 +1892,24 @@ async function until(fn: () => Promise<boolean>) {
           select: { projectionVersion: true },
         }),
       ).toEqual({ projectionVersion: 2 });
-      expect(next.events[1].data.omissionReason).toBe("TOOL_DETAILS_EXCLUDED");
-      expect(next.events[1].data.commandDetails).toMatchObject({
-        commandLabel: "pnpm test",
+      expect(next.events[1].data.toolDetails).toMatchObject({
+        policy: "AUTHORIZED_SESSION_DETAIL_V1",
+        updateMode: "SNAPSHOT",
+        label: "pnpm test",
+        input: { command: "pnpm test", actions: [] },
+        output: "fixture output\npassword=[REDACTED]",
         exitCode: 0,
-        outputState: "OMITTED",
-        provisional: true,
       });
       const storedCommand = await prisma.sessionEvent.findFirstOrThrow({
         where: { sessionId, sequence: 4 },
       });
-      expect(storedCommand.projectionVersion).toBe(3);
+      expect(storedCommand.projectionVersion).toBe(4);
       expect(storedCommand.rawPayload).toEqual(next.events[1].data);
       expect(JSON.stringify(storedCommand.rawPayload)).not.toMatch(
-        /private output|private raw line|aggregated_output/,
+        /fixture-secret|private raw line|aggregated_output/,
       );
       expect(JSON.stringify(next)).not.toMatch(
-        /private command|private output|private raw line|hidden|actor/,
+        /fixture-secret|private raw line|hidden|actor/,
       );
       expect(next.highWaterSequence).toBe(next.session.lastSequence);
       expect(next.hasMore).toBe(false);
@@ -2424,7 +2425,7 @@ async function until(fn: () => Promise<boolean>) {
             command: "git diff --check",
             status: "completed",
             exit_code: 0,
-            aggregated_output: "private stream output",
+            aggregated_output: "fixture stream output\npassword=fixture-secret",
           },
         },
         rawLine: "raw",
@@ -2432,12 +2433,14 @@ async function until(fn: () => Promise<boolean>) {
       await until(async () => events.length === 3);
       expect(events.map((e) => e.id)).toEqual(["1", "2", "3"]);
       expect(events[2].data).not.toHaveProperty("actor");
-      expect(events[2].data.data.commandDetails).toMatchObject({
-        commandLabel: "git diff --check",
+      expect(events[2].data.data.toolDetails).toMatchObject({
+        policy: "AUTHORIZED_SESSION_DETAIL_V1",
+        updateMode: "SNAPSHOT",
+        label: "git diff --check",
+        output: "fixture stream output\npassword=[REDACTED]",
         exitCode: 0,
-        outputState: "OMITTED",
       });
-      expect(JSON.stringify(events)).not.toContain("private stream output");
+      expect(JSON.stringify(events)).not.toContain("fixture-secret");
       const rest = (await eventHistory(owner, "?after=2").expect(200)).body;
       expect(JSON.parse(JSON.stringify(events[2].data))).toEqual(
         rest.events[0],
@@ -3028,6 +3031,10 @@ async function until(fn: () => Promise<boolean>) {
         schemas.PersistedSessionEventDto.properties.data.properties
           .commandDetails.allOf[0].$ref,
       ).toContain("CommandDisclosureDto");
+      expect(
+        schemas.PersistedSessionEventDto.properties.data.properties.toolDetails
+          .properties.policy.enum,
+      ).toEqual(["AUTHORIZED_SESSION_DETAIL_V1"]);
       expect(
         schemas.AssistantTextUpdateDto.properties.runCompletion.enum,
       ).toEqual(["USE_SERVER_STATE"]);
