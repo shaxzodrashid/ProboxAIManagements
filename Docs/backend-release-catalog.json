@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.8",
+      "gitRef": "refs/tags/v0.3.8",
+      "channel": "production",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.7",
       "gitRef": "refs/tags/v0.3.7",
       "channel": "production",
@@ -151,6 +157,13 @@
     }
   ],
   "features": [
+    {
+      "id": "managed-provider-model-catalog",
+      "title": "Installation-wide model and reasoning effort management with a shared Codex catalog",
+      "since": "0.3.8",
+      "state": "supported",
+      "contract": "Docs/MODEL_PROVIDER_SESSION_MANAGEMENT.md"
+    },
     {
       "id": "session-live-tool-activity",
       "title": "Authorized tool activity snapshots with opt-in app-server streaming",

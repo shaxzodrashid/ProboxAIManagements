@@ -11,7 +11,7 @@ describe("ModelCatalogService", () => {
       effectiveModel: "claude-opus-5-5",
       requestedReasoningEffort: null,
       effectiveReasoningEffort: "medium",
-      catalogSnapshot: { version: "2026-09-27" },
+      catalogSnapshot: { version: catalog.version },
     });
   });
 
@@ -64,22 +64,10 @@ describe("ModelCatalogService", () => {
     expect(() =>
       catalog.resolve("deepmind", "gemini-3.8-flash", "minimal"),
     ).toThrow();
-    expect(
-      catalog.resolve(
-        "amazon-bedrock-runtime",
-        "global.openai.gpt-6-sol",
-        "none",
-      ).effectiveModel,
-    ).toBe("global.openai.gpt-6-sol");
+    // Bedrock remains registered for historical rows. The fork disables it for new sessions.
+    expect(catalog.list("amazon-bedrock-runtime")).toEqual([]);
     expect(() =>
-      catalog.resolve("amazon-bedrock", "global.openai.gpt-6-sol"),
-    ).toThrow();
-    expect(() =>
-      catalog.resolve(
-        "amazon-bedrock-runtime",
-        "global.openai.gpt-6-sol",
-        "ultra",
-      ),
+      catalog.resolve("amazon-bedrock", "openai.gpt-6-sol"),
     ).toThrow();
   });
 

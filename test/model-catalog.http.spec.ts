@@ -6,10 +6,7 @@ import { SessionsController } from "../src/sessions/sessions.controller";
 import { SessionsService } from "../src/sessions/sessions.service";
 import { SessionEventsService } from "../src/sessions/session-events.service";
 import { ProboxAiRunner } from "../src/sessions/proboxai-runner.service";
-import {
-  ModelCatalogService,
-  REASONING_EFFORTS,
-} from "../src/sessions/model-catalog.service";
+import { ModelCatalogService } from "../src/sessions/model-catalog.service";
 import { PrismaService } from "../src/prisma/prisma.service";
 const request = require("supertest");
 
@@ -159,8 +156,8 @@ describe("managed model catalog HTTP/schema", () => {
     ]);
     expect(
       schemas.SupportedModelResponseDto.properties.supportedReasoningEfforts
-        .items.enum,
-    ).toEqual([...REASONING_EFFORTS]);
+        .items,
+    ).toEqual({ type: "string" });
     expect(schemas.SupportedModelResponseDto.required).toEqual([
       "id",
       "displayName",

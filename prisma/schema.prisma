@@ -1763,3 +1763,20 @@ model ProjectFileOperation {
   @@id([projectId, id])
   @@index([projectId, createdAt])
 }
+
+// Installation-wide model registry. Provider activation lives in code.
+model ManagedModel {
+  providerId                String
+  id                        String
+  displayName               String
+  priority                  Int       @default(100)
+  isActive                  Boolean   @default(true)
+  isAvailable               Boolean   @default(true)
+  sunsetAt                  DateTime? @db.Timestamptz(3)
+  defaultReasoningEffort    String
+  supportedReasoningEfforts String[]
+  maxOutputTokens           Int
+  thinkingBudgets           Json?
+
+  @@id([providerId, id])
+}

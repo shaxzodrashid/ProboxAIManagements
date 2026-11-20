@@ -1,5 +1,39 @@
 # Model Provider, Model, and Thinking-Effort Management
 
+## Manage the runtime catalog
+
+ProboxAI stores the installation-wide model registry in PostgreSQL. Its management API publishes the same versioned JSON file that the backend and the Codex fork read. OpenAI, Anthropic, and Google DeepMind accept new sessions. The fork keeps the Bedrock providers disabled for new sessions.
+
+Apply the Prisma migrations and run the updated backend with the updated CLI. Set `PROBOXAI_MODEL_CATALOG_ADMIN_IDS` to a comma-separated list of operator user IDs. Each operator also needs `settings.manage` and an access token. The backend creates `~/.proboxai/provider-models.json` under its service account, or uses the absolute path in `CODEX_PROVIDER_CATALOG`. Both runner transports pass that path to Codex. A standalone CLI can read the same file by setting that variable. All backend instances and runners serving the same installation should share this path on a filesystem supporting atomic rename. Keep it outside user-editable project directories.
+
+| Operation                                                             | Route under `/api/v1`                                         |
+| --------------------------------------------------------------------- | ------------------------------------------------------------- |
+| List every configured model for a provider, including retired entries | `GET /admin/model-catalog/providers/:providerId/models`       |
+| Add and publish a model                                               | `POST /admin/model-catalog/providers/:providerId/models`      |
+| Update and publish a model                                            | `PATCH /admin/model-catalog/providers/:providerId/models/:id` |
+| Read eligible models, defaults and effort names for session creation  | `GET /sessions/model-catalog`                                 |
+
+For example, POST the following body to the DeepMind management route, substituting the model ID and effort names accepted by your provider account.
+
+```json
+{
+  "id": "example-model",
+  "displayName": "Example Model",
+  "supportedReasoningEfforts": ["low", "focused"],
+  "defaultReasoningEffort": "focused",
+  "maxOutputTokens": 65536
+}
+```
+
+To add an effort, PATCH the model with the complete new `supportedReasoningEfforts` array. You can change the default in the same request. Native Gemini sends the selected value as `thinking_level`. Native Anthropic uses adaptive thinking and sends the value as `output_config.effort`. For a manual-budget Anthropic model, supply `thinkingBudgets` with one integer per effort, each at least 1024 and below `maxOutputTokens`. OpenAI retains the fork's existing wire aliases for its special effort modes.
+
+`isActive` controls administrative activation. `isAvailable` records operator-declared availability. Both default to true. Set `sunsetAt` to an ISO timestamp with an explicit timezone to retire a model automatically, or to null to cancel the schedule. Eligibility is evaluated on catalog reads and on new inference requests, including resumed sessions. A stream already in progress can finish. Saved preferences and historical session selections remain available for inspection. The eligible model with the lowest `priority` is the provider default. Priorities can be negative. Equal priorities sort by model ID. The session picker omits providers with no eligible models.
+
+A successful mutation has committed to PostgreSQL and published the file. A publication failure returns HTTP 503. Read the management entry to check the stored change. The service reconciles the file from the database at startup and every 30 seconds. A duplicate POST returns 409. The initial catalog is seeded once into an empty registry. Provider credentials, account entitlements and upstream support must be configured separately.
+
+<details>
+<summary>Historical implementation and September 2026 catalog snapshot</summary>
+
 **Status:** source-backed management specification
 
 **Catalog snapshot:** 27 September 2026
@@ -269,3 +303,5 @@ The catalog in this document is compiled from the current Codex source:
 The current ProboxAI implementation boundaries are in
 `src/sessions/dto.ts`, `src/sessions/sessions.service.ts`,
 `src/sessions/proboxai-runner.service.ts`, and `prisma/schema.prisma`.
+
+</details>

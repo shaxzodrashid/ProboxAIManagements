@@ -1,23 +1,64 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Inject,
+  Optional,
+  ServiceUnavailableException,
+} from "@nestjs/common";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
+import seed = require("./model-catalog.seed.json");
 
-export const REASONING_EFFORTS = [
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-  "ultra",
-] as const;
+export const MODEL_CATALOG_FILE = Symbol("MODEL_CATALOG_FILE");
 
-export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
-
+export const PROVIDER_NAMES: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  deepmind: "Google DeepMind",
+  "amazon-bedrock": "Amazon Bedrock",
+  "amazon-bedrock-runtime": "Amazon Bedrock Runtime",
+};
+// The CLI currently permits only these providers for new sessions.
+export const ACTIVE_PROVIDERS = ["openai", "anthropic", "deepmind"];
+export interface CatalogRow {
+  providerId: string;
+  id: string;
+  displayName: string;
+  defaultReasoningEffort: string;
+  supportedReasoningEfforts: string[];
+  priority: number;
+  isActive: boolean;
+  isAvailable: boolean;
+  sunsetAt: string | null;
+  maxOutputTokens: number;
+  thinkingBudgets: Record<string, number> | null;
+}
+export function catalogFilePath() {
+  const path =
+    process.env.CODEX_PROVIDER_CATALOG ??
+    join(homedir(), ".proboxai", "provider-models.json");
+  if (!isAbsolute(path))
+    throw new Error("CODEX_PROVIDER_CATALOG must be an absolute path");
+  return path;
+}
+export function defaultMaxTokens(providerId: string) {
+  return providerId === "anthropic" ? 128000 : 65536;
+}
+export const initialCatalog: CatalogRow[] = seed.map((m) => ({
+  ...m,
+  isActive: true,
+  isAvailable: true,
+  sunsetAt: null,
+  maxOutputTokens: m.maxOutputTokens ?? defaultMaxTokens(m.providerId),
+  thinkingBudgets: m.thinkingBudgets ?? null,
+}));
 export interface SupportedModel {
   id: string;
   displayName: string;
-  defaultReasoningEffort: ReasoningEffort;
-  supportedReasoningEfforts: readonly ReasoningEffort[];
+  defaultReasoningEffort: string;
+  supportedReasoningEfforts: readonly string[];
 }
 
 export interface ModelProviderCatalog {
@@ -31,191 +72,90 @@ export interface ResolvedModelSelection {
   providerId: string;
   requestedModel: string | null;
   effectiveModel: string;
-  requestedReasoningEffort: ReasoningEffort | null;
-  effectiveReasoningEffort: ReasoningEffort;
+  requestedReasoningEffort: string | null;
+  effectiveReasoningEffort: string;
   catalogSnapshot: Record<string, unknown>;
-}
-
-const STANDARD_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
-const BALANCED_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
-
-const PROVIDERS: readonly ModelProviderCatalog[] = [
-  {
-    id: "openai",
-    displayName: "OpenAI",
-    defaultModel: "gpt-6-sol",
-    models: [
-      model("gpt-6-astra", "GPT-6 Astra", "low", [
-        ...STANDARD_EFFORTS,
-        "ultra",
-      ]),
-      model("gpt-6-sol", "GPT-6 Sol", "medium", [
-        "none",
-        ...STANDARD_EFFORTS,
-        "ultra",
-      ]),
-      model("gpt-6-luna", "GPT-6 Luna", "medium", [
-        "none",
-        ...STANDARD_EFFORTS,
-      ]),
-      model("gpt-5.6-sol", "GPT-5.6 Sol", "low", [
-        ...STANDARD_EFFORTS,
-        "ultra",
-      ]),
-      model("gpt-5.6-terra", "GPT-5.6 Terra", "medium", [
-        ...STANDARD_EFFORTS,
-        "ultra",
-      ]),
-      model("gpt-5.6-luna", "GPT-5.6 Luna", "medium", STANDARD_EFFORTS),
-      model("gpt-5.5", "GPT-5.5", "medium", BALANCED_EFFORTS),
-      model("gpt-5.2", "GPT-5.2", "medium", BALANCED_EFFORTS),
-    ],
-  },
-  {
-    id: "amazon-bedrock",
-    displayName: "Amazon Bedrock",
-    defaultModel: "openai.gpt-6-sol",
-    models: [
-      model("openai.gpt-6-sol", "GPT-6 Sol", "medium", [
-        "none",
-        ...STANDARD_EFFORTS,
-      ]),
-      model("openai.gpt-6-astra", "GPT-6 Astra", "low", STANDARD_EFFORTS),
-      model("openai.gpt-6-luna", "GPT-6 Luna", "medium", [
-        "none",
-        ...STANDARD_EFFORTS,
-      ]),
-      model("openai.gpt-5.6-sol", "GPT-5.6 Sol", "low", STANDARD_EFFORTS),
-      model(
-        "openai.gpt-5.6-terra",
-        "GPT-5.6 Terra",
-        "medium",
-        STANDARD_EFFORTS,
-      ),
-      model("openai.gpt-5.6-luna", "GPT-5.6 Luna", "medium", STANDARD_EFFORTS),
-      model("openai.gpt-5.5", "GPT-5.5", "medium", BALANCED_EFFORTS),
-      model("openai.gpt-5.4", "GPT-5.4", "medium", BALANCED_EFFORTS),
-    ],
-  },
-  {
-    id: "amazon-bedrock-runtime",
-    displayName: "Amazon Bedrock Runtime",
-    defaultModel: "global.openai.gpt-6-sol",
-    models: [
-      ...["global", "us"].flatMap((region) => [
-        model(`${region}.openai.gpt-6-sol`, `GPT-6 Sol (${region})`, "medium", [
-          "none",
-          ...STANDARD_EFFORTS,
-        ]),
-        model(
-          `${region}.openai.gpt-6-astra`,
-          `GPT-6 Astra (${region})`,
-          "low",
-          STANDARD_EFFORTS,
-        ),
-        model(
-          `${region}.openai.gpt-6-luna`,
-          `GPT-6 Luna (${region})`,
-          "medium",
-          ["none", ...STANDARD_EFFORTS],
-        ),
-        model(
-          `${region}.openai.gpt-5.6-sol`,
-          `GPT-5.6 Sol (${region})`,
-          "low",
-          STANDARD_EFFORTS,
-        ),
-        model(
-          `${region}.openai.gpt-5.6-terra`,
-          `GPT-5.6 Terra (${region})`,
-          "medium",
-          STANDARD_EFFORTS,
-        ),
-        model(
-          `${region}.openai.gpt-5.6-luna`,
-          `GPT-5.6 Luna (${region})`,
-          "medium",
-          STANDARD_EFFORTS,
-        ),
-      ]),
-    ],
-  },
-  {
-    id: "anthropic",
-    displayName: "Anthropic",
-    defaultModel: "claude-opus-5-5",
-    models: [
-      model("claude-opus-5-5", "Claude Opus 5.5", "medium", STANDARD_EFFORTS),
-      model("claude-fable-5-1", "Claude Fable 5.1", "high", STANDARD_EFFORTS),
-      model(
-        "claude-mythos-5-1",
-        "Claude Mythos 5.1 (invite only)",
-        "high",
-        STANDARD_EFFORTS,
-      ),
-      model("claude-opus-5", "Claude Opus 5", "high", STANDARD_EFFORTS),
-      model("claude-sonnet-5", "Claude Sonnet 5", "high", STANDARD_EFFORTS),
-      model("claude-fable-5", "Claude Fable 5", "high", STANDARD_EFFORTS),
-      model(
-        "claude-haiku-4-5-20251001",
-        "Claude Haiku 4.5",
-        "high",
-        STANDARD_EFFORTS,
-      ),
-    ],
-  },
-  {
-    id: "deepmind",
-    displayName: "Google DeepMind",
-    defaultModel: "gemini-3.1-pro-preview",
-    models: [
-      model("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", "high", [
-        "low",
-        "medium",
-        "high",
-      ]),
-      model("gemini-3.8-flash", "Gemini 3.8 Flash", "medium", [
-        "low",
-        "medium",
-        "high",
-      ]),
-      model("gemini-3.6-flash", "Gemini 3.6 Flash", "medium", [
-        "minimal",
-        "low",
-        "medium",
-        "high",
-      ]),
-      model("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "minimal", [
-        "minimal",
-        "low",
-        "medium",
-        "high",
-      ]),
-      model("gemma-4-31b-it", "Gemma 4 31B IT", "high", ["minimal", "high"]),
-      model("gemma-4-26b-a4b-it", "Gemma 4 26B A4B IT", "high", [
-        "minimal",
-        "high",
-      ]),
-    ],
-  },
-];
-
-function model(
-  id: string,
-  displayName: string,
-  defaultReasoningEffort: ReasoningEffort,
-  supportedReasoningEfforts: readonly ReasoningEffort[],
-): SupportedModel {
-  return { id, displayName, defaultReasoningEffort, supportedReasoningEfforts };
 }
 
 @Injectable()
 export class ModelCatalogService {
-  readonly version = "2026-09-27";
+  constructor(
+    @Optional() @Inject(MODEL_CATALOG_FILE) private readonly file?: string,
+  ) {}
 
-  list(providerId?: string): readonly ModelProviderCatalog[] {
-    if (!providerId) return PROVIDERS;
-    return [this.provider(providerId)];
+  snapshot(providerId?: string) {
+    if (providerId && !Object.hasOwn(PROVIDER_NAMES, providerId)) {
+      throw new BadRequestException(
+        `Model provider "${providerId}" is not configured with a managed catalog`,
+      );
+    }
+    let rows: CatalogRow[] = initialCatalog;
+    if (this.file) {
+      try {
+        const data = JSON.parse(readFileSync(this.file, "utf8"));
+        if (data.schemaVersion !== 1 || !Array.isArray(data.models))
+          throw new Error();
+        rows = data.models;
+      } catch {
+        throw new ServiceUnavailableException(
+          "Published model catalog is unavailable",
+        );
+      }
+    }
+    const now = Date.now();
+    const providers: ModelProviderCatalog[] = [];
+    for (const id of ACTIVE_PROVIDERS) {
+      const models = rows
+        .filter(
+          (m) =>
+            m.providerId === id &&
+            m.isActive &&
+            m.isAvailable &&
+            (m.sunsetAt === null || Date.parse(m.sunsetAt) > now),
+        )
+        .sort(
+          (a, b) =>
+            a.priority - b.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        )
+        .map(
+          ({
+            id,
+            displayName,
+            defaultReasoningEffort,
+            supportedReasoningEfforts,
+          }) => ({
+            id,
+            displayName,
+            defaultReasoningEffort,
+            supportedReasoningEfforts,
+          }),
+        );
+      if (models[0])
+        providers.push({
+          id,
+          displayName: PROVIDER_NAMES[id]!,
+          defaultModel: models[0].id,
+          models,
+        });
+    }
+    const version = createHash("sha256")
+      .update(JSON.stringify(rows))
+      .update(JSON.stringify(providers))
+      .digest("hex");
+    return {
+      version,
+      providers: providerId
+        ? providers.filter((p) => p.id === providerId)
+        : providers,
+    };
+  }
+
+  get version() {
+    return this.snapshot().version;
+  }
+
+  list(providerId?: string) {
+    return this.snapshot(providerId).providers;
   }
 
   resolve(
@@ -223,7 +163,8 @@ export class ModelCatalogService {
     requestedModel?: string,
     requestedReasoningEffort?: string,
   ): ResolvedModelSelection {
-    const provider = this.provider(providerId ?? "openai");
+    const snapshot = this.snapshot();
+    const provider = this.provider(snapshot.providers, providerId ?? "openai");
     const effectiveModel = requestedModel ?? provider.defaultModel;
     const selectedModel = provider.models.find(
       (candidate) => candidate.id === effectiveModel,
@@ -236,11 +177,6 @@ export class ModelCatalogService {
 
     const effectiveReasoningEffort =
       requestedReasoningEffort ?? selectedModel.defaultReasoningEffort;
-    if (!isReasoningEffort(effectiveReasoningEffort)) {
-      throw new BadRequestException(
-        `Unknown reasoning effort "${effectiveReasoningEffort}"`,
-      );
-    }
     if (
       !selectedModel.supportedReasoningEfforts.includes(
         effectiveReasoningEffort,
@@ -255,43 +191,30 @@ export class ModelCatalogService {
       providerId: provider.id,
       requestedModel: requestedModel ?? null,
       effectiveModel: selectedModel.id,
-      requestedReasoningEffort:
-        (requestedReasoningEffort as ReasoningEffort | undefined) ?? null,
+      requestedReasoningEffort: requestedReasoningEffort ?? null,
       effectiveReasoningEffort,
       catalogSnapshot: {
-        version: this.version,
-        provider: serializeProvider(provider),
+        version: snapshot.version,
+        provider,
       },
     };
   }
 
-  private provider(providerId: string): ModelProviderCatalog {
-    const provider = PROVIDERS.find((candidate) => candidate.id === providerId);
+  private provider(
+    providers: ModelProviderCatalog[],
+    providerId: string,
+  ): ModelProviderCatalog {
+    const provider = providers.find((candidate) => candidate.id === providerId);
     if (!provider) {
+      if (Object.hasOwn(PROVIDER_NAMES, providerId)) {
+        throw new BadRequestException(
+          `Model provider "${providerId}" has no models available for new sessions`,
+        );
+      }
       throw new BadRequestException(
         `Model provider "${providerId}" is not configured with a managed catalog`,
       );
     }
     return provider;
   }
-}
-
-function isReasoningEffort(value: string): value is ReasoningEffort {
-  return (REASONING_EFFORTS as readonly string[]).includes(value);
-}
-
-function serializeProvider(
-  provider: ModelProviderCatalog,
-): Record<string, unknown> {
-  return {
-    id: provider.id,
-    displayName: provider.displayName,
-    defaultModel: provider.defaultModel,
-    models: provider.models.map((entry) => ({
-      id: entry.id,
-      displayName: entry.displayName,
-      defaultReasoningEffort: entry.defaultReasoningEffort,
-      supportedReasoningEfforts: [...entry.supportedReasoningEfforts],
-    })),
-  };
 }

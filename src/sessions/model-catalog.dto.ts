@@ -1,26 +1,20 @@
 import { ApiProperty } from "@nestjs/swagger";
-import {
-  REASONING_EFFORTS,
-  ReasoningEffort,
-  SupportedModel,
-  ModelProviderCatalog,
-} from "./model-catalog.service";
+import { SupportedModel, ModelProviderCatalog } from "./model-catalog.service";
 
 export class SupportedModelResponseDto implements SupportedModel {
   @ApiProperty() id!: string;
   @ApiProperty() displayName!: string;
   @ApiProperty({
-    enum: REASONING_EFFORTS,
+    type: String,
     description: "Default for this specific model when no effort is selected.",
   })
-  defaultReasoningEffort!: ReasoningEffort;
+  defaultReasoningEffort!: string;
   @ApiProperty({
-    enum: REASONING_EFFORTS,
+    type: String,
     isArray: true,
-    description:
-      "Offer only this model's returned effort values. The vocabulary enum does not mean every effort works with every model.",
+    description: "Offer only this model's returned effort values.",
   })
-  supportedReasoningEfforts!: ReasoningEffort[];
+  supportedReasoningEfforts!: string[];
 }
 export class ModelProviderResponseDto implements ModelProviderCatalog {
   @ApiProperty() id!: string;

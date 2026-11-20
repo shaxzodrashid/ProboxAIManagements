@@ -19,6 +19,7 @@ type Entry = {
   modelName: string;
 };
 type Draft = {
+  catalogVersion: string;
   userId: string;
   workspaceId: string;
   chatId: bigint;
@@ -75,9 +76,11 @@ export class TelegramModelPanel {
   ) {
     for (const [key, value] of this.drafts)
       if (value.expiresAt <= this.now()) this.drafts.delete(key);
+    const snapshot = this.catalog.snapshot();
     const current = this.drafts.get(actor.id);
     if (
       current &&
+      current.catalogVersion === snapshot.version &&
       current.workspaceId === actor.workspaceId &&
       current.chatId === chatId &&
       current.telegramUserId === telegramUserId &&
@@ -102,7 +105,7 @@ export class TelegramModelPanel {
     } catch {
       /* Invalid legacy configuration must be selected again, not silently saved. */
     }
-    const entries = this.catalog.list().flatMap((p) =>
+    const entries = snapshot.providers.flatMap((p) =>
       p.models.map((m) => ({
         providerId: p.id,
         providerName: p.displayName,
@@ -111,6 +114,7 @@ export class TelegramModelPanel {
       })),
     );
     const draft: Draft = {
+      catalogVersion: snapshot.version,
       userId: actor.id,
       workspaceId: actor.workspaceId,
       chatId,
@@ -179,6 +183,14 @@ export class TelegramModelPanel {
     if (["b", "ok", "x"].includes(action!) && arg !== undefined) return;
     if (action === "x") {
       await this.cancel(actor, chatId);
+      return;
+    }
+    if (draft.catalogVersion !== this.catalog.version) {
+      this.drafts.delete(actor.id);
+      await this.closed(
+        draft,
+        "The model catalog changed. Open Models to see the current choices.",
+      );
       return;
     }
     if (action === "ok") {

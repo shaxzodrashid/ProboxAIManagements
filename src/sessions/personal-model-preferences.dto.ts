@@ -1,7 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import {
-  IsIn,
   IsDefined,
   IsString,
   MaxLength,
@@ -9,7 +8,6 @@ import {
   ValidateIf,
   ValidateNested,
 } from "class-validator";
-import { REASONING_EFFORTS } from "./model-catalog.service";
 export class PersonalModelPreferencesQueryDto {}
 export class SavedPersonalModelDto {
   @ApiProperty({ maxLength: 256 })
@@ -31,7 +29,7 @@ export class SavedPersonalModelDto {
 export class EffectivePersonalModelDto {
   @ApiProperty() providerId!: string;
   @ApiProperty() model!: string;
-  @ApiProperty({ enum: REASONING_EFFORTS }) reasoningEffort!: string;
+  @ApiProperty({ maxLength: 64 }) reasoningEffort!: string;
 }
 export class PutPersonalModelPreferencesDto {
   @ApiProperty({
@@ -53,8 +51,10 @@ export class PutPersonalModelPreferencesDto {
   @MinLength(1)
   @MaxLength(256)
   model!: string;
-  @ApiProperty({ enum: REASONING_EFFORTS })
-  @IsIn(REASONING_EFFORTS)
+  @ApiProperty({ maxLength: 64 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
   reasoningEffort!: string;
 }
 export class PersonalModelPreferencesDto {

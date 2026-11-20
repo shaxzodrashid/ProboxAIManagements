@@ -1491,10 +1491,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   listModelCatalog(providerId?: string) {
-    return {
-      version: this.modelCatalog.version,
-      providers: this.modelCatalog.list(providerId),
-    };
+    return this.modelCatalog.snapshot(providerId);
   }
 
   private async recordEvent(

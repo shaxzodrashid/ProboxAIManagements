@@ -1,5 +1,16 @@
 # Backend changelog
 
+## 0.3.8 — managed model catalog
+
+- Manage model availability, priority, reasoning efforts and retirement through
+  an installation-wide, operator-only API backed by PostgreSQL.
+- Publish a shared, versioned JSON catalog for backend session selection, Telegram
+  and the compatible Codex CLI. Support OpenAI, Anthropic and Google DeepMind for
+  new sessions and retain saved model selections for existing sessions.
+
+The release requires the additive managed-model migration and a catalog-compatible
+Codex build for runner parity. See the [app2 rollout notes](Docs/release-0.3.8-rollout.md).
+
 ## 0.3.7 — session activity, Telegram tracking and browser workspace access
 
 - Include bounded tool activity snapshots in authorized session history and

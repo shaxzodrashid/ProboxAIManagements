@@ -12,6 +12,7 @@ import { StringDecoder } from "node:string_decoder";
 import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
 import { archiveRunnerEvent, historyText } from "./session-history";
 import { runAppServerSession } from "./app-server-session";
+import { catalogFilePath } from "./model-catalog.service";
 import sharp from "sharp";
 
 const execFileAsync = promisify(execFile);
@@ -400,6 +401,7 @@ export class ProboxAiRunner {
       AWS_DEFAULT_REGION,
     } = process.env;
     return {
+      CODEX_PROVIDER_CATALOG: catalogFilePath(),
       NODE_ENV,
       PATH,
       HOME,

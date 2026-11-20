@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { AuthenticatedUser } from "../auth/auth.types";
 import { PrismaService } from "../prisma/prisma.service";
@@ -36,7 +36,8 @@ export async function personalSessionSelection(
       saved.model ?? undefined,
       saved.reasoningEffort ?? undefined,
     );
-  } catch {
+  } catch (error) {
+    if (!(error instanceof BadRequestException)) throw error;
     throw operationError(
       409,
       "MODEL_PREFERENCES_INVALID",
@@ -92,7 +93,8 @@ export class PersonalModelPreferencesService {
         model: s.effectiveModel,
         reasoningEffort: s.effectiveReasoningEffort,
       };
-    } catch {
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) throw error;
       /* Repairable legacy setting; never substitute silently. */
     }
     return {

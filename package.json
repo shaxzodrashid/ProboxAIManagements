@@ -1,6 +1,6 @@
 {
   "name": "proboxai",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "packageManager": "pnpm@10.13.1",
   "private": true,
   "description": "ProboxAI programmatic coding-session control plane",
@@ -88,6 +88,10 @@
       "ts"
     ],
     "rootDir": ".",
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/test"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": [

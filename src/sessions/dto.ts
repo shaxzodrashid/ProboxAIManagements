@@ -1,3 +1,4 @@
+import { ACTIVE_PROVIDERS, PROVIDER_NAMES } from "./model-catalog.service";
 import {
   IsIn,
   IsOptional,
@@ -72,13 +73,7 @@ export class CreateSessionDto {
   model?: string;
 
   @ApiPropertyOptional({
-    enum: [
-      "openai",
-      "amazon-bedrock",
-      "amazon-bedrock-runtime",
-      "anthropic",
-      "deepmind",
-    ],
+    enum: ACTIVE_PROVIDERS,
     description:
       "Managed provider ID. Explicit selection uses the runtime catalog and overrides personal defaults; an entirely omitted selection inherits shared personal preferences. Existing sessions and project context are unchanged.",
   })
@@ -88,13 +83,13 @@ export class CreateSessionDto {
   providerId?: string;
 
   @ApiPropertyOptional({
-    enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+    maxLength: 64,
     description:
       "Optional model-specific thinking effort. Omit it to use the selected model's catalog default.",
   })
   @IsOptional()
   @IsString()
-  @MaxLength(20)
+  @MaxLength(64)
   reasoningEffort?: string;
 }
 
@@ -275,13 +270,7 @@ export class SessionResponseDto {
 
 export class ModelCatalogQueryDto {
   @ApiPropertyOptional({
-    enum: [
-      "openai",
-      "amazon-bedrock",
-      "amazon-bedrock-runtime",
-      "anthropic",
-      "deepmind",
-    ],
+    enum: Object.keys(PROVIDER_NAMES),
     description:
       "Return models for one provider. Omit to return all providers.",
   })

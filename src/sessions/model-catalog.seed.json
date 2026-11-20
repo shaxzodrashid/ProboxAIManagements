@@ -1,0 +1,504 @@
+[
+  {
+    "providerId": "openai",
+    "id": "gpt-6-astra",
+    "displayName": "GPT-6 Astra",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "priority": 10
+  },
+  {
+    "providerId": "openai",
+    "id": "gpt-6-sol",
+    "displayName": "GPT-6 Sol",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "priority": 0
+  },
+  {
+    "providerId": "openai",
+    "id": "gpt-6-luna",
+    "displayName": "GPT-6 Luna",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "priority": 12
+  },
+  {
+    "providerId": "openai",
+    "id": "gpt-5.6-sol",
+    "displayName": "GPT-5.6 Sol",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "priority": 13
+  },
+  {
+    "providerId": "openai",
+    "id": "gpt-5.6-terra",
+    "displayName": "GPT-5.6 Terra",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "priority": 14
+  },
+  {
+    "providerId": "openai",
+    "id": "gpt-5.6-luna",
+    "displayName": "GPT-5.6 Luna",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 15
+  },
+  {
+    "providerId": "openai",
+    "id": "gpt-5.5",
+    "displayName": "GPT-5.5",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+    "priority": 16
+  },
+  {
+    "providerId": "openai",
+    "id": "gpt-5.2",
+    "displayName": "GPT-5.2",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+    "priority": 17
+  },
+  {
+    "providerId": "amazon-bedrock",
+    "id": "openai.gpt-6-sol",
+    "displayName": "GPT-6 Sol",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "priority": 0
+  },
+  {
+    "providerId": "amazon-bedrock",
+    "id": "openai.gpt-6-astra",
+    "displayName": "GPT-6 Astra",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 11
+  },
+  {
+    "providerId": "amazon-bedrock",
+    "id": "openai.gpt-6-luna",
+    "displayName": "GPT-6 Luna",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "priority": 12
+  },
+  {
+    "providerId": "amazon-bedrock",
+    "id": "openai.gpt-5.6-sol",
+    "displayName": "GPT-5.6 Sol",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 13
+  },
+  {
+    "providerId": "amazon-bedrock",
+    "id": "openai.gpt-5.6-terra",
+    "displayName": "GPT-5.6 Terra",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 14
+  },
+  {
+    "providerId": "amazon-bedrock",
+    "id": "openai.gpt-5.6-luna",
+    "displayName": "GPT-5.6 Luna",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 15
+  },
+  {
+    "providerId": "amazon-bedrock",
+    "id": "openai.gpt-5.5",
+    "displayName": "GPT-5.5",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+    "priority": 16
+  },
+  {
+    "providerId": "amazon-bedrock",
+    "id": "openai.gpt-5.4",
+    "displayName": "GPT-5.4",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+    "priority": 17
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "global.openai.gpt-6-sol",
+    "displayName": "GPT-6 Sol (global)",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "priority": 0
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "global.openai.gpt-6-astra",
+    "displayName": "GPT-6 Astra (global)",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 11
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "global.openai.gpt-6-luna",
+    "displayName": "GPT-6 Luna (global)",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "priority": 12
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "global.openai.gpt-5.6-sol",
+    "displayName": "GPT-5.6 Sol (global)",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 13
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "global.openai.gpt-5.6-terra",
+    "displayName": "GPT-5.6 Terra (global)",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 14
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "global.openai.gpt-5.6-luna",
+    "displayName": "GPT-5.6 Luna (global)",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 15
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "us.openai.gpt-6-sol",
+    "displayName": "GPT-6 Sol (us)",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "priority": 16
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "us.openai.gpt-6-astra",
+    "displayName": "GPT-6 Astra (us)",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 17
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "us.openai.gpt-6-luna",
+    "displayName": "GPT-6 Luna (us)",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": [
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "priority": 18
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "us.openai.gpt-5.6-sol",
+    "displayName": "GPT-5.6 Sol (us)",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 19
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "us.openai.gpt-5.6-terra",
+    "displayName": "GPT-5.6 Terra (us)",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 20
+  },
+  {
+    "providerId": "amazon-bedrock-runtime",
+    "id": "us.openai.gpt-5.6-luna",
+    "displayName": "GPT-5.6 Luna (us)",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 21
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-opus-5-5",
+    "displayName": "Claude Opus 5.5",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 0
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-fable-5-1",
+    "displayName": "Claude Fable 5.1",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 11
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-mythos-5-1",
+    "displayName": "Claude Mythos 5.1 (invite only)",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 12
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-opus-5",
+    "displayName": "Claude Opus 5",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 13
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-sonnet-5",
+    "displayName": "Claude Sonnet 5",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 14
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-fable-5",
+    "displayName": "Claude Fable 5",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 15
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-haiku-4-5-20251001",
+    "displayName": "Claude Haiku 4.5",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 16,
+    "maxOutputTokens": 64000,
+    "thinkingBudgets": {
+      "low": 1024,
+      "medium": 4096,
+      "high": 8192,
+      "xhigh": 16384,
+      "max": 32768
+    }
+  },
+  {
+    "providerId": "deepmind",
+    "id": "gemini-3.1-pro-preview",
+    "displayName": "Gemini 3.1 Pro Preview",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high"],
+    "priority": 0
+  },
+  {
+    "providerId": "deepmind",
+    "id": "gemini-3.8-flash",
+    "displayName": "Gemini 3.8 Flash",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high"],
+    "priority": 11
+  },
+  {
+    "providerId": "deepmind",
+    "id": "gemini-3.6-flash",
+    "displayName": "Gemini 3.6 Flash",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["minimal", "low", "medium", "high"],
+    "priority": 12
+  },
+  {
+    "providerId": "deepmind",
+    "id": "gemini-3.5-flash-lite",
+    "displayName": "Gemini 3.5 Flash-Lite",
+    "defaultReasoningEffort": "minimal",
+    "supportedReasoningEfforts": ["minimal", "low", "medium", "high"],
+    "priority": 13
+  },
+  {
+    "providerId": "deepmind",
+    "id": "gemma-4-31b-it",
+    "displayName": "Gemma 4 31B IT",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["minimal", "high"],
+    "priority": 14,
+    "maxOutputTokens": 32768
+  },
+  {
+    "providerId": "deepmind",
+    "id": "gemma-4-26b-a4b-it",
+    "displayName": "Gemma 4 26B A4B IT",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["minimal", "high"],
+    "priority": 15,
+    "maxOutputTokens": 32768
+  },
+  {
+    "providerId": "openai",
+    "id": "gpt-6.1-sol",
+    "displayName": "GPT-6.1-Sol",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "priority": 61
+  },
+  {
+    "providerId": "openai",
+    "id": "gpt-6.1-terra",
+    "displayName": "GPT-6.1 Terra",
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "priority": 62
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-sonnet-5-5",
+    "displayName": "Claude Sonnet 5.5",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 63
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-haiku-5-5",
+    "displayName": "Claude Haiku 5.5",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 64
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-fable-5-2",
+    "displayName": "Claude Fable 5.2",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 65
+  },
+  {
+    "providerId": "anthropic",
+    "id": "claude-mythos-5-2",
+    "displayName": "Claude Mythos 5.2 (verification required)",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
+    "priority": 66
+  },
+  {
+    "providerId": "deepmind",
+    "id": "gemini-4-carbon",
+    "displayName": "Gemini 4 Carbon",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high"],
+    "priority": 67
+  },
+  {
+    "providerId": "deepmind",
+    "id": "gemini-4-argon",
+    "displayName": "Gemini 4 Argon",
+    "defaultReasoningEffort": "medium",
+    "supportedReasoningEfforts": ["low", "medium", "high"],
+    "priority": 68
+  },
+  {
+    "providerId": "deepmind",
+    "id": "gemini-4-hydrogen",
+    "displayName": "Gemini 4 Hydrogen",
+    "defaultReasoningEffort": "high",
+    "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+    "priority": 69
+  }
+]

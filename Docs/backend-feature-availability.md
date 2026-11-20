@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.3.7**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.3.8**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -39,6 +39,7 @@ Available since refers to the first tracked Git release containing this bounded 
 | Human task edits, assignees, checklists, comments and moves                           | 0.2.0-dev.1     | foundation | [Contract](../Docs/human-task-collaboration-contracts.md)      |
 | Optional plain bio, limit1000 and private default                                     | 0.2.0-dev.1     | supported  | [Contract](../Docs/human-task-query-bio-evidence.md)           |
 | Bounded initialization event recovery                                                 | 0.2.0-dev.1     | supported  | [Contract](../Docs/initialization-event-readback-contracts.md) |
+| Installation-wide model and reasoning effort management with a shared Codex catalog   | 0.3.8           | supported  | [Contract](../Docs/MODEL_PROVIDER_SESSION_MANAGEMENT.md)       |
 | Profile audiences, directed contacts and private aliases                              | 0.2.0-dev.1     | supported  | [Contract](../Docs/profile-picker-contracts.md)                |
 | Self birthday and independently authorized date parts                                 | 0.2.0-dev.1     | foundation | [Contract](../Docs/profile-privacy-foundations.md)             |
 | Archive retention and member-only human task reads                                    | 0.2.0-dev.1     | supported  | [Contract](../Docs/project-archive-human-task-contracts.md)    |
@@ -74,6 +75,7 @@ Available since refers to the first tracked Git release containing this bounded 
 
 ## Release references
 
+- **0.3.8**: `refs/tags/v0.3.8`, production, not-deployed.
 - **0.3.7**: `refs/tags/v0.3.7`, production, not-deployed.
 - **0.3.6**: `refs/tags/v0.3.6`, production, not-deployed.
 - **0.3.5**: `refs/tags/v0.3.5`, production, not-deployed.

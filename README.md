@@ -393,13 +393,11 @@ turn. Widgets refresh while visible and show activity categories without tool
 inputs or outputs. Set `TELEGRAM_WIDGETS_ENABLED=true` after registering
 `widget_query` to enable widgets. The default uses text navigation.
 
-The shared API/bot catalog follows **our custom Codex fork**, including OpenAI,
-Anthropic, Google DeepMind, Amazon Bedrock and Amazon Bedrock Runtime. The
-September 27 catalog adds GPT-6 Astra/Sol/Luna, Claude Opus 5.5/Fable 5.1/Mythos
-5.1, Gemini 3.8 Flash and Bedrock global/US routing variants. Provider-specific
-reasoning limits are validated; Mythos retains its invite-only label. Models
-still require the corresponding provider account/credentials. The default
-OpenAI model is GPT-6 Sol; Anthropic defaults to Claude Opus 5.5.
+ProboxAI stores the shared API and Telegram model catalog in PostgreSQL and
+publishes it as JSON for the compatible Codex fork. Installation operators can
+manage model availability, defaults and reasoning efforts for OpenAI, Anthropic
+and Google DeepMind. Bedrock is disabled for new sessions. See the
+[model catalog guide](Docs/MODEL_PROVIDER_SESSION_MANAGEMENT.md) for setup and API usage.
 
 ## Safety boundary
 
