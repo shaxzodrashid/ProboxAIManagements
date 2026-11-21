@@ -13,6 +13,10 @@ import { WorkspacePathPolicy } from "../storage/workspace-path-policy.service";
 import { archiveRunnerEvent, historyText } from "./session-history";
 import { runAppServerSession } from "./app-server-session";
 import { catalogFilePath } from "./model-catalog.service";
+import {
+  imageEditorPilotOverride,
+  type ImageEditorPilotActor,
+} from "./image-editor-pilot";
 import sharp from "sharp";
 
 const execFileAsync = promisify(execFile);
@@ -29,6 +33,7 @@ export interface RunnerOptions {
   providerId: string;
   reasoningEffort?: string;
   threadId?: string;
+  imageEditorActor?: ImageEditorPilotActor;
 }
 export interface RunnerEvent {
   type: string;
@@ -87,19 +92,13 @@ export class ProboxAiRunner {
         "-c",
         `model_reasoning_effort=${JSON.stringify(options.reasoningEffort)}`,
       );
-    if (options.threadId) args.push("resume", options.threadId);
-    args.push("--", options.prompt);
     const live = process.env.PROBOXAI_RUNNER_TRANSPORT === "app-server";
-    const runnerArgs = live
-      ? [
-          "app-server",
-          "-c",
-          `model_provider=${JSON.stringify(options.providerId)}`,
-        ]
-      : args;
     const archivePath = options.archiveToDatabase
       ? undefined
       : await this.archivePath(options.sessionId);
+    const imageEditor = live
+      ? undefined
+      : await imageEditorPilotOverride(options);
     if (options.beforeSpawn && !(await options.beforeSpawn())) return -1;
     const directory = await this.paths.executionDirectory(
       options.cwd,
@@ -109,6 +108,21 @@ export class ProboxAiRunner {
       throw new Error("Runner working directory is unavailable");
     if (this.processes.has(options.sessionId))
       throw new Error("Session runner is already tracked");
+    if (imageEditor) args.push("-c", imageEditor);
+    if (options.threadId) args.push("resume", options.threadId);
+    const prompt = imageEditor
+      ? "ProboxAI Image Editor is available through MCP. Register /workspace with " +
+        "workspace_register and use project-relative paths for inputs and exports.\n\n" +
+        options.prompt
+      : options.prompt;
+    args.push("--", prompt);
+    const runnerArgs = live
+      ? [
+          "app-server",
+          "-c",
+          `model_provider=${JSON.stringify(options.providerId)}`,
+        ]
+      : args;
     const child = spawn(bin, runnerArgs, {
       stdio: "pipe",
       shell: false,

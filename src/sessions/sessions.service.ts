@@ -1052,7 +1052,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
       return { session, turn, executionPrompt };
     });
     if (!claimed) return;
-    const { session, executionPrompt } = claimed;
+    const { session, turn, executionPrompt } = claimed;
     let failed = false;
     let code = -1;
     const heartbeat = setInterval(() => {
@@ -1076,6 +1076,13 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
           providerId: session.providerId,
           reasoningEffort: session.effectiveReasoningEffort ?? undefined,
           threadId: session.codexThreadId ?? undefined,
+          imageEditorActor:
+            session.selectedProjectId && turn.requestedById
+              ? {
+                  projectId: session.selectedProjectId,
+                  userId: turn.requestedById,
+                }
+              : undefined,
         },
         async (event) => {
           if (["turn.failed", "error", "runner.error"].includes(event.type))

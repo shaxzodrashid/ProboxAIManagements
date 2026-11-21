@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { imageEditorPilotOverride } from "../src/sessions/image-editor-pilot";
 import { ProboxAiRunner } from "../src/sessions/proboxai-runner.service";
 
 jest.mock("node:child_process", () => ({
@@ -11,9 +12,13 @@ jest.mock("node:child_process", () => ({
   execFile: jest.fn(),
   spawn: jest.fn(),
 }));
+jest.mock("../src/sessions/image-editor-pilot", () => ({
+  imageEditorPilotOverride: jest.fn(),
+}));
 
 const spawnMock = jest.mocked(spawn);
 const execFileMock = jest.mocked(execFile);
+const editorOverrideMock = jest.mocked(imageEditorPilotOverride);
 
 describe("ProboxAiRunner hash chain", () => {
   it("binds each frame to its predecessor", () => {
@@ -111,6 +116,7 @@ describe("ProboxAiRunner start", () => {
   beforeEach(async () => {
     process.env.PROBOXAI_RUNNER_TRANSPORT = "exec";
     jest.clearAllMocks();
+    editorOverrideMock.mockReset();
     const archiveDirectory = await mkdtemp(join(tmpdir(), "proboxai-runner-"));
     archiveDirectories.push(archiveDirectory);
     process.env.PROBOXAI_ARCHIVE_DIR = archiveDirectory;
@@ -137,9 +143,19 @@ describe("ProboxAiRunner start", () => {
     );
   });
 
-  it.each([undefined, "thread-123"])(
-    "starts/resumes Codex with the non-Git repository check skipped (%s)",
-    async (threadId) => {
+  it.each([
+    { threadId: undefined, editor: false },
+    { threadId: "thread-123", editor: false },
+    { threadId: undefined, editor: true },
+    { threadId: "thread-123", editor: true },
+  ])(
+    "starts/resumes Codex with the non-Git repository check skipped (thread=$threadId, editor=$editor)",
+    async ({ threadId, editor }) => {
+      const override =
+        'mcp_servers.image-editor={command="/usr/bin/bwrap",required=true}';
+      if (editor) editorOverrideMock.mockResolvedValue(override);
+      const sandbox = editor ? "workspace-write" : "read-only";
+      const actor = { projectId: "pilot-project", userId: "approved-actor" };
       const stdin = new PassThrough();
       const endSpy = jest.spyOn(stdin, "end");
       const child = Object.assign(new EventEmitter(), {
@@ -170,12 +186,13 @@ describe("ProboxAiRunner start", () => {
         {
           sessionId: "session-1",
           cwd: "/opt/marketing/Brandbook_E2E",
-          sandbox: "read-only",
+          sandbox,
           model: "gpt-5.4",
           providerId: "openai",
           reasoningEffort: "high",
           prompt: "Create the brandbook.",
           threadId,
+          imageEditorActor: actor,
         },
         jest.fn(),
       );
@@ -186,6 +203,9 @@ describe("ProboxAiRunner start", () => {
       child.emit("close", 0);
 
       await expect(start).resolves.toBe(0);
+      expect(editorOverrideMock).toHaveBeenCalledWith(
+        expect.objectContaining({ sandbox, imageEditorActor: actor }),
+      );
       expect(spawnMock).toHaveBeenCalledWith(
         expect.any(String),
         [
@@ -193,7 +213,7 @@ describe("ProboxAiRunner start", () => {
           "--json",
           "--skip-git-repo-check",
           "--sandbox",
-          "read-only",
+          sandbox,
           "-C",
           "/opt/marketing/Brandbook_E2E",
           "-c",
@@ -202,9 +222,14 @@ describe("ProboxAiRunner start", () => {
           "gpt-5.4",
           "-c",
           'model_reasoning_effort="high"',
+          ...(editor ? ["-c", override] : []),
           ...(threadId ? ["resume", threadId] : []),
           "--",
-          "Create the brandbook.",
+          editor
+            ? expect.stringMatching(
+                /Register \/workspace[\s\S]*Create the brandbook\.$/,
+              )
+            : "Create the brandbook.",
         ],
         expect.objectContaining({ shell: false }),
       );

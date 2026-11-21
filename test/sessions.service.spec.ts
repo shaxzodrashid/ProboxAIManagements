@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import { ModelCatalogService } from "../src/sessions/model-catalog.service";
 import { SessionsService } from "../src/sessions/sessions.service";
 
-function setup() {
+function setup(selectedProjectId?: string) {
   const session = {
     id: "session",
     workspaceId: "workspace",
     task: { managerId: "actor", workspaceId: "workspace" },
     taskId: "task",
+    selectedProjectId,
     status: "COMPLETED",
     cwd: "/opt/apps/project",
     sandbox: "workspace-write",
@@ -74,6 +75,20 @@ function setup() {
         id: "task",
         workspaceId: "workspace",
         managerId: "actor",
+      })),
+    },
+    project: {
+      findFirst: jest.fn(async () => ({
+        id: selectedProjectId,
+        name: "Pilot project",
+        status: "READY",
+        directoryName: "project",
+        department: {
+          homePath: "/opt/apps",
+          workspaceId: "workspace",
+          status: "ACTIVE",
+        },
+        members: [{ userId: "actor" }],
       })),
     },
     sessionEvent: {
@@ -166,7 +181,7 @@ describe("Session continuity and terminal state", () => {
     expect(prisma.proboxAiSession.update).not.toHaveBeenCalled();
   });
   it("resumes the existing provider thread with its saved model and effort", async () => {
-    const h = setup();
+    const h = setup("pilot-project");
     await h.service.acceptFollowUp(
       "actor",
       "session",
@@ -180,6 +195,7 @@ describe("Session continuity and terminal state", () => {
         providerId: "anthropic",
         model: "claude-fable-5-1",
         reasoningEffort: "max",
+        imageEditorActor: { projectId: "pilot-project", userId: "actor" },
       }),
       expect.any(Function),
     );
