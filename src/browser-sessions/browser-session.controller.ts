@@ -46,6 +46,12 @@ export class BrowserSessionResponseDto {
   })
   authenticated!: boolean;
   @ApiProperty({
+    required: false,
+    description:
+      "Present for authenticated sessions. Requires the catalog operator allowlist and settings.manage.",
+  })
+  canManageModelCatalog?: boolean;
+  @ApiProperty({
     description: "Generation-bound synchronizer token; keep in memory only.",
   })
   csrfToken!: string;
@@ -111,7 +117,20 @@ const taskRoutes: Record<string, string[]> = {
   ],
 };
 
+const catalogCollection =
+  /^admin\/model-catalog\/providers\/(?:openai|anthropic|deepmind|amazon-bedrock(?:-runtime)?)\/models$/;
+const catalogItem =
+  /^admin\/model-catalog\/providers\/(?:openai|anthropic|deepmind|amazon-bedrock(?:-runtime)?)\/models\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+
 export function browserProxyAllowed(method: string, path: string) {
+  if (
+    method === "PUT" &&
+    new RegExp(`^sessions/${id}/model-selection$`).test(path)
+  )
+    return true;
+  if (catalogCollection.test(path))
+    return method === "GET" || method === "POST";
+  if (catalogItem.test(path)) return method === "PATCH";
   if (
     taskRoutes[method]?.some((pattern) => new RegExp(`^${pattern}$`).test(path))
   )

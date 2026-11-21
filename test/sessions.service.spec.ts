@@ -115,6 +115,56 @@ function setup() {
 }
 
 describe("Session continuity and terminal state", () => {
+  it("repairs an idle retired selection once, preserving the thread and recording its old values", async () => {
+    const { session, service, prisma } = setup();
+    session.model = "retired-test-model";
+    const expected = {
+      providerId: session.providerId,
+      model: session.model,
+      reasoningEffort: session.effectiveReasoningEffort,
+    };
+    const next = {
+      providerId: "openai",
+      model: "gpt-6-sol",
+      reasoningEffort: "high",
+    };
+    await expect(
+      service.repairModel("actor", "session", { expected, ...next }),
+    ).resolves.toEqual(next);
+    expect(session.codexThreadId).toBe("existing-thread");
+    expect(session.status).toBe("COMPLETED");
+    expect(prisma.sessionEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          type: "session.model-selection",
+          rawPayload: { previous: expected, effective: next, actorId: "actor" },
+        }),
+      }),
+    );
+    await service.repairModel("actor", "session", { expected, ...next });
+    expect(prisma.sessionEvent.create).toHaveBeenCalledTimes(1);
+  });
+  it("rejects a repair after the record changed or a turn started", async () => {
+    const { session, service, prisma } = setup();
+    const dto = {
+      expected: {
+        providerId: "anthropic",
+        model: "stale",
+        reasoningEffort: "high",
+      },
+      providerId: "openai",
+      model: "gpt-6-sol",
+      reasoningEffort: "high",
+    };
+    await expect(service.repairModel("actor", "session", dto)).rejects.toThrow(
+      "selection changed",
+    );
+    session.status = "RUNNING";
+    await expect(service.repairModel("actor", "session", dto)).rejects.toThrow(
+      "idle session",
+    );
+    expect(prisma.proboxAiSession.update).not.toHaveBeenCalled();
+  });
   it("resumes the existing provider thread with its saved model and effort", async () => {
     const h = setup();
     await h.service.acceptFollowUp(

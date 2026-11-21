@@ -31,6 +31,42 @@ To add an effort, PATCH the model with the complete new `supportedReasoningEffor
 
 A successful mutation has committed to PostgreSQL and published the file. A publication failure returns HTTP 503. Read the management entry to check the stored change. The service reconciles the file from the database at startup and every 30 seconds. A duplicate POST returns 409. The initial catalog is seeded once into an empty registry. Provider credentials, account entitlements and upstream support must be configured separately.
 
+## Browser rollout and access checks
+
+Deploy backend **0.3.9 or later** before enabling the matching frontend. Use a
+browser-enabled backend and keep the existing operator allowlist and role grants.
+From the backend source or release directory, verify the frontend's API origin:
+
+```bash
+node scripts/verify-browser-catalog-gateway.mjs https://agent.probox.uz 0.3.9
+```
+
+The probe checks the running OpenAPI schema and the concrete cookie-gateway
+routes without credentials or writes. The updated app2 deployment wrapper also
+runs it against the candidate on loopback when `BROWSER_SESSIONS_ENABLED=true`.
+Install the reviewed `deploy.sh` into the operator directory before cutover as
+described in the [app2 runbook](deployment-app2.md).
+
+Sign in through the same frontend used by the operator and open **Settings →
+Installation → Model Catalog**. Confirm the model list loads. An older gateway
+omits `canManageModelCatalog`, while a supported gateway reports `false` for an
+account missing either the workspace permission or the installation allowlist
+entry. A supported gateway returns `true` when both checks pass. Verify a
+non-operator cannot open the catalog. This read-only acceptance complements the
+anonymous deployment probe.
+
+Model list responses include a per-record `revision`. Send that value in a
+quoted `If-Match` header on PATCH to detect a concurrent edit. A mismatch returns
+409 before the write. The header is optional for existing clients.
+
+An assigned manager with `sessions.manage` can replace an ineligible choice on
+an idle session with `PUT /sessions/:id/model-selection`. Send the previously
+read `expected` object and the replacement `providerId`, `model`, and
+`reasoningEffort`. The server checks the selection under the session lock,
+records the old and new choices, and preserves the thread and prior turns.
+Repeating the already applied replacement on an idle session returns its
+effective selection.
+
 <details>
 <summary>Historical implementation and September 2026 catalog snapshot</summary>
 
@@ -63,6 +99,7 @@ available at session-start time.
 `reasoningEffort`. Before a session is created, ProboxAI resolves those fields
 against its managed catalog, applies the model default only when the caller
 omits a value, and rejects unsupported provider/model/effort combinations.
+
 `GET /sessions/model-catalog` gives clients the exact picker data, including
 each model's `supportedReasoningEfforts` and `defaultReasoningEffort`.
 

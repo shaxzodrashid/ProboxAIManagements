@@ -1,5 +1,14 @@
 # Backend changelog
 
+## 0.3.9 — browser model catalog management
+
+- Expose Model Catalog through the browser gateway for operators with
+  `settings.manage` on the installation allowlist.
+- Support conditional catalog edits and repair of an unavailable model selection
+  on an idle session, preserving the thread and prior turns.
+- Verify the running catalog gateway during browser-enabled deployments before
+  accepting the candidate. No new migration or Codex build is required from 0.3.8.
+
 ## 0.3.8 — managed model catalog
 
 - Manage model availability, priority, reasoning efforts and retirement through

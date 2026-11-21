@@ -109,6 +109,11 @@ export class ManagedModelResponseDto extends PickType(CreateManagedModelDto, [
   "defaultReasoningEffort",
   "supportedReasoningEfforts",
 ] as const) {
+  @ApiPropertyOptional({
+    description:
+      "Opaque per-record revision supplied on listing for conditional edits.",
+  })
+  revision?: string;
   @ApiProperty() providerId!: string;
   @ApiProperty() priority!: number;
   @ApiProperty() isActive!: boolean;

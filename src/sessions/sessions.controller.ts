@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Param,
   Post,
+  Put,
   Query,
   Sse,
   UseGuards,
@@ -45,6 +46,10 @@ import {
   SessionHistoryResponseDto,
 } from "./dto";
 import { SessionsService } from "./sessions.service";
+import {
+  PutPersonalModelPreferencesDto,
+  EffectivePersonalModelDto,
+} from "./personal-model-preferences.dto";
 import {
   SessionDetailQueryDto,
   SessionDetailPageDto,
@@ -333,6 +338,20 @@ export class SessionsController {
   @ApiResourceErrors()
   get(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.sessions.get(user.id, id);
+  }
+  @Put(":id/model-selection")
+  @Header("Cache-Control", "no-store")
+  @RequirePermissions(Permissions.SESSIONS_MANAGE)
+  @ApiOperation({
+    summary: "Replace an unavailable model selection on an idle session",
+  })
+  @ApiOkResponse({ type: EffectivePersonalModelDto })
+  repairModel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: PutPersonalModelPreferencesDto,
+  ) {
+    return this.sessions.repairModel(user.id, id, dto);
   }
   @Post(":id/turns")
   @HttpCode(202)

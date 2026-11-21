@@ -21,6 +21,10 @@ import { AuthService } from "../auth/auth.service";
 import { AuthLocale, LoginDto } from "../auth/auth.dto";
 import { PrismaService } from "../prisma/prisma.service";
 import {
+  catalogManagementPermission,
+  isCatalogOperator,
+} from "../sessions/catalog-operator";
+import {
   BrowserSessionConfig,
   browserCookieName,
   browserDigest,
@@ -246,21 +250,25 @@ export class BrowserSessionService {
         },
       },
     });
+    const permissions = [
+      ...new Set(
+        user.roleAssignments.flatMap((a) =>
+          a.role.permissions.map((p) => p.permissionKey),
+        ),
+      ),
+    ].sort();
     return {
       authenticated: true as const,
+      canManageModelCatalog:
+        permissions.includes(catalogManagementPermission) &&
+        isCatalogOperator(user.id),
       csrfToken: bundle.csrfToken,
       user: {
         id: user.id,
         workspaceId: user.workspaceId,
         displayName: user.fullName ?? "",
       },
-      permissions: [
-        ...new Set(
-          user.roleAssignments.flatMap((a) =>
-            a.role.permissions.map((p) => p.permissionKey),
-          ),
-        ),
-      ].sort(),
+      permissions,
       idleExpiresAt: row.idleExpiresAt.toISOString(),
       // Compatibility deadline for old adapters; new clients use hardExpiresAt.
       absoluteExpiresAt: (row.rolling

@@ -31,6 +31,7 @@ import {
 import { CreateSessionDto } from "./dto";
 import { ModelCatalogService } from "./model-catalog.service";
 import { personalSessionSelection } from "./personal-model-preferences.service";
+import { PutPersonalModelPreferencesDto } from "./personal-model-preferences.dto";
 import { KeyedCreateSessionDto } from "./session-creation.dto";
 import {
   archiveEventResponse,
@@ -642,6 +643,93 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async repairModel(
+    actorId: string,
+    sessionId: string,
+    dto: PutPersonalModelPreferencesDto,
+  ) {
+    return this.transaction(async (tx) => {
+      await this.lockRun(tx, sessionId);
+      const session = await this.assertManager(
+        actorId,
+        sessionId,
+        "sessions.manage",
+        tx,
+      );
+      if (
+        !["PAUSED", "COMPLETED", "FAILED", "INTERRUPTED"].includes(
+          session.status,
+        ) ||
+        session.stopConfirmation === "STOP_UNCONFIRMED"
+      )
+        throw new ConflictException(
+          "Model selection can only change on an idle session",
+        );
+      const previous = {
+        providerId: session.providerId,
+        model: session.effectiveModel ?? session.model,
+        reasoningEffort: session.effectiveReasoningEffort,
+      };
+      const next = this.modelCatalog.resolve(
+        dto.providerId,
+        dto.model,
+        dto.reasoningEffort,
+      );
+      const effective = {
+        providerId: next.providerId,
+        model: next.effectiveModel,
+        reasoningEffort: next.effectiveReasoningEffort,
+      };
+      if (
+        previous.providerId === effective.providerId &&
+        previous.model === effective.model &&
+        previous.reasoningEffort === effective.reasoningEffort
+      )
+        return effective;
+      if (
+        previous.providerId !== dto.expected.providerId ||
+        previous.model !== dto.expected.model ||
+        previous.reasoningEffort !== dto.expected.reasoningEffort
+      )
+        throw new ConflictException(
+          "Session selection changed. Reload before choosing again.",
+        );
+      let eligible = true;
+      try {
+        this.modelCatalog.resolve(
+          previous.providerId,
+          previous.model ?? undefined,
+          previous.reasoningEffort ?? undefined,
+        );
+      } catch (error) {
+        if (!(error instanceof BadRequestException)) throw error;
+        eligible = false;
+      }
+      if (eligible)
+        throw new ConflictException(
+          "The current session selection is eligible",
+        );
+      await tx.proboxAiSession.update({
+        where: { id: sessionId },
+        data: {
+          providerId: next.providerId,
+          model: next.effectiveModel,
+          requestedModel: next.requestedModel,
+          effectiveModel: next.effectiveModel,
+          requestedReasoningEffort: next.requestedReasoningEffort,
+          effectiveReasoningEffort: next.effectiveReasoningEffort,
+          catalogSnapshot: next.catalogSnapshot as Prisma.InputJsonValue,
+        },
+      });
+      await appendSessionEvent(tx, sessionId, null, "session.model-selection", {
+        previous,
+        effective,
+        actorId,
+      });
+      return effective;
+    });
+  }
+
   async acceptFollowUp(
     actorId: string,
     sessionId: string,
@@ -787,6 +875,11 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
         actorId,
         session.cwd,
         session.selectedProjectId ?? undefined,
+      );
+      this.modelCatalog.resolve(
+        session.providerId,
+        session.effectiveModel ?? session.model ?? undefined,
+        session.effectiveReasoningEffort ?? undefined,
       );
       if (session.stopConfirmation === "STOP_UNCONFIRMED")
         throw new ConflictException(

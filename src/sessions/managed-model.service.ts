@@ -9,7 +9,7 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { PrismaService } from "../prisma/prisma.service";
@@ -71,9 +71,34 @@ export class ManagedModelService implements OnModuleInit, OnModuleDestroy {
     clearInterval(this.repair);
   }
 
-  list(providerId: string) {
+  private revision(row: Prisma.ManagedModelGetPayload<object>) {
+    const budgets = row.thinkingBudgets;
+    const values = [
+      row.id,
+      row.providerId,
+      row.displayName,
+      row.priority,
+      row.isActive,
+      row.isAvailable,
+      row.sunsetAt,
+      row.defaultReasoningEffort,
+      row.supportedReasoningEfforts,
+      row.maxOutputTokens,
+      budgets && typeof budgets === "object"
+        ? Object.entries(budgets).sort(([a], [b]) =>
+            a < b ? -1 : a > b ? 1 : 0,
+          )
+        : null,
+    ];
+    return createHash("sha256").update(JSON.stringify(values)).digest("hex");
+  }
+  async list(providerId: string) {
     provider(providerId);
-    return this.db.managedModel.findMany({ where: { providerId }, orderBy });
+    const rows = await this.db.managedModel.findMany({
+      where: { providerId },
+      orderBy,
+    });
+    return rows.map((row) => ({ ...row, revision: this.revision(row) }));
   }
   async create(providerId: string, dto: CreateManagedModelDto) {
     provider(providerId);
@@ -101,7 +126,12 @@ export class ManagedModelService implements OnModuleInit, OnModuleDestroy {
     await this.publish();
     return row;
   }
-  async patch(providerId: string, id: string, dto: PatchManagedModelDto) {
+  async patch(
+    providerId: string,
+    id: string,
+    dto: PatchManagedModelDto,
+    expectedRevision?: string,
+  ) {
     provider(providerId);
     if (!Object.keys(dto).length)
       throw new BadRequestException("Supply at least one model property");
@@ -110,6 +140,11 @@ export class ManagedModelService implements OnModuleInit, OnModuleDestroy {
       const where = { providerId_id: { providerId, id } };
       const current = await tx.managedModel.findUnique({ where });
       if (!current) throw new NotFoundException("Unknown model");
+      if (
+        expectedRevision !== undefined &&
+        expectedRevision !== this.revision(current)
+      )
+        throw new ConflictException("Catalog record changed before save");
       this.validate(providerId, { ...current, ...dto });
       return tx.managedModel.update({
         where,

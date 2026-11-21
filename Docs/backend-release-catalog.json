@@ -6,6 +6,12 @@
   },
   "releases": [
     {
+      "version": "0.3.9",
+      "gitRef": "refs/tags/v0.3.9",
+      "channel": "production",
+      "deployment": "not-deployed"
+    },
+    {
       "version": "0.3.8",
       "gitRef": "refs/tags/v0.3.8",
       "channel": "production",
@@ -157,6 +163,13 @@
     }
   ],
   "features": [
+    {
+      "id": "browser-model-catalog-management",
+      "title": "Operator Model Catalog and saved model selection repair through the browser gateway",
+      "since": "0.3.9",
+      "state": "supported",
+      "contract": "Docs/MODEL_PROVIDER_SESSION_MANAGEMENT.md"
+    },
     {
       "id": "managed-provider-model-catalog",
       "title": "Installation-wide model and reasoning effort management with a shared Codex catalog",

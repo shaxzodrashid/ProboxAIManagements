@@ -9,6 +9,21 @@ import {
 } from "./support/frontend-session-harness";
 
 describe("project browser allowlist", () => {
+  it("exposes only the catalog collection and single-record commands", () => {
+    const collection = "admin/model-catalog/providers/openai/models";
+    const model = collection + "/sol-6.2:preview";
+    expect(browserProxyAllowed("GET", collection)).toBe(true);
+    expect(browserProxyAllowed("POST", collection)).toBe(true);
+    expect(browserProxyAllowed("PATCH", model)).toBe(true);
+    expect(browserProxyAllowed("DELETE", model)).toBe(false);
+    expect(browserProxyAllowed("POST", model)).toBe(false);
+    expect(
+      browserProxyAllowed(
+        "PUT",
+        "sessions/" + randomUUID() + "/model-selection",
+      ),
+    ).toBe(true);
+  });
   it("allows authenticated avatar reads without opening profile mutations or other profile data", () => {
     const accountId = randomUUID(),
       assetId = randomUUID();

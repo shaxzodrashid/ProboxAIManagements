@@ -100,6 +100,18 @@ function scenario(name, command, expected, check, overrides = {}) {
         version: name === "prerelease" ? "0.2.0-dev.1" : "0.2.0",
       }),
     );
+    if (name.startsWith("browser-gateway-")) {
+      if (name !== "browser-gateway-disabled")
+        writeFileSync(
+          join(root, "service.env"),
+          "NODE_ENV=production\nPORT=3000\nBROWSER_SESSIONS_ENABLED=true\n",
+        );
+      mkdirSync(join(template, "scripts"));
+      writeFileSync(
+        join(template, "scripts", "verify-browser-catalog-gateway.mjs"),
+        `process.exit(${name === "browser-gateway-fail" ? 1 : 0});\n`,
+      );
+    }
     mkdirSync(join(template, "prisma", "migrations", "candidate_new"), {
       recursive: true,
     });
@@ -335,10 +347,28 @@ scenario("initial", "deploy", 0, ({ current }) =>
     "0.2.0",
   ),
 );
-for (const name of ["health-fail", "version-mismatch", "start-fail"])
+for (const name of [
+  "health-fail",
+  "version-mismatch",
+  "start-fail",
+  "browser-gateway-fail",
+])
   scenario(name, "restart", 1, ({ root, current, old }) => {
     assert.equal(realpathSync(current), realpathSync(old));
     assert.equal(readFileSync(join(root, "active"), "utf8").trim(), "1");
+  });
+for (const [name, checked] of [
+  ["browser-gateway-pass", true],
+  ["browser-gateway-disabled", false],
+])
+  scenario(name, "restart", 0, ({ calls, current, old }) => {
+    assert.notEqual(realpathSync(current), realpathSync(old));
+    assert.equal(
+      calls.includes(
+        "/scripts/verify-browser-catalog-gateway.mjs http://127.0.0.1:3000 0.2.0",
+      ),
+      checked,
+    );
   });
 scenario("stop-unconfirmed", "restart", 1, ({ current, old }) =>
   assert.equal(realpathSync(current), realpathSync(old)),

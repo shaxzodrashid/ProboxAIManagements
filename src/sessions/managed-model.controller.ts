@@ -4,6 +4,7 @@ import {
   Controller,
   ExecutionContext,
   Get,
+  Headers,
   Injectable,
   Param,
   Patch,
@@ -30,6 +31,10 @@ import {
   PatchManagedModelDto,
 } from "./managed-model.dto";
 import { ManagedModelService } from "./managed-model.service";
+import {
+  catalogManagementPermission,
+  isCatalogOperator,
+} from "./catalog-operator";
 
 // Workspace administrators can grant permissions inside their own workspace.
 // This registry controls the runner for every workspace on the installation.
@@ -39,12 +44,7 @@ export class CatalogOperatorGuard implements CanActivate {
     const user = context
       .switchToHttp()
       .getRequest<{ user: AuthenticatedUser }>().user;
-    return (
-      !!user?.id &&
-      (process.env.PROBOXAI_MODEL_CATALOG_ADMIN_IDS ?? "")
-        .split(",")
-        .some((id) => id.trim() === user.id)
-    );
+    return isCatalogOperator(user?.id);
   }
 }
 
@@ -54,7 +54,7 @@ export class CatalogOperatorGuard implements CanActivate {
 @ApiAuthenticationErrors()
 @ApiValidationErrors()
 @UseGuards(JwtAuthGuard, PermissionsGuard, CatalogOperatorGuard)
-@RequirePermissions("settings.manage")
+@RequirePermissions(catalogManagementPermission)
 export class ManagedModelController {
   constructor(private readonly registry: ManagedModelService) {}
   @Get()
@@ -84,7 +84,13 @@ export class ManagedModelController {
     @Param("providerId") providerId: string,
     @Param("id") id: string,
     @Body() body: PatchManagedModelDto,
+    @Headers("if-match") ifMatch?: string,
   ) {
-    return this.registry.patch(providerId, id, body);
+    return this.registry.patch(
+      providerId,
+      id,
+      body,
+      ifMatch?.replace(/^"([0-9a-f]{64})"$/, "$1"),
+    );
   }
 }

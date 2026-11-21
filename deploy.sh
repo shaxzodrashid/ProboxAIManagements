@@ -213,6 +213,13 @@ case "$command_name" in
     activate "$candidate"
     manage start "$service"
     health "$release_version" || die "New backend failed bounded health/version verification; inspect private log $operation_log"
+    gateway_check="$candidate/scripts/verify-browser-catalog-gateway.mjs"
+    if [[ -f "$gateway_check" ]]; then
+      browser_enabled=$(env -i PATH="$PATH" HOME="$HOME" "$node" "${node_env_args[@]}" -p 'process.env.BROWSER_SESSIONS_ENABLED === "true" ? "yes" : "no"')
+      if [[ "$browser_enabled" = yes ]]; then
+        "$node" "$gateway_check" "${health_url%/api/v1/health/ready}" "$release_version" >>"$operation_log" 2>&1 || die "New backend failed browser catalog gateway verification; inspect private log $operation_log"
+      fi
+    fi
     switched=0
     printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$release_version" "$revision" >>"$state/deployments.log"
     log "Deployment healthy: $release_version. Previous release retained; database rollback is not implied"

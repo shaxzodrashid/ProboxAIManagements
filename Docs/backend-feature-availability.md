@@ -2,7 +2,7 @@
 
 Generated from package.json and backend-release-catalog.json. Run `pnpm release:docs` to update; `pnpm release:check` verifies consistency.
 
-Current package release: **0.3.8**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
+Current package release: **0.3.9**. Dev prereleases are progress snapshots, not production deployments. URL compatibility remains **/api/v1**.
 
 Baseline package snapshot: 0.1.0 at commit `31fdd5a9d9a9bf19d6268c24504496bb54b75e2a`. Observed package snapshot only. Legacy feature introduction versions and release/deployment history are unknown.
 
@@ -21,6 +21,7 @@ Available since refers to the first tracked Git release containing this bounded 
 | Atomic human Profile Save with stale-draft protection and whole-operation receipts    | 0.3.0-dev.9     | supported  | [Contract](../Docs/atomic-profile-save-contracts.md)           |
 | Credential rejection versus authentication availability                               | 0.2.0-dev.1     | supported  | [Contract](../Docs/authentication-availability-contracts.md)   |
 | Browser registration, recovery and keyed project creation transport                   | 0.3.3           | foundation | [Contract](../Docs/browser-auth-creation-transport.md)         |
+| Operator Model Catalog and saved model selection repair through the browser gateway   | 0.3.9           | supported  | [Contract](../Docs/MODEL_PROVIDER_SESSION_MANAGEMENT.md)       |
 | Unified task board queries, card placement, invalidation streams and assignee avatars | 0.3.5           | foundation | [Contract](../Docs/frontend/tasks.md)                          |
 | Browser cookie sessions with CSRF and bounded proxy admission                         | 0.3.0           | foundation | [Contract](../Docs/browser-session-local-implementation.md)    |
 | Exact browser frontend origin allowlist with secure same-origin proxies               | 0.3.6           | supported  | [Contract](../Docs/browser-session-origins.md)                 |
@@ -75,6 +76,7 @@ Available since refers to the first tracked Git release containing this bounded 
 
 ## Release references
 
+- **0.3.9**: `refs/tags/v0.3.9`, production, not-deployed.
 - **0.3.8**: `refs/tags/v0.3.8`, production, not-deployed.
 - **0.3.7**: `refs/tags/v0.3.7`, production, not-deployed.
 - **0.3.6**: `refs/tags/v0.3.6`, production, not-deployed.

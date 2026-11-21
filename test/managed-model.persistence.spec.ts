@@ -114,6 +114,20 @@ const fixture = "postgresql://catalog_test@127.0.0.1:55487/catalog_test";
       expect(reader.resolve("anthropic", id).effectiveReasoningEffort).toBe(
         "focused",
       );
+      const revision = (await api.get(url).expect(200)).body.find(
+        (row: any) => row.id === id,
+      ).revision;
+      expect(revision).toMatch(/^[a-f0-9]{64}$/);
+      await api
+        .patch(url + "/" + id)
+        .set("If-Match", '"' + revision + '"')
+        .send({ displayName: "First revision" })
+        .expect(200);
+      await api
+        .patch(url + "/" + id)
+        .set("If-Match", '"' + revision + '"')
+        .send({ displayName: "Stale edit" })
+        .expect(409);
       const patch = (data: object) => api.patch(url + "/" + id).send(data);
       await patch({ supportedReasoningEfforts: ["Extended.v2"] }).expect(400);
       await patch({ isActive: null }).expect(400);
